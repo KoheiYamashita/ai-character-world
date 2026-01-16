@@ -1,0 +1,25 @@
+{
+  "characters": [
+    {
+      "id": "kanon",
+      "name": "花音・クレア・トンプソン",
+      "sprite": {
+        "sheetUrl": "/assets/sprites/kanon.png",
+        "frameWidth": 96,
+        "frameHeight": 96,
+        "cols": 3,
+        "rows": 4,
+        "rowMapping": {
+          "down": 0,
+          "left": 1,
+          "right": 2,
+          "up": 3
+        }
+      },
+      "defaultStats": {
+        "money": 100,
+        "hunger": 100
+      }
+    }
+  ]
+}

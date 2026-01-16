@@ -1,9 +1,7 @@
 import { create } from 'zustand'
 import type { NavigationState, Position } from '@/types'
 
-interface NavigationEntry extends NavigationState {
-  startPosition: Position | null
-}
+type NavigationEntry = NavigationState
 
 interface NavigationStore {
   navigations: Map<string, NavigationEntry>

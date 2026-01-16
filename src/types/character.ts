@@ -4,13 +4,28 @@ export interface SpriteConfig {
   sheetUrl: string
   frameWidth: number
   frameHeight: number
-  animations: {
-    walkDown: number[]
-    walkUp: number[]
-    walkLeft: number[]
-    walkRight: number[]
-    idle: number[]
+  cols: number
+  rows: number
+  rowMapping: {
+    down: number
+    left: number
+    right: number
+    up: number
   }
+}
+
+export interface CharacterConfig {
+  id: string
+  name: string
+  sprite: SpriteConfig
+  defaultStats: {
+    money: number
+    hunger: number
+  }
+}
+
+export interface CharactersData {
+  characters: CharacterConfig[]
 }
 
 export interface Position {
@@ -35,5 +50,6 @@ export interface NavigationState {
   path: string[]
   currentPathIndex: number
   progress: number
+  startPosition: Position | null
   targetPosition: Position | null
 }

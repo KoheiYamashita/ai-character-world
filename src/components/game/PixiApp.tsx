@@ -1,25 +1,30 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Application, Container, Graphics } from 'pixi.js'
+import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
 import { useGameStore, useCharacterStore, useNavigationStore } from '@/stores'
 import { maps, getNode } from '@/data/maps'
 import { findPath } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance, MOVEMENT_SPEED } from '@/lib/movement'
-import type { PathNode } from '@/types'
+import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
+import type { PathNode, Direction, Position } from '@/types'
 
 const IDLE_TIME_MIN = 500
 const IDLE_TIME_MAX = 1500
 const ENTRANCE_PROBABILITY = 0.1
 const FADE_STEP = 0.05
 const FADE_INTERVAL_MS = 16
+const ANIMATION_SPEED = 0.15
+const CHARACTER_SCALE = 1
 
 export default function PixiApp(): React.ReactNode {
   const containerRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<Application | null>(null)
-  const characterGraphicsRef = useRef<Graphics | null>(null)
+  const characterSpriteRef = useRef<AnimatedSprite | null>(null)
+  const spritesheetRef = useRef<CharacterSpritesheet | null>(null)
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const initializingRef = useRef(false)
+  const currentDirectionRef = useRef<Direction>('down')
 
   const currentMapId = useGameStore((s) => s.currentMapId)
   const transition = useGameStore((s) => s.transition)
@@ -40,6 +45,7 @@ export default function PixiApp(): React.ReactNode {
   const completeNavigation = useNavigationStore((s) => s.completeNavigation)
 
   const [isReady, setIsReady] = useState(false)
+  const [spritesheetLoaded, setSpritesheetLoaded] = useState(false)
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
@@ -176,6 +182,29 @@ export default function PixiApp(): React.ReactNode {
     }
   }, [clearIdleTimer])
 
+  // Load spritesheet when character or sprite URL changes
+  // Note: Using activeCharacter?.id instead of activeCharacter to prevent re-renders on position updates
+  const spriteSheetUrl = activeCharacter?.sprite.sheetUrl
+  useEffect(() => {
+    if (!activeCharacter || !spriteSheetUrl) return
+
+    const spriteConfig = activeCharacter.sprite
+    setSpritesheetLoaded(false)
+
+    async function loadSprite(): Promise<void> {
+      try {
+        const charSpritesheet = await loadCharacterSpritesheet(spriteConfig)
+        spritesheetRef.current = charSpritesheet
+        setSpritesheetLoaded(true)
+      } catch (error) {
+        console.error('Failed to load character spritesheet:', error)
+      }
+    }
+
+    loadSprite()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCharacter?.id, spriteSheetUrl])
+
   // Render map and character
   useEffect(() => {
     if (!isReady || !appRef.current) return
@@ -208,21 +237,32 @@ export default function PixiApp(): React.ReactNode {
       }
     }
 
-    // Character
-    const charGraphics = new Graphics()
-    charGraphics.circle(0, 0, 16)
-    charGraphics.fill(0xf39c12)
-    charGraphics.circle(0, 0, 16)
-    charGraphics.stroke({ color: 0xe67e22, width: 3 })
+    // Character - use AnimatedSprite if spritesheet is loaded, otherwise fallback to Graphics
+    if (spritesheetRef.current && activeCharacter) {
+      const direction = activeCharacter.direction
+      const textures = getDirectionAnimation(spritesheetRef.current, direction)
+      const charSprite = new AnimatedSprite(textures)
+      charSprite.anchor.set(0.5, 0.5)
+      charSprite.scale.set(CHARACTER_SCALE)
+      charSprite.animationSpeed = ANIMATION_SPEED
+      charSprite.x = activeCharacter.position.x
+      charSprite.y = activeCharacter.position.y
+      currentDirectionRef.current = direction
 
-    if (activeCharacter) {
+      characterSpriteRef.current = charSprite
+      app.stage.addChild(charSprite)
+    } else if (activeCharacter) {
+      // Fallback to orange circle while loading
+      const charGraphics = new Graphics()
+      charGraphics.circle(0, 0, 16)
+      charGraphics.fill(0xf39c12)
+      charGraphics.stroke({ color: 0xe67e22, width: 3 })
       charGraphics.x = activeCharacter.position.x
       charGraphics.y = activeCharacter.position.y
+      app.stage.addChild(charGraphics)
     }
-
-    characterGraphicsRef.current = charGraphics
-    app.stage.addChild(charGraphics)
-  }, [isReady, currentMapId, activeCharacter?.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded])
 
   // Schedule movement when idle
   useEffect(() => {
@@ -234,6 +274,7 @@ export default function PixiApp(): React.ReactNode {
     }
 
     return clearIdleTimer
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, activeCharacter?.id, transition.isTransitioning, scheduleNextMove, getNavigation, clearIdleTimer])
 
   // Movement ticker
@@ -243,9 +284,34 @@ export default function PixiApp(): React.ReactNode {
     const app = appRef.current
     const characterId = activeCharacter.id
 
+    function updateSpriteAnimation(direction: Direction, isMoving: boolean): void {
+      const sprite = characterSpriteRef.current
+      const spritesheet = spritesheetRef.current
+      if (!sprite || !spritesheet) return
+
+      if (direction !== currentDirectionRef.current) {
+        const textures = getDirectionAnimation(spritesheet, direction)
+        sprite.textures = textures
+        currentDirectionRef.current = direction
+      }
+
+      if (isMoving && !sprite.playing) {
+        sprite.play()
+      } else if (!isMoving && sprite.playing) {
+        sprite.stop()
+        sprite.texture = getIdleTexture(spritesheet, direction)
+      }
+    }
+
     function ticker(time: { deltaMS: number }): void {
       const deltaTime = time.deltaMS / 1000
       const nav = getNavigation(characterId)
+
+      // Update idle animation when not moving
+      if (characterSpriteRef.current && activeCharacter && !nav?.isMoving) {
+        updateSpriteAnimation(activeCharacter.direction, false)
+      }
+
       if (!nav?.isMoving || !nav.startPosition || !nav.targetPosition) return
 
       const distance = getDistance(nav.startPosition, nav.targetPosition)
@@ -255,52 +321,86 @@ export default function PixiApp(): React.ReactNode {
 
       updatePosition(characterId, newPosition)
 
-      if (characterGraphicsRef.current) {
-        characterGraphicsRef.current.x = newPosition.x
-        characterGraphicsRef.current.y = newPosition.y
+      if (characterSpriteRef.current) {
+        characterSpriteRef.current.x = newPosition.x
+        characterSpriteRef.current.y = newPosition.y
+        const direction = getDirection(nav.startPosition, nav.targetPosition)
+        updateSpriteAnimation(direction, true)
       }
 
       if (newProgress >= 1) {
-        handleMovementComplete(nav, newPosition)
+        handleMovementComplete({
+          path: nav.path,
+          currentPathIndex: nav.currentPathIndex,
+          startPosition: nav.startPosition,
+          targetPosition: nav.targetPosition,
+        }, newPosition)
       } else {
         updateProgress(characterId, newProgress)
       }
     }
 
     function handleMovementComplete(
-      nav: { path: string[]; currentPathIndex: number },
-      newPosition: { x: number; y: number }
+      nav: { path: string[]; currentPathIndex: number; startPosition: Position; targetPosition: Position },
+      newPosition: Position
     ): void {
       const nextIndex = nav.currentPathIndex + 1
-      const isAtFinalNode = nextIndex >= nav.path.length - 1
+      const finalNodeIndex = nav.path.length - 1
+      const hasReachedFinalNode = nextIndex >= finalNodeIndex
 
-      if (isAtFinalNode) {
-        const finalNodeId = nav.path[nav.path.length - 1]
-        const map = maps[currentMapId]
-        const finalNode = map?.nodes.find((n) => n.id === finalNodeId)
-
-        updateCharacter(characterId, { currentNodeId: finalNodeId })
-        completeNavigation(characterId)
-
-        if (finalNode?.type === 'entrance' && finalNode.leadsTo) {
-          handleMapTransition(finalNode)
-        } else {
-          scheduleNextMove()
-        }
+      if (hasReachedFinalNode) {
+        handleArrivalAtDestination(nav, characterId)
       } else {
-        const nextNodeId = nav.path[nextIndex + 1]
-        const map = maps[currentMapId]
-        const nextNode = map?.nodes.find((n) => n.id === nextNodeId)
-
-        if (nextNode) {
-          const currentNodeId = nav.path[nextIndex]
-          updateCharacter(characterId, { currentNodeId })
-          advanceToNextNode(characterId, { x: nextNode.x, y: nextNode.y })
-
-          const direction = getDirection(newPosition, { x: nextNode.x, y: nextNode.y })
-          updateDirection(characterId, direction)
-        }
+        handleContinueToNextNode(nav, nextIndex, newPosition, characterId)
       }
+    }
+
+    function handleArrivalAtDestination(
+      nav: { path: string[]; startPosition: Position; targetPosition: Position },
+      charId: string
+    ): void {
+      const finalNodeId = nav.path[nav.path.length - 1]
+      const map = maps[currentMapId]
+      const finalNode = map?.nodes.find((n) => n.id === finalNodeId)
+
+      const finalDirection = getDirection(nav.startPosition, nav.targetPosition)
+      updateDirection(charId, finalDirection)
+      updateCharacter(charId, { currentNodeId: finalNodeId })
+      completeNavigation(charId)
+
+      // Stop animation and show idle frame
+      if (characterSpriteRef.current && spritesheetRef.current) {
+        characterSpriteRef.current.stop()
+        characterSpriteRef.current.texture = getIdleTexture(spritesheetRef.current, finalDirection)
+      }
+
+      if (finalNode?.type === 'entrance' && finalNode.leadsTo) {
+        handleMapTransition(finalNode)
+      } else {
+        scheduleNextMove()
+      }
+    }
+
+    function handleContinueToNextNode(
+      nav: { path: string[] },
+      nextIndex: number,
+      newPosition: Position,
+      charId: string
+    ): void {
+      const nextNodeId = nav.path[nextIndex + 1]
+      const map = maps[currentMapId]
+      const nextNode = map?.nodes.find((n) => n.id === nextNodeId)
+
+      if (!nextNode) return
+
+      const currentNodeId = nav.path[nextIndex]
+      const nextPosition: Position = { x: nextNode.x, y: nextNode.y }
+
+      updateCharacter(charId, { currentNodeId })
+      advanceToNextNode(charId, nextPosition)
+
+      const direction = getDirection(newPosition, nextPosition)
+      updateDirection(charId, direction)
     }
 
     app.ticker.add(ticker)
@@ -308,6 +408,7 @@ export default function PixiApp(): React.ReactNode {
     return () => {
       appRef.current?.ticker.remove(ticker)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isReady,
     activeCharacter?.id,
