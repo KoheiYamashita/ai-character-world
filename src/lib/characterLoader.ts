@@ -1,4 +1,4 @@
-import type { CharacterConfig, CharactersData, Character } from '@/types'
+import type { CharacterConfig, CharactersData, Character, Position } from '@/types'
 
 let cachedConfigs: CharacterConfig[] | null = null
 
@@ -8,6 +8,9 @@ export async function loadCharacterConfigs(): Promise<CharacterConfig[]> {
   }
 
   const response = await fetch('/data/characters.json')
+  if (!response.ok) {
+    throw new Error(`Failed to load character configs: ${response.status} ${response.statusText}`)
+  }
   const data: CharactersData = await response.json()
   cachedConfigs = data.characters
   return cachedConfigs
@@ -17,7 +20,7 @@ export function createCharacterFromConfig(
   config: CharacterConfig,
   mapId: string,
   nodeId: string,
-  position: { x: number; y: number }
+  position: Position
 ): Character {
   return {
     id: config.id,

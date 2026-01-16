@@ -25,6 +25,8 @@
 ### マップ遷移
 - entranceノードに到達 → フェードアウト → 別マップのentranceに出現 → フェードイン
 - `leadsTo: { mapId, nodeId }` で遷移先を定義
+- フェードアニメーションは`setInterval`で実装、`fadeOutIntervalRef`/`fadeInIntervalRef`で管理
+- unmount時や新規遷移開始時に`clearTransitionIntervals()`でクリーンアップ
 
 ### 状態管理 (Zustand)
 - `gameStore` - 現在マップ、時間、遷移状態
@@ -35,7 +37,8 @@
 - 行ベースのスプライトシート（3列×4行、各方向3フレーム）
 - 行構成: Row0=下、Row1=左、Row2=右、Row3=上
 - アニメーション: [0,1,2,1]ループ、停止時はフレーム1
-- キャラクター設定は`public/data/characters.json`で管理
+- キャラクター設定は`public/data/characters.json`で管理（正本）
+- `src/data/characters/index.ts`はZustand初期状態用の同期フォールバック
 - PixiJS `AnimatedSprite`で描画、方向変更時にテクスチャ切替
 
 ## ディレクトリ構成
@@ -73,6 +76,8 @@ scripts/
 - @pixi/reactは不使用
 - ticker駆動でリアルタイム更新
 - Reactの再レンダリングを介さずパフォーマンス向上
+- stale closure対策: `activeCharacterRef`, `currentMapIdRef` でtickerコールバック内の最新値を参照
+- Graphics再利用: transition overlayは単一インスタンスを`clear()`して再描画
 
 ### グリッドノード
 - 自由な移動感を出すため高密度のノードを配置
@@ -81,6 +86,8 @@ scripts/
 ### キャラクター移動
 - ランダム自動移動
 - 10%の確率でentranceへ、90%はマップ内を探索
+- 位置更新の最適化: スプライトは毎フレーム直接更新、storeへの反映はノード到達時のみ
+- `positionRef`で移動中の位置を保持、60fpsのstore更新を回避
 - 移動完了時に最終方向をstoreに保存
 
 ## コマンド

@@ -7,25 +7,32 @@ import { maps, getNode } from '@/data/maps'
 import { findPath } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance, MOVEMENT_SPEED } from '@/lib/movement'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
-import type { PathNode, Direction, Position } from '@/types'
+import type { PathNode, Direction, Position, Character } from '@/types'
 
+// Timing constants
 const IDLE_TIME_MIN = 500
 const IDLE_TIME_MAX = 1500
-const ENTRANCE_PROBABILITY = 0.1
 const FADE_STEP = 0.05
 const FADE_INTERVAL_MS = 16
+
+// Character constants
+const ENTRANCE_PROBABILITY = 0.1
 const ANIMATION_SPEED = 0.15
 const CHARACTER_SCALE = 1
 
-export default function PixiApp(): React.ReactNode {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const appRef = useRef<Application | null>(null)
-  const characterSpriteRef = useRef<AnimatedSprite | null>(null)
-  const spritesheetRef = useRef<CharacterSpritesheet | null>(null)
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const initializingRef = useRef(false)
-  const currentDirectionRef = useRef<Direction>('down')
+// Canvas dimensions
+const CANVAS_WIDTH = 800
+const CANVAS_HEIGHT = 600
 
+interface ActiveNavigation {
+  path: string[]
+  currentPathIndex: number
+  startPosition: Position
+  targetPosition: Position
+}
+
+export default function PixiApp(): React.ReactNode {
+  // Store selectors
   const currentMapId = useGameStore((s) => s.currentMapId)
   const transition = useGameStore((s) => s.transition)
   const startTransition = useGameStore((s) => s.startTransition)
@@ -44,8 +51,40 @@ export default function PixiApp(): React.ReactNode {
   const advanceToNextNode = useNavigationStore((s) => s.advanceToNextNode)
   const completeNavigation = useNavigationStore((s) => s.completeNavigation)
 
+  // PixiJS refs
+  const containerRef = useRef<HTMLDivElement>(null)
+  const appRef = useRef<Application | null>(null)
+  const characterSpriteRef = useRef<AnimatedSprite | null>(null)
+  const spritesheetRef = useRef<CharacterSpritesheet | null>(null)
+  const transitionOverlayRef = useRef<Graphics | null>(null)
+
+  // Timer refs
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fadeOutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fadeInIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // State refs (avoid stale closures in callbacks)
+  const initializingRef = useRef(false)
+  const currentDirectionRef = useRef<Direction>('down')
+  const positionRef = useRef<Position | null>(null)
+  const activeCharacterRef = useRef(activeCharacter)
+  const currentMapIdRef = useRef(currentMapId)
+
+  // Component state
   const [isReady, setIsReady] = useState(false)
   const [spritesheetLoaded, setSpritesheetLoaded] = useState(false)
+
+  // Sync refs with latest values
+  useEffect(() => {
+    activeCharacterRef.current = activeCharacter
+    if (activeCharacter) {
+      positionRef.current = activeCharacter.position
+    }
+  }, [activeCharacter])
+
+  useEffect(() => {
+    currentMapIdRef.current = currentMapId
+  }, [currentMapId])
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
@@ -54,17 +93,30 @@ export default function PixiApp(): React.ReactNode {
     }
   }, [])
 
-  const moveToRandomNode = useCallback(() => {
-    if (!activeCharacter || transition.isTransitioning) return
+  const clearTransitionIntervals = useCallback(() => {
+    if (fadeOutIntervalRef.current) {
+      clearInterval(fadeOutIntervalRef.current)
+      fadeOutIntervalRef.current = null
+    }
+    if (fadeInIntervalRef.current) {
+      clearInterval(fadeInIntervalRef.current)
+      fadeInIntervalRef.current = null
+    }
+  }, [])
 
-    const nav = getNavigation(activeCharacter.id)
+  const moveToRandomNode = useCallback(() => {
+    const character = activeCharacterRef.current
+    const mapId = currentMapIdRef.current
+    if (!character || transition.isTransitioning) return
+
+    const nav = getNavigation(character.id)
     if (nav?.isMoving) return
 
-    const map = maps[currentMapId]
+    const map = maps[mapId]
     if (!map) return
 
     const shouldGoToEntrance = Math.random() < ENTRANCE_PROBABILITY
-    const excludeCurrentNode = (n: PathNode) => n.id !== activeCharacter.currentNodeId
+    const excludeCurrentNode = (n: PathNode) => n.id !== character.currentNodeId
     const isNonEntrance = (n: PathNode) => n.type !== 'entrance'
 
     let availableNodes = map.nodes.filter(excludeCurrentNode)
@@ -78,20 +130,19 @@ export default function PixiApp(): React.ReactNode {
     if (availableNodes.length === 0) return
 
     const randomNode = availableNodes[Math.floor(Math.random() * availableNodes.length)]
-    const path = findPath(map, activeCharacter.currentNodeId, randomNode.id)
+    const path = findPath(map, character.currentNodeId, randomNode.id)
     if (path.length <= 1) return
 
-    const firstTargetNode = getNode(currentMapId, path[1])
+    const firstTargetNode = getNode(mapId, path[1])
     if (!firstTargetNode) return
 
+    const currentPosition = positionRef.current ?? character.position
     const targetPosition = { x: firstTargetNode.x, y: firstTargetNode.y }
-    startNavigation(activeCharacter.id, path, activeCharacter.position, targetPosition)
+    startNavigation(character.id, path, currentPosition, targetPosition)
 
-    const direction = getDirection(activeCharacter.position, targetPosition)
-    updateDirection(activeCharacter.id, direction)
+    const direction = getDirection(currentPosition, targetPosition)
+    updateDirection(character.id, direction)
   }, [
-    activeCharacter,
-    currentMapId,
     transition.isTransitioning,
     getNavigation,
     startNavigation,
@@ -104,40 +155,51 @@ export default function PixiApp(): React.ReactNode {
     idleTimerRef.current = setTimeout(moveToRandomNode, idleTime)
   }, [clearIdleTimer, moveToRandomNode])
 
+  const startFadeIn = useCallback(() => {
+    let progress = 1
+    fadeInIntervalRef.current = setInterval(() => {
+      progress -= FADE_STEP
+      updateTransitionProgress(progress)
+
+      if (progress <= 0) {
+        if (fadeInIntervalRef.current) {
+          clearInterval(fadeInIntervalRef.current)
+          fadeInIntervalRef.current = null
+        }
+        endTransition()
+      }
+    }, FADE_INTERVAL_MS)
+  }, [updateTransitionProgress, endTransition])
+
   const handleMapTransition = useCallback((entranceNode: PathNode) => {
-    if (!entranceNode.leadsTo || !activeCharacter) return
+    const character = activeCharacterRef.current
+    if (!entranceNode.leadsTo || !character) return
 
     const { mapId, nodeId } = entranceNode.leadsTo
     const targetMap = maps[mapId]
     const targetNode = targetMap?.nodes.find((n) => n.id === nodeId)
     if (!targetMap || !targetNode) return
 
-    startTransition(currentMapId, mapId)
+    clearTransitionIntervals()
+    startTransition(currentMapIdRef.current, mapId)
 
     let progress = 0
-    const fadeOut = setInterval(() => {
+    fadeOutIntervalRef.current = setInterval(() => {
       progress += FADE_STEP
       updateTransitionProgress(progress)
 
       if (progress >= 1) {
-        clearInterval(fadeOut)
-        setCharacterMap(activeCharacter.id, mapId, nodeId, { x: targetNode.x, y: targetNode.y })
-
-        let fadeInProgress = 1
-        const fadeIn = setInterval(() => {
-          fadeInProgress -= FADE_STEP
-          updateTransitionProgress(fadeInProgress)
-
-          if (fadeInProgress <= 0) {
-            clearInterval(fadeIn)
-            endTransition()
-          }
-        }, FADE_INTERVAL_MS)
+        if (fadeOutIntervalRef.current) {
+          clearInterval(fadeOutIntervalRef.current)
+          fadeOutIntervalRef.current = null
+        }
+        setCharacterMap(character.id, mapId, nodeId, { x: targetNode.x, y: targetNode.y })
+        startFadeIn()
       }
     }, FADE_INTERVAL_MS)
-  }, [activeCharacter, currentMapId, startTransition, updateTransitionProgress, setCharacterMap, endTransition])
+  }, [clearTransitionIntervals, startTransition, updateTransitionProgress, setCharacterMap, startFadeIn])
 
-  // Initialize PixiJS application
+  // Initialize PixiJS
   useEffect(() => {
     if (!containerRef.current || initializingRef.current || appRef.current) return
 
@@ -148,8 +210,8 @@ export default function PixiApp(): React.ReactNode {
     async function initApp(): Promise<void> {
       try {
         await app.init({
-          width: 800,
-          height: 600,
+          width: CANVAS_WIDTH,
+          height: CANVAS_HEIGHT,
           backgroundColor: 0x1a1a2e,
           antialias: true,
         })
@@ -177,13 +239,13 @@ export default function PixiApp(): React.ReactNode {
         appRef.current = null
       }
       clearIdleTimer()
+      clearTransitionIntervals()
       initializingRef.current = false
       setIsReady(false)
     }
-  }, [clearIdleTimer])
+  }, [clearIdleTimer, clearTransitionIntervals])
 
-  // Load spritesheet when character or sprite URL changes
-  // Note: Using activeCharacter?.id instead of activeCharacter to prevent re-renders on position updates
+  // Load spritesheet (deps use ?.id to avoid re-renders on position updates)
   const spriteSheetUrl = activeCharacter?.sprite.sheetUrl
   useEffect(() => {
     if (!activeCharacter || !spriteSheetUrl) return
@@ -266,15 +328,15 @@ export default function PixiApp(): React.ReactNode {
 
   // Schedule movement when idle
   useEffect(() => {
-    if (!isReady || !activeCharacter || transition.isTransitioning) return
+    const character = activeCharacterRef.current
+    if (!isReady || !character || transition.isTransitioning) return
 
-    const nav = getNavigation(activeCharacter.id)
+    const nav = getNavigation(character.id)
     if (!nav?.isMoving) {
       scheduleNextMove()
     }
 
     return clearIdleTimer
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, activeCharacter?.id, transition.isTransitioning, scheduleNextMove, getNavigation, clearIdleTimer])
 
   // Movement ticker
@@ -306,10 +368,11 @@ export default function PixiApp(): React.ReactNode {
     function ticker(time: { deltaMS: number }): void {
       const deltaTime = time.deltaMS / 1000
       const nav = getNavigation(characterId)
+      const character = activeCharacterRef.current
 
       // Update idle animation when not moving
-      if (characterSpriteRef.current && activeCharacter && !nav?.isMoving) {
-        updateSpriteAnimation(activeCharacter.direction, false)
+      if (characterSpriteRef.current && character && !nav?.isMoving) {
+        updateSpriteAnimation(character.direction, false)
       }
 
       if (!nav?.isMoving || !nav.startPosition || !nav.targetPosition) return
@@ -319,7 +382,7 @@ export default function PixiApp(): React.ReactNode {
       const newProgress = Math.min(1, nav.progress + deltaTime / duration)
       const newPosition = lerpPosition(nav.startPosition, nav.targetPosition, newProgress)
 
-      updatePosition(characterId, newPosition)
+      positionRef.current = newPosition
 
       if (characterSpriteRef.current) {
         characterSpriteRef.current.x = newPosition.x
@@ -340,10 +403,7 @@ export default function PixiApp(): React.ReactNode {
       }
     }
 
-    function handleMovementComplete(
-      nav: { path: string[]; currentPathIndex: number; startPosition: Position; targetPosition: Position },
-      newPosition: Position
-    ): void {
+    function handleMovementComplete(nav: ActiveNavigation, newPosition: Position): void {
       const nextIndex = nav.currentPathIndex + 1
       const finalNodeIndex = nav.path.length - 1
       const hasReachedFinalNode = nextIndex >= finalNodeIndex
@@ -355,20 +415,18 @@ export default function PixiApp(): React.ReactNode {
       }
     }
 
-    function handleArrivalAtDestination(
-      nav: { path: string[]; startPosition: Position; targetPosition: Position },
-      charId: string
-    ): void {
+    function handleArrivalAtDestination(nav: ActiveNavigation, charId: string): void {
       const finalNodeId = nav.path[nav.path.length - 1]
-      const map = maps[currentMapId]
+      const mapId = currentMapIdRef.current
+      const map = maps[mapId]
       const finalNode = map?.nodes.find((n) => n.id === finalNodeId)
 
       const finalDirection = getDirection(nav.startPosition, nav.targetPosition)
+      updatePosition(charId, nav.targetPosition)
       updateDirection(charId, finalDirection)
       updateCharacter(charId, { currentNodeId: finalNodeId })
       completeNavigation(charId)
 
-      // Stop animation and show idle frame
       if (characterSpriteRef.current && spritesheetRef.current) {
         characterSpriteRef.current.stop()
         characterSpriteRef.current.texture = getIdleTexture(spritesheetRef.current, finalDirection)
@@ -382,13 +440,14 @@ export default function PixiApp(): React.ReactNode {
     }
 
     function handleContinueToNextNode(
-      nav: { path: string[] },
+      nav: ActiveNavigation,
       nextIndex: number,
       newPosition: Position,
       charId: string
     ): void {
       const nextNodeId = nav.path[nextIndex + 1]
-      const map = maps[currentMapId]
+      const mapId = currentMapIdRef.current
+      const map = maps[mapId]
       const nextNode = map?.nodes.find((n) => n.id === nextNodeId)
 
       if (!nextNode) return
@@ -396,6 +455,7 @@ export default function PixiApp(): React.ReactNode {
       const currentNodeId = nav.path[nextIndex]
       const nextPosition: Position = { x: nextNode.x, y: nextNode.y }
 
+      updatePosition(charId, newPosition)
       updateCharacter(charId, { currentNodeId })
       advanceToNextNode(charId, nextPosition)
 
@@ -412,7 +472,6 @@ export default function PixiApp(): React.ReactNode {
   }, [
     isReady,
     activeCharacter?.id,
-    currentMapId,
     scheduleNextMove,
     handleMapTransition,
     getNavigation,
@@ -431,16 +490,20 @@ export default function PixiApp(): React.ReactNode {
     const app = appRef.current
 
     if (transition.isTransitioning) {
-      const overlay = new Graphics()
-      overlay.label = 'transitionOverlay'
-      overlay.rect(0, 0, 800, 600)
-      overlay.fill({ color: 0x000000, alpha: transition.progress })
-      app.stage.addChild(overlay)
-    } else {
-      const overlay = app.stage.getChildByLabel('transitionOverlay')
-      if (overlay) {
-        app.stage.removeChild(overlay)
+      if (!transitionOverlayRef.current) {
+        transitionOverlayRef.current = new Graphics()
+        transitionOverlayRef.current.label = 'transitionOverlay'
+        app.stage.addChild(transitionOverlayRef.current)
       }
+
+      const overlay = transitionOverlayRef.current
+      overlay.clear()
+      overlay.rect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+      overlay.fill({ color: 0x000000, alpha: transition.progress })
+    } else if (transitionOverlayRef.current) {
+      app.stage.removeChild(transitionOverlayRef.current)
+      transitionOverlayRef.current.destroy()
+      transitionOverlayRef.current = null
     }
   }, [isReady, transition.isTransitioning, transition.progress])
 
