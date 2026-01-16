@@ -1,8 +1,24 @@
 import { Assets, Texture, Spritesheet } from 'pixi.js'
 import type { SpriteConfig, Direction } from '@/types'
+import { isConfigLoaded, getConfig } from './gameConfigLoader'
 
-const ANIMATION_SEQUENCE = [0, 1, 2, 1]
-const IDLE_FRAME = 1
+// Default fallbacks (matches game-config.json)
+const DEFAULT_ANIMATION_SEQUENCE = [0, 1, 2, 1]
+const DEFAULT_IDLE_FRAME = 1
+
+function getAnimationSequence(): number[] {
+  if (isConfigLoaded()) {
+    return getConfig().sprite.animationSequence
+  }
+  return DEFAULT_ANIMATION_SEQUENCE
+}
+
+function getIdleFrame(): number {
+  if (isConfigLoaded()) {
+    return getConfig().sprite.idleFrame
+  }
+  return DEFAULT_IDLE_FRAME
+}
 
 export interface CharacterSpritesheet {
   spritesheet: Spritesheet
@@ -60,7 +76,7 @@ function getAnimationTextures(
   row: number,
   colsPerRow: number
 ): Texture[] {
-  return ANIMATION_SEQUENCE.map((col) => {
+  return getAnimationSequence().map((col) => {
     const frameIndex = row * colsPerRow + col
     return spritesheet.textures[`frame_${frameIndex}`]
   })
@@ -78,5 +94,5 @@ export function getIdleTexture(
   direction: Direction
 ): Texture {
   const animation = charSpritesheet.animations[direction]
-  return animation[IDLE_FRAME]
+  return animation[getIdleFrame()]
 }

@@ -1,0 +1,78 @@
+{
+  "timing": {
+    "idleTimeMin": 500,
+    "idleTimeMax": 1500,
+    "fadeStep": 0.05,
+    "fadeIntervalMs": 16
+  },
+  "movement": {
+    "speed": 150,
+    "entranceProbability": 0.1
+  },
+  "character": {
+    "scale": 1,
+    "animationSpeed": 0.15
+  },
+  "sprite": {
+    "animationSequence": [0, 1, 2, 1],
+    "idleFrame": 1
+  },
+  "grid": {
+    "defaultCols": 12,
+    "defaultRows": 9,
+    "defaultWidth": 800,
+    "defaultHeight": 600
+  },
+  "canvas": {
+    "defaultWidth": 800,
+    "defaultHeight": 600,
+    "backgroundColor": "0x1a1a2e"
+  },
+  "theme": {
+    "nodes": {
+      "entrance": {
+        "fill": "0xe74c3c",
+        "stroke": "0xc0392b",
+        "strokeWidth": 2,
+        "radius": 8
+      },
+      "spawn": {
+        "fill": "0x2ecc71",
+        "stroke": "0x27ae60",
+        "strokeWidth": 1,
+        "radius": 6
+      },
+      "waypoint": {
+        "fill": "0x3498db",
+        "alpha": 0.5,
+        "radius": 4
+      },
+      "connectionLine": {
+        "color": "0xc0392b",
+        "width": 2,
+        "alpha": 0.5
+      }
+    },
+    "characterFallback": {
+      "fill": "0xf39c12",
+      "stroke": "0xe67e22",
+      "strokeWidth": 3,
+      "radius": 16
+    },
+    "transition": {
+      "overlayColor": "0x000000"
+    }
+  },
+  "initialState": {
+    "mapId": "town",
+    "time": {
+      "hour": 8,
+      "minute": 0,
+      "day": 1
+    }
+  },
+  "paths": {
+    "mapsJson": "/data/maps.json",
+    "charactersJson": "/data/characters.json"
+  }
+}

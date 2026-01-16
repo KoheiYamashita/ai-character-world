@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import type { GameTime, TransitionState } from '@/types'
 
+// Initial state defaults (will be overridden when config loads in PixiApp)
+const INITIAL_MAP_ID = 'town'
+const INITIAL_TIME: GameTime = { hour: 8, minute: 0, day: 1 }
+
 interface GameStore {
   currentMapId: string
   time: GameTime
   isPaused: boolean
   transition: TransitionState
+  mapsLoaded: boolean
 
   setCurrentMap: (mapId: string) => void
   setTime: (time: GameTime) => void
@@ -14,11 +19,12 @@ interface GameStore {
   startTransition: (fromMapId: string, toMapId: string) => void
   updateTransitionProgress: (progress: number) => void
   endTransition: () => void
+  setMapsLoaded: (loaded: boolean) => void
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
-  currentMapId: 'town',
-  time: { hour: 8, minute: 0, day: 1 },
+  currentMapId: INITIAL_MAP_ID,
+  time: INITIAL_TIME,
   isPaused: false,
   transition: {
     isTransitioning: false,
@@ -26,8 +32,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
     toMapId: null,
     progress: 0,
   },
+  mapsLoaded: false,
 
   setCurrentMap: (mapId) => set({ currentMapId: mapId }),
+  setMapsLoaded: (loaded) => set({ mapsLoaded: loaded }),
 
   setTime: (time) => set({ time }),
 
@@ -68,17 +76,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     })),
 
   endTransition: () => {
-    const { transition } = get()
-    if (transition.toMapId) {
-      set({
-        currentMapId: transition.toMapId,
-        transition: {
-          isTransitioning: false,
-          fromMapId: null,
-          toMapId: null,
-          progress: 0,
-        },
-      })
-    }
+    const { toMapId } = get().transition
+    if (!toMapId) return
+
+    set({
+      currentMapId: toMapId,
+      transition: {
+        isTransitioning: false,
+        fromMapId: null,
+        toMapId: null,
+        progress: 0,
+      },
+    })
   },
 }))

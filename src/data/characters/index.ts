@@ -15,6 +15,11 @@ const defaultSpriteConfig: SpriteConfig = {
   },
 }
 
+// Initial defaults for store (will be updated when config/maps load)
+const INITIAL_MAP_ID = 'town'
+const INITIAL_NODE_ID = 'town-4-5'
+const INITIAL_POSITION = { x: 369, y: 300 }
+
 // Default character for initial store state (sync fallback for async JSON loading)
 // Keep in sync with public/data/characters.json
 export const defaultCharacter: Character = {
@@ -23,8 +28,8 @@ export const defaultCharacter: Character = {
   sprite: defaultSpriteConfig,
   money: 100,
   hunger: 100,
-  currentMapId: 'town',
-  currentNodeId: 'town-4-5',
-  position: { x: 369, y: 300 },
+  currentMapId: INITIAL_MAP_ID,
+  currentNodeId: INITIAL_NODE_ID,
+  position: INITIAL_POSITION,
   direction: 'down',
 }

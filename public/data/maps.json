@@ -1,0 +1,97 @@
+{
+  "maps": [
+    {
+      "id": "town",
+      "name": "Town Square",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x4a7c59",
+      "spawnNodeId": "town-4-5",
+      "grid": {
+        "prefix": "town",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "town-4-5", "label": "Town Center", "type": "spawn" }
+      ],
+      "entrances": [
+        {
+          "id": "home-entrance",
+          "x": 400,
+          "y": 30,
+          "connectedNodeIds": ["town-0-5", "town-0-6"],
+          "leadsTo": { "mapId": "home", "nodeId": "home-door" },
+          "label": "Home"
+        },
+        {
+          "id": "cafe-entrance",
+          "x": 770,
+          "y": 300,
+          "connectedNodeIds": ["town-4-11", "town-5-11"],
+          "leadsTo": { "mapId": "cafe", "nodeId": "cafe-door" },
+          "label": "Cafe"
+        }
+      ]
+    },
+    {
+      "id": "home",
+      "name": "Home",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x8b7355",
+      "spawnNodeId": "home-door",
+      "grid": {
+        "prefix": "home",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "home-4-5", "label": "Living Room", "type": "spawn" },
+        { "nodeId": "home-1-2", "label": "Bedroom" },
+        { "nodeId": "home-1-9", "label": "Kitchen" },
+        { "nodeId": "home-1-5", "label": "Bathroom" }
+      ],
+      "entrances": [
+        {
+          "id": "home-door",
+          "x": 400,
+          "y": 570,
+          "connectedNodeIds": ["home-8-5", "home-8-6"],
+          "leadsTo": { "mapId": "town", "nodeId": "home-entrance" },
+          "label": "Exit"
+        }
+      ]
+    },
+    {
+      "id": "cafe",
+      "name": "Cafe",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0xd4956a",
+      "spawnNodeId": "cafe-door",
+      "grid": {
+        "prefix": "cafe",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "cafe-4-2", "label": "Lobby", "type": "spawn" },
+        { "nodeId": "cafe-4-6", "label": "Counter" },
+        { "nodeId": "cafe-1-9", "label": "Table 1" },
+        { "nodeId": "cafe-4-9", "label": "Table 2" },
+        { "nodeId": "cafe-7-9", "label": "Table 3" }
+      ],
+      "entrances": [
+        {
+          "id": "cafe-door",
+          "x": 30,
+          "y": 300,
+          "connectedNodeIds": ["cafe-4-0", "cafe-5-0"],
+          "leadsTo": { "mapId": "town", "nodeId": "cafe-entrance" },
+          "label": "Exit"
+        }
+      ]
+    }
+  ]
+}

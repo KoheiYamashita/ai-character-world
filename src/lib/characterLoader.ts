@@ -1,4 +1,7 @@
 import type { CharacterConfig, CharactersData, Character, Position } from '@/types'
+import { isConfigLoaded, getConfig } from './gameConfigLoader'
+
+const DEFAULT_CHARACTERS_PATH = '/data/characters.json'
 
 let cachedConfigs: CharacterConfig[] | null = null
 
@@ -7,7 +10,8 @@ export async function loadCharacterConfigs(): Promise<CharacterConfig[]> {
     return cachedConfigs
   }
 
-  const response = await fetch('/data/characters.json')
+  const charactersPath = isConfigLoaded() ? getConfig().paths.charactersJson : DEFAULT_CHARACTERS_PATH
+  const response = await fetch(charactersPath)
   if (!response.ok) {
     throw new Error(`Failed to load character configs: ${response.status} ${response.statusText}`)
   }

@@ -1,4 +1,5 @@
 import type { PathNode } from '@/types'
+import { isConfigLoaded, getConfig } from '@/lib/gameConfigLoader'
 
 export interface GridConfig {
   prefix: string
@@ -23,10 +24,26 @@ export interface EntranceConfig {
   label: string
 }
 
-const DEFAULT_COLS = 12
-const DEFAULT_ROWS = 9
-const DEFAULT_WIDTH = 800
-const DEFAULT_HEIGHT = 600
+// Defaults matching game-config.json
+const FALLBACK_DEFAULTS = {
+  cols: 12,
+  rows: 9,
+  width: 800,
+  height: 600,
+}
+
+function getGridDefaults() {
+  if (isConfigLoaded()) {
+    const config = getConfig()
+    return {
+      cols: config.grid.defaultCols,
+      rows: config.grid.defaultRows,
+      width: config.grid.defaultWidth,
+      height: config.grid.defaultHeight,
+    }
+  }
+  return FALLBACK_DEFAULTS
+}
 
 function getNodeId(prefix: string, row: number, col: number): string {
   return `${prefix}-${row}-${col}`
@@ -61,12 +78,13 @@ export function generateGridNodes(
   labels: NodeLabel[] = [],
   entrances: EntranceConfig[] = []
 ): PathNode[] {
+  const defaults = getGridDefaults()
   const {
     prefix,
-    cols = DEFAULT_COLS,
-    rows = DEFAULT_ROWS,
-    width = DEFAULT_WIDTH,
-    height = DEFAULT_HEIGHT,
+    cols = defaults.cols,
+    rows = defaults.rows,
+    width = defaults.width,
+    height = defaults.height,
   } = config
 
   const spacingX = width / (cols + 1)

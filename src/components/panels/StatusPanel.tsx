@@ -3,18 +3,19 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useGameStore, useCharacterStore } from '@/stores'
-import { maps } from '@/data/maps'
+import { getMaps } from '@/data/maps'
 
-export function StatusPanel() {
+function formatTime(hour: number, minute: number): string {
+  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+}
+
+export function StatusPanel(): React.ReactNode {
   const time = useGameStore((s) => s.time)
   const currentMapId = useGameStore((s) => s.currentMapId)
+  const mapsLoaded = useGameStore((s) => s.mapsLoaded)
   const activeCharacter = useCharacterStore((s) => s.getActiveCharacter())
 
-  const currentMap = maps[currentMapId]
-
-  const formatTime = (hour: number, minute: number) => {
-    return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
-  }
+  const currentMap = mapsLoaded ? getMaps()[currentMapId] : null
 
   return (
     <div className="w-80 space-y-4">
