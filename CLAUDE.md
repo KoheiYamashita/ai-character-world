@@ -29,7 +29,14 @@
 ### 状態管理 (Zustand)
 - `gameStore` - 現在マップ、時間、遷移状態
 - `characterStore` - キャラクター情報（位置、空腹、所持金）
-- `navigationStore` - 移動状態（パス、進捗）
+- `navigationStore` - 移動状態（パス、進捗、開始/目標位置）
+
+### スプライトシステム
+- 行ベースのスプライトシート（3列×4行、各方向3フレーム）
+- 行構成: Row0=下、Row1=左、Row2=右、Row3=上
+- アニメーション: [0,1,2,1]ループ、停止時はフレーム1
+- キャラクター設定は`public/data/characters.json`で管理
+- PixiJS `AnimatedSprite`で描画、方向変更時にテクスチャ切替
 
 ## ディレクトリ構成
 ```
@@ -44,11 +51,20 @@ src/
 ├── stores/                # Zustand stores
 ├── data/
 │   ├── maps/              # マップ定義（grid.tsで共通生成）
-│   └── characters/        # キャラクター定義
+│   └── characters/        # デフォルトキャラクター定義
 ├── lib/                   # ユーティリティ
 │   ├── pathfinding.ts     # BFSパス探索
-│   └── movement.ts        # 補間・方向計算
+│   ├── movement.ts        # 補間・方向計算
+│   ├── spritesheet.ts     # スプライトシート読み込み・テクスチャ生成
+│   └── characterLoader.ts # JSON設定からキャラクター生成
 └── types/                 # 型定義
+
+public/
+├── assets/sprites/        # スプライト画像（288x384px、96x96フレーム）
+└── data/characters.json   # キャラクター設定JSON
+
+scripts/
+└── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
 ```
 
 ## 重要な設計判断
@@ -65,10 +81,14 @@ src/
 ### キャラクター移動
 - ランダム自動移動
 - 10%の確率でentranceへ、90%はマップ内を探索
+- 移動完了時に最終方向をstoreに保存
 
 ## コマンド
 ```bash
 npm run dev    # 開発サーバー (http://localhost:3000)
 npm run build  # プロダクションビルド
 npm run lint   # ESLint
+
+# プレースホルダースプライト生成
+node scripts/generate-placeholder-sprite.mjs
 ```
