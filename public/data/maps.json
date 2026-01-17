@@ -93,7 +93,6 @@
       },
       "labels": [
         { "nodeId": "home-4-5", "label": "リビング", "type": "spawn" },
-        { "nodeId": "home-1-2", "label": "寝室" },
         { "nodeId": "home-1-9", "label": "キッチン" },
         { "nodeId": "home-1-5", "label": "浴室" }
       ],
@@ -108,7 +107,14 @@
         }
       ],
       "obstacles": [
-        { "row": 1, "col": 0, "tileWidth": 2, "tileHeight": 2, "label": "ベッド" },
+        {
+          "row": 1, "col": 0, "tileWidth": 5, "tileHeight": 5,
+          "label": "寝室",
+          "type": "zone",
+          "wallSides": ["top", "left", "bottom", "right"],
+          "door": { "side": "right", "start": 2, "end": 4 }
+        },
+        { "row": 2, "col": 1, "tileWidth": 2, "tileHeight": 2, "label": "ベッド" },
         { "row": 3, "col": 8, "tileWidth": 2, "tileHeight": 2, "label": "ソファ" },
         { "row": 6, "col": 10, "tileWidth": 2, "tileHeight": 2, "label": "テーブル" },
         { "row": 0, "col": 11, "tileWidth": 2, "tileHeight": 2, "label": "調理台" }

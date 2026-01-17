@@ -13,6 +13,19 @@ export interface PathNode {
   label?: string
 }
 
+export type ObstacleType = 'building' | 'zone'
+export type WallSide = 'top' | 'bottom' | 'left' | 'right'
+
+export interface DoorConfig {
+  side: WallSide
+  // 壁終端位置を指定（0-indexed、壁の最初のノード=0）
+  // 開口部はstart〜endの間（exclusive: start < offset < end）
+  // 例: start=2, end=4 → offset 0,1,2は壁、offset 3が開口部、offset 4以降は壁
+  // 制約: end - start >= 2（間に最低1つの開口部が必要）
+  start: number
+  end: number
+}
+
 export interface ObstacleConfigJson {
   id?: string
   row: number // タイル行（0-indexed）
@@ -20,6 +33,9 @@ export interface ObstacleConfigJson {
   tileWidth: number // タイル幅（何タイル分か）
   tileHeight: number // タイル高（何タイル分か）
   label?: string
+  type?: ObstacleType // デフォルト: 'building'
+  wallSides?: WallSide[] // zone用: 壁のある辺
+  door?: DoorConfig // zone用: 扉の位置範囲
 }
 
 export interface Obstacle {
@@ -29,6 +45,14 @@ export interface Obstacle {
   width: number
   height: number
   label?: string
+  type: ObstacleType
+  wallSides?: WallSide[]
+  door?: DoorConfig
+  // タイルベースの座標情報（壁衝突計算用）
+  tileRow: number
+  tileCol: number
+  tileWidth: number
+  tileHeight: number
 }
 
 export interface GameMap {

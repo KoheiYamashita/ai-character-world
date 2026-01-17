@@ -6,7 +6,8 @@ import { isConfigLoaded, getConfig, parseColor } from './gameConfigLoader'
 const DEFAULT_MAPS_PATH = '/data/maps.json'
 
 // Minimum obstacle size in tiles
-const MIN_OBSTACLE_SIZE = 2
+const MIN_BUILDING_SIZE = 2
+const MIN_ZONE_SIZE = 4
 
 function isValidNumber(value: unknown): value is number {
   return typeof value === 'number' && !isNaN(value) && isFinite(value)
@@ -35,16 +36,22 @@ function validateObstacleFields(mapId: string, obstacles: ObstacleConfigJson[]):
 }
 
 function validateObstacleMinSize(mapId: string, obstacles: ObstacleConfigJson[]): void {
-  const undersized = obstacles.filter(
-    (obs) => obs.tileWidth < MIN_OBSTACLE_SIZE || obs.tileHeight < MIN_OBSTACLE_SIZE
-  )
+  const undersized: string[] = []
+
+  for (const obs of obstacles) {
+    const type = obs.type ?? 'building'
+    const minSize = type === 'zone' ? MIN_ZONE_SIZE : MIN_BUILDING_SIZE
+
+    if (obs.tileWidth < minSize || obs.tileHeight < minSize) {
+      undersized.push(
+        `  - "${obs.label ?? 'unnamed'}" (${type}: ${obs.tileWidth}x${obs.tileHeight}, minimum: ${minSize}x${minSize})`
+      )
+    }
+  }
 
   if (undersized.length > 0) {
-    const details = undersized
-      .map((obs) => `  - "${obs.label ?? 'unnamed'}" (${obs.tileWidth}x${obs.tileHeight})`)
-      .join('\n')
     throw new Error(
-      `Map "${mapId}" has undersized obstacles (minimum: ${MIN_OBSTACLE_SIZE}x${MIN_OBSTACLE_SIZE}):\n${details}`
+      `Map "${mapId}" has undersized obstacles:\n${undersized.join('\n')}`
     )
   }
 }
@@ -94,7 +101,9 @@ function validateLabelObstacleConflicts(
   width: number,
   height: number
 ): void {
-  if (labels.length === 0 || obstacles.length === 0) return
+  // Only check against building-type obstacles (zones allow nodes inside)
+  const buildingObstacles = obstacles.filter((obs) => obs.type === 'building')
+  if (labels.length === 0 || buildingObstacles.length === 0) return
 
   const conflicts: string[] = []
 
@@ -103,7 +112,7 @@ function validateLabelObstacleConflicts(
     if (!coord) continue
 
     const { x, y } = gridCoordToPixel(coord, width, height, cols, rows)
-    const obstacle = findObstacleContainingPoint(x, y, obstacles)
+    const obstacle = findObstacleContainingPoint(x, y, buildingObstacles)
 
     if (obstacle) {
       conflicts.push(
@@ -159,6 +168,14 @@ export function buildMapFromConfig(config: MapConfigJson): GameMap {
       width: pixelCoords.width,
       height: pixelCoords.height,
       label: obs.label,
+      type: obs.type ?? 'building',
+      wallSides: obs.wallSides,
+      door: obs.door,
+      // Preserve tile coordinates for wall collision calculations
+      tileRow: obs.row,
+      tileCol: obs.col,
+      tileWidth: obs.tileWidth,
+      tileHeight: obs.tileHeight,
     }
   })
 

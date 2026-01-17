@@ -55,6 +55,11 @@ export interface ObstacleTheme {
   labelColor?: string
 }
 
+export interface ObstacleThemeConfig {
+  building: ObstacleTheme
+  zone: ObstacleTheme
+}
+
 export interface ThemeConfig {
   nodes: {
     entrance: NodeTheme
@@ -62,7 +67,7 @@ export interface ThemeConfig {
     waypoint: NodeTheme
     connectionLine: ConnectionLineTheme
   }
-  obstacle: ObstacleTheme
+  obstacle: ObstacleTheme | ObstacleThemeConfig
   characterFallback: {
     fill: string
     stroke: string
