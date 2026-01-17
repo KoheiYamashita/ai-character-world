@@ -1,0 +1,342 @@
+import { promises as fs } from 'fs'
+import path from 'path'
+import type {
+  GameMap,
+  Character,
+  GameConfig,
+  MapConfigJson,
+  MapsDataJson,
+  CharacterConfig,
+  CharactersData,
+  Obstacle,
+  PathNode,
+} from '@/types'
+import type { TileToPixelConfig, NodeLabel, EntranceConfig } from '@/data/maps/grid'
+import { tileToPixelObstacle, tileToPixelEntrance } from '@/data/maps/grid'
+
+// Get the path to public directory
+function getPublicPath(): string {
+  // In development and production, public files are at project root/public
+  return path.join(process.cwd(), 'public')
+}
+
+// Parse color string to number
+function parseColor(colorStr: string): number {
+  if (colorStr.startsWith('0x')) {
+    return parseInt(colorStr, 16)
+  }
+  return parseInt(colorStr.replace('#', ''), 16)
+}
+
+// Load game config
+export async function loadGameConfigServer(): Promise<GameConfig> {
+  const configPath = path.join(getPublicPath(), 'data', 'game-config.json')
+  const content = await fs.readFile(configPath, 'utf-8')
+  return JSON.parse(content)
+}
+
+// Generate grid nodes (server-side version that doesn't depend on cached config)
+function generateGridNodesServer(
+  config: {
+    prefix: string
+    cols: number
+    rows: number
+    width: number
+    height: number
+  },
+  labels: NodeLabel[] = [],
+  entrances: EntranceConfig[] = [],
+  obstacles: Obstacle[] = []
+): PathNode[] {
+  const { prefix, cols, rows, width, height } = config
+
+  const spacingX = width / (cols + 1)
+  const spacingY = height / (rows + 1)
+
+  const nodes: PathNode[] = []
+  const nodeMap = new Map<string, PathNode>()
+
+  // Helper functions
+  const getNodeId = (row: number, col: number): string => `${prefix}-${row}-${col}`
+
+  const isInsideBuildingObstacle = (x: number, y: number): boolean => {
+    return obstacles
+      .filter((obs) => obs.type === 'building')
+      .some((obstacle) =>
+        x >= obstacle.x &&
+        x <= obstacle.x + obstacle.width &&
+        y >= obstacle.y &&
+        y <= obstacle.y + obstacle.height
+      )
+  }
+
+  const isOnZoneWall = (nodeX: number, nodeY: number): boolean => {
+    const TOLERANCE = 2
+
+    for (const obs of obstacles) {
+      if (obs.type !== 'zone' || !obs.wallSides || obs.wallSides.length === 0) continue
+
+      const { x, y, width: obsW, height: obsH, wallSides, door, tileWidth, tileHeight } = obs
+      const tileSizeX = obsW / tileWidth
+      const tileSizeY = obsH / tileHeight
+
+      for (const side of wallSides) {
+        const outsetX = tileSizeX / 2
+        const outsetY = tileSizeY / 2
+
+        let fixedPos: number
+        let rangeStart: number
+        let rangeEnd: number
+        let tileSize: number
+        let isHorizontal: boolean
+
+        switch (side) {
+          case 'top':
+            fixedPos = y - outsetY
+            rangeStart = x - outsetX
+            rangeEnd = x + obsW + outsetX
+            tileSize = tileSizeX
+            isHorizontal = true
+            break
+          case 'bottom':
+            fixedPos = y + obsH + outsetY
+            rangeStart = x - outsetX
+            rangeEnd = x + obsW + outsetX
+            tileSize = tileSizeX
+            isHorizontal = true
+            break
+          case 'left':
+            fixedPos = x - outsetX
+            rangeStart = y - outsetY
+            rangeEnd = y + obsH + outsetY
+            tileSize = tileSizeY
+            isHorizontal = false
+            break
+          case 'right':
+            fixedPos = x + obsW + outsetX
+            rangeStart = y - outsetY
+            rangeEnd = y + obsH + outsetY
+            tileSize = tileSizeY
+            isHorizontal = false
+            break
+        }
+
+        const fixedCoord = isHorizontal ? nodeY : nodeX
+        const rangeCoord = isHorizontal ? nodeX : nodeY
+
+        const onWallLine = Math.abs(fixedCoord - fixedPos) < TOLERANCE
+        const inWallRange = rangeCoord >= rangeStart - TOLERANCE && rangeCoord <= rangeEnd + TOLERANCE
+
+        if (!onWallLine || !inWallRange) continue
+
+        // Skip if in door opening
+        if (door && door.side === side) {
+          const offsetUnits = Math.round((rangeCoord - rangeStart) / tileSize)
+          if (offsetUnits > door.start && offsetUnits < door.end) continue
+        }
+
+        return true
+      }
+    }
+    return false
+  }
+
+  const generateConnections = (row: number, col: number): string[] => {
+    const connections: string[] = []
+
+    // Cardinal directions
+    if (col > 0) connections.push(getNodeId(row, col - 1))
+    if (col < cols - 1) connections.push(getNodeId(row, col + 1))
+    if (row > 0) connections.push(getNodeId(row - 1, col))
+    if (row < rows - 1) connections.push(getNodeId(row + 1, col))
+
+    // Diagonal directions
+    if (row > 0 && col > 0) connections.push(getNodeId(row - 1, col - 1))
+    if (row > 0 && col < cols - 1) connections.push(getNodeId(row - 1, col + 1))
+    if (row < rows - 1 && col > 0) connections.push(getNodeId(row + 1, col - 1))
+    if (row < rows - 1 && col < cols - 1) connections.push(getNodeId(row + 1, col + 1))
+
+    return connections
+  }
+
+  // Generate grid nodes
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const x = Math.round(spacingX * (col + 1))
+      const y = Math.round(spacingY * (row + 1))
+
+      if (isInsideBuildingObstacle(x, y)) continue
+      if (isOnZoneWall(x, y)) continue
+
+      const id = getNodeId(row, col)
+      const node: PathNode = {
+        id,
+        x,
+        y,
+        type: 'waypoint',
+        connectedTo: generateConnections(row, col),
+      }
+      nodes.push(node)
+      nodeMap.set(id, node)
+    }
+  }
+
+  // Filter connections to only include existing nodes
+  for (const node of nodes) {
+    node.connectedTo = node.connectedTo.filter((id) => nodeMap.has(id))
+  }
+
+  // Apply labels
+  for (const { nodeId, label, type } of labels) {
+    const node = nodeMap.get(nodeId)
+    if (node) {
+      node.label = label
+      if (type) node.type = type
+    }
+  }
+
+  // Add entrance nodes
+  const gridConfigForConversion: TileToPixelConfig = { cols, rows, width, height }
+  for (const entrance of entrances) {
+    const { x, y } = tileToPixelEntrance(entrance, gridConfigForConversion)
+    const entranceNode: PathNode = {
+      id: entrance.id,
+      x,
+      y,
+      type: 'entrance',
+      connectedTo: [...entrance.connectedNodeIds].filter((id) => nodeMap.has(id)),
+      leadsTo: entrance.leadsTo,
+      label: entrance.label,
+    }
+    nodes.push(entranceNode)
+
+    // Connect grid nodes to this entrance
+    for (const connectedId of entrance.connectedNodeIds) {
+      const gridNode = nodeMap.get(connectedId)
+      if (gridNode) {
+        gridNode.connectedTo.push(entrance.id)
+      }
+    }
+  }
+
+  return nodes
+}
+
+// Load and process maps
+export async function loadMapsServer(config?: GameConfig): Promise<Record<string, GameMap>> {
+  const cfg = config ?? (await loadGameConfigServer())
+  const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
+  const content = await fs.readFile(mapsPath, 'utf-8')
+  const mapsData: MapsDataJson = JSON.parse(content)
+
+  const maps: Record<string, GameMap> = {}
+
+  for (const mapConfig of mapsData.maps) {
+    maps[mapConfig.id] = buildMapFromConfigServer(mapConfig, cfg)
+  }
+
+  return maps
+}
+
+// Build map from config (server-side version)
+function buildMapFromConfigServer(mapConfig: MapConfigJson, config: GameConfig): GameMap {
+  const gridDefaults = config.grid
+  const cols = mapConfig.grid.cols ?? gridDefaults.defaultCols
+  const rows = mapConfig.grid.rows ?? gridDefaults.defaultRows
+
+  const gridConfigForConversion: TileToPixelConfig = {
+    cols,
+    rows,
+    width: mapConfig.width,
+    height: mapConfig.height,
+  }
+
+  // Convert obstacles from tile coordinates to pixel coordinates
+  const obstacles: Obstacle[] = (mapConfig.obstacles ?? []).map((obs, index) => {
+    const pixelCoords = tileToPixelObstacle(obs, gridConfigForConversion)
+    return {
+      id: obs.id ?? `${mapConfig.id}-obstacle-${index}`,
+      x: pixelCoords.x,
+      y: pixelCoords.y,
+      width: pixelCoords.width,
+      height: pixelCoords.height,
+      label: obs.label,
+      type: obs.type ?? 'building',
+      wallSides: obs.wallSides,
+      door: obs.door,
+      tileRow: obs.row,
+      tileCol: obs.col,
+      tileWidth: obs.tileWidth,
+      tileHeight: obs.tileHeight,
+    }
+  })
+
+  // Generate nodes
+  const nodes = generateGridNodesServer(
+    {
+      prefix: mapConfig.grid.prefix,
+      cols,
+      rows,
+      width: mapConfig.width,
+      height: mapConfig.height,
+    },
+    mapConfig.labels as NodeLabel[],
+    mapConfig.entrances as EntranceConfig[],
+    obstacles
+  )
+
+  return {
+    id: mapConfig.id,
+    name: mapConfig.name,
+    width: mapConfig.width,
+    height: mapConfig.height,
+    backgroundColor: parseColor(mapConfig.backgroundColor),
+    spawnNodeId: mapConfig.spawnNodeId,
+    nodes,
+    obstacles,
+  }
+}
+
+// Load characters
+export async function loadCharactersServer(config?: GameConfig): Promise<Character[]> {
+  const cfg = config ?? (await loadGameConfigServer())
+  const charactersPath = path.join(getPublicPath(), cfg.paths.charactersJson.replace(/^\//, ''))
+  const content = await fs.readFile(charactersPath, 'utf-8')
+  const charactersData: CharactersData = JSON.parse(content)
+
+  // Get initial map and spawn position
+  const maps = await loadMapsServer(cfg)
+  const initialMap = maps[cfg.initialState.mapId]
+  const spawnNode = initialMap?.nodes.find((n) => n.id === initialMap.spawnNodeId)
+
+  const characters: Character[] = charactersData.characters.map((charConfig: CharacterConfig) => ({
+    id: charConfig.id,
+    name: charConfig.name,
+    sprite: charConfig.sprite,
+    money: charConfig.defaultStats.money,
+    hunger: charConfig.defaultStats.hunger,
+    currentMapId: cfg.initialState.mapId,
+    currentNodeId: initialMap?.spawnNodeId ?? '',
+    position: spawnNode
+      ? { x: spawnNode.x, y: spawnNode.y }
+      : { x: 0, y: 0 },
+    direction: 'down' as const,
+  }))
+
+  return characters
+}
+
+// Load all game data needed for simulation
+export interface GameData {
+  config: GameConfig
+  maps: Record<string, GameMap>
+  characters: Character[]
+}
+
+export async function loadGameDataServer(): Promise<GameData> {
+  const config = await loadGameConfigServer()
+  const maps = await loadMapsServer(config)
+  const characters = await loadCharactersServer(config)
+
+  return { config, maps, characters }
+}
