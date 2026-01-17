@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
+import { Application, Container, Graphics, AnimatedSprite, Text, TextStyle } from 'pixi.js'
 import { useGameStore, useCharacterStore, useNavigationStore } from '@/stores'
 import { getMaps, loadMaps, getNode, clearMapsCache } from '@/data/maps'
 import { findPath } from '@/lib/pathfinding'
@@ -426,11 +426,20 @@ export default function PixiApp(): React.ReactNode {
     const obstaclesContainer = new Container()
     app.stage.addChild(obstaclesContainer)
 
-    // Render obstacles
+    // Render obstacles with labels
     for (const obstacle of map.obstacles) {
+      const obstacleContainer = new Container()
       const obstacleGraphics = new Graphics()
       renderObstacle(obstacleGraphics, obstacle, config)
-      obstaclesContainer.addChild(obstacleGraphics)
+      obstacleContainer.addChild(obstacleGraphics)
+
+      // Add label text if obstacle has a label
+      if (obstacle.label) {
+        const labelText = createObstacleLabel(obstacle, config)
+        obstacleContainer.addChild(labelText)
+      }
+
+      obstaclesContainer.addChild(obstacleContainer)
     }
 
     // Nodes container
@@ -655,9 +664,14 @@ export default function PixiApp(): React.ReactNode {
 }
 
 function getNodeTheme(nodeType: string, nodes: GameConfig['theme']['nodes']) {
-  if (nodeType === 'entrance') return nodes.entrance
-  if (nodeType === 'spawn') return nodes.spawn
-  return nodes.waypoint
+  switch (nodeType) {
+    case 'entrance':
+      return nodes.entrance
+    case 'spawn':
+      return nodes.spawn
+    default:
+      return nodes.waypoint
+  }
 }
 
 function renderNode(graphics: Graphics, node: PathNode, config: GameConfig): void {
@@ -677,6 +691,43 @@ function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: GameConf
   graphics.rect(obstacle.x, obstacle.y, obstacle.width, obstacle.height)
   graphics.fill({ color: parseColor(theme.fill), alpha: theme.alpha })
   graphics.stroke({ color: parseColor(theme.stroke), width: theme.strokeWidth })
+}
+
+function createObstacleLabel(obstacle: Obstacle, config: GameConfig): Text {
+  const PADDING = 4
+  const MIN_FONT_SIZE = 6
+  const MAX_FONT_SIZE = 16
+
+  const maxWidth = obstacle.width - PADDING * 2
+  const maxHeight = obstacle.height - PADDING * 2
+  const labelColor = config.theme.obstacle.labelColor ?? '0xffffff'
+
+  const style = new TextStyle({
+    fontFamily: '"Hiragino Sans", "Meiryo", "Yu Gothic", "Noto Sans JP", sans-serif',
+    fontSize: Math.min(maxHeight * 0.8, MAX_FONT_SIZE),
+    fill: parseColor(labelColor),
+    align: 'center',
+    wordWrap: true,
+    wordWrapWidth: maxWidth,
+  })
+
+  const text = new Text({ text: obstacle.label ?? '', style })
+
+  // Scale down proportionally if text exceeds bounds
+  if (text.width > maxWidth || text.height > maxHeight) {
+    const scale = Math.max(
+      MIN_FONT_SIZE / style.fontSize,
+      Math.min(maxWidth / text.width, maxHeight / text.height)
+    )
+    style.fontSize = Math.floor(style.fontSize * scale)
+    text.style = style
+  }
+
+  text.anchor.set(0.5, 0.5)
+  text.x = obstacle.x + obstacle.width / 2
+  text.y = obstacle.y + obstacle.height / 2
+
+  return text
 }
 
 function renderEntranceConnections(

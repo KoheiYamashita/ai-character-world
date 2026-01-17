@@ -18,10 +18,19 @@
 - 障害物領域内のノードは生成時にスキップ
 
 ### 障害物システム
-- 各マップに`obstacles`配列で定義（ピクセル座標指定）
+- 各マップに`obstacles`配列で定義（タイルベース座標: `row`, `col`, `tileWidth`, `tileHeight`）
+- `mapLoader.ts`がタイル座標→ピクセル座標に変換
 - 障害物内のノードは自動的に生成されず、キャラクターは通過不可
-- 描画: 黄色枠線（デバッグ用、`game-config.json`で設定可能）
-- ラベル-障害物衝突バリデーション: 起動時にラベル付きノードが障害物内にないかチェック
+- 描画: 黄色枠線 + 内部にラベル表示（日本語フォント対応）
+- バリデーション:
+  - 必須フィールドチェック（row, col, tileWidth, tileHeight）
+  - 最小サイズチェック（2x2タイル以上）
+  - ラベル-障害物衝突チェック
+
+### 入口システム
+- 各マップに`entrances`配列で定義（タイルベース座標: `row`, `col`）
+- グリッド範囲外の値も許容（マップ端に配置する場合: row=-1, col=12等）
+- `connectedNodeIds`で接続するグリッドノードを指定
 
 ### 経路表示
 - 移動開始時に目的地までのルートを白線で描画
@@ -83,7 +92,8 @@ public/
     └── game-config.json   # ゲーム設定（テーマ、タイミング等）
 
 scripts/
-└── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
+├── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
+└── validate-maps.mjs                # マップデータ検証スクリプト
 ```
 
 ## 重要な設計判断
@@ -101,6 +111,7 @@ scripts/
 - `src/data/maps/grid.ts` で共通生成
 - 障害物領域内のノードは生成時にスキップ、接続も自動フィルタリング
 - キャッシュ管理: `mapLoader.ts`が一元管理、`clearMapCache()`でHMR時にリセット
+- デフォルト値: `getGridDefaults()`で一元管理（game-config.jsonから取得、未ロード時はフォールバック）
 
 ### キャラクター移動
 - ランダム自動移動
@@ -117,4 +128,7 @@ npm run lint   # ESLint
 
 # プレースホルダースプライト生成
 node scripts/generate-placeholder-sprite.mjs
+
+# マップデータ検証
+node scripts/validate-maps.mjs
 ```

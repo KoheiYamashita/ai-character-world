@@ -57,7 +57,8 @@
       "fill": "0x1a1a1a",
       "alpha": 0,
       "stroke": "0xffff00",
-      "strokeWidth": 2
+      "strokeWidth": 2,
+      "labelColor": "0xffffff"
     },
     "characterFallback": {
       "fill": "0xf39c12",

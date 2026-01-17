@@ -52,6 +52,7 @@ export interface ObstacleTheme {
   alpha: number
   stroke: string
   strokeWidth: number
+  labelColor?: string
 }
 
 export interface ThemeConfig {

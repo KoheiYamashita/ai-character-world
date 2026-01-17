@@ -15,10 +15,10 @@ export interface PathNode {
 
 export interface ObstacleConfigJson {
   id?: string
-  x: number
-  y: number
-  width: number
-  height: number
+  row: number // タイル行（0-indexed）
+  col: number // タイル列（0-indexed）
+  tileWidth: number // タイル幅（何タイル分か）
+  tileHeight: number // タイル高（何タイル分か）
   label?: string
 }
 
@@ -57,8 +57,8 @@ export interface NodeLabelJson {
 
 export interface EntranceConfigJson {
   id: string
-  x: number
-  y: number
+  row: number // タイル行（グリッド範囲外も許容）
+  col: number // タイル列（グリッド範囲外も許容）
   connectedNodeIds: string[]
   leadsTo: { mapId: string; nodeId: string }
   label: string

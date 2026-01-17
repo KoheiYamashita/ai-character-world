@@ -17,11 +17,67 @@ export interface NodeLabel {
 
 export interface EntranceConfig {
   id: string
-  x: number
-  y: number
+  row: number // タイル行（グリッド範囲外も許容）
+  col: number // タイル列（グリッド範囲外も許容）
   connectedNodeIds: string[]
   leadsTo: { mapId: string; nodeId: string }
   label: string
+}
+
+export interface TileToPixelConfig {
+  cols: number
+  rows: number
+  width: number
+  height: number
+}
+
+interface GridSpacing {
+  x: number
+  y: number
+}
+
+function getGridSpacing(gridConfig: TileToPixelConfig): GridSpacing {
+  return {
+    x: gridConfig.width / (gridConfig.cols + 1),
+    y: gridConfig.height / (gridConfig.rows + 1),
+  }
+}
+
+function tileToPixelPosition(row: number, col: number, spacing: GridSpacing): { x: number; y: number } {
+  return {
+    x: Math.round(spacing.x * (col + 1)),
+    y: Math.round(spacing.y * (row + 1)),
+  }
+}
+
+export function tileToPixelObstacle(
+  obsConfig: { row: number; col: number; tileWidth: number; tileHeight: number },
+  gridConfig: TileToPixelConfig
+): { x: number; y: number; width: number; height: number } {
+  const spacing = getGridSpacing(gridConfig)
+
+  // Calculate center position (exact, before rounding)
+  const centerX = spacing.x * (obsConfig.col + 1)
+  const centerY = spacing.y * (obsConfig.row + 1)
+
+  const pixelWidth = spacing.x * obsConfig.tileWidth
+  const pixelHeight = spacing.y * obsConfig.tileHeight
+
+  // Round once at the end to avoid accumulating rounding errors
+  return {
+    x: Math.round(centerX - pixelWidth / 2),
+    y: Math.round(centerY - pixelHeight / 2),
+    width: Math.round(pixelWidth),
+    height: Math.round(pixelHeight),
+  }
+}
+
+export function tileToPixelEntrance(
+  entranceConfig: { row: number; col: number },
+  gridConfig: TileToPixelConfig
+): { x: number; y: number } {
+  const spacing = getGridSpacing(gridConfig)
+  return tileToPixelPosition(entranceConfig.row, entranceConfig.col, spacing)
 }
 
 export function isPointInsideObstacle(x: number, y: number, obstacle: Obstacle): boolean {
@@ -45,7 +101,14 @@ const FALLBACK_DEFAULTS = {
   height: 600,
 }
 
-function getGridDefaults() {
+interface GridDefaults {
+  cols: number
+  rows: number
+  width: number
+  height: number
+}
+
+export function getGridDefaults(): GridDefaults {
   if (isConfigLoaded()) {
     const config = getConfig()
     return {
@@ -146,11 +209,13 @@ export function generateGridNodes(
   }
 
   // Add entrance nodes and connect them to the grid
+  const gridConfigForConversion: TileToPixelConfig = { cols, rows, width, height }
   for (const entrance of entrances) {
+    const { x, y } = tileToPixelEntrance(entrance, gridConfigForConversion)
     const entranceNode: PathNode = {
       id: entrance.id,
-      x: entrance.x,
-      y: entrance.y,
+      x,
+      y,
       type: 'entrance',
       connectedTo: [...entrance.connectedNodeIds].filter((id) => nodeMap.has(id)),
       leadsTo: entrance.leadsTo,

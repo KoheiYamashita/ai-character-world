@@ -1,13 +1,88 @@
-import type { GameMap, MapConfigJson, MapsDataJson, Obstacle } from '@/types'
-import type { NodeLabel } from '@/data/maps/grid'
-import { generateGridNodes, isPointInsideObstacle } from '@/data/maps/grid'
+import type { GameMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson } from '@/types'
+import type { NodeLabel, TileToPixelConfig } from '@/data/maps/grid'
+import { generateGridNodes, isPointInsideObstacle, tileToPixelObstacle, getGridDefaults } from '@/data/maps/grid'
 import { isConfigLoaded, getConfig, parseColor } from './gameConfigLoader'
 
 const DEFAULT_MAPS_PATH = '/data/maps.json'
 
-// Default grid dimensions matching game-config.json
-const DEFAULT_COLS = 12
-const DEFAULT_ROWS = 9
+// Minimum obstacle size in tiles
+const MIN_OBSTACLE_SIZE = 2
+
+function isValidNumber(value: unknown): value is number {
+  return typeof value === 'number' && !isNaN(value) && isFinite(value)
+}
+
+function validateObstacleFields(mapId: string, obstacles: ObstacleConfigJson[]): void {
+  const invalid: string[] = []
+
+  obstacles.forEach((obs, i) => {
+    const name = obs.label ?? `obstacle[${i}]`
+    const missing: string[] = []
+
+    if (!isValidNumber(obs.row)) missing.push('row')
+    if (!isValidNumber(obs.col)) missing.push('col')
+    if (!isValidNumber(obs.tileWidth)) missing.push('tileWidth')
+    if (!isValidNumber(obs.tileHeight)) missing.push('tileHeight')
+
+    if (missing.length > 0) {
+      invalid.push(`  - "${name}": missing/invalid fields: ${missing.join(', ')}`)
+    }
+  })
+
+  if (invalid.length > 0) {
+    throw new Error(`Map "${mapId}" has obstacles with invalid fields:\n${invalid.join('\n')}`)
+  }
+}
+
+function validateObstacleMinSize(mapId: string, obstacles: ObstacleConfigJson[]): void {
+  const undersized = obstacles.filter(
+    (obs) => obs.tileWidth < MIN_OBSTACLE_SIZE || obs.tileHeight < MIN_OBSTACLE_SIZE
+  )
+
+  if (undersized.length > 0) {
+    const details = undersized
+      .map((obs) => `  - "${obs.label ?? 'unnamed'}" (${obs.tileWidth}x${obs.tileHeight})`)
+      .join('\n')
+    throw new Error(
+      `Map "${mapId}" has undersized obstacles (minimum: ${MIN_OBSTACLE_SIZE}x${MIN_OBSTACLE_SIZE}):\n${details}`
+    )
+  }
+}
+
+interface GridCoordinate {
+  row: number
+  col: number
+}
+
+function parseNodeIdToGridCoord(nodeId: string, gridPrefix: string): GridCoordinate | null {
+  const parts = nodeId.split('-')
+  if (parts.length < 3 || parts[0] !== gridPrefix) return null
+
+  const row = parseInt(parts[1], 10)
+  const col = parseInt(parts[2], 10)
+
+  if (isNaN(row) || isNaN(col)) return null
+  return { row, col }
+}
+
+function gridCoordToPixel(
+  coord: GridCoordinate,
+  width: number,
+  height: number,
+  cols: number,
+  rows: number
+): { x: number; y: number } {
+  const spacingX = width / (cols + 1)
+  const spacingY = height / (rows + 1)
+  return {
+    x: Math.round(spacingX * (coord.col + 1)),
+    y: Math.round(spacingY * (coord.row + 1)),
+  }
+}
+
+function findObstacleContainingPoint(x: number, y: number, obstacles: Obstacle[]): Obstacle | undefined {
+  return obstacles.find((obs) => isPointInsideObstacle(x, y, obs))
+}
 
 function validateLabelObstacleConflicts(
   mapId: string,
@@ -21,30 +96,19 @@ function validateLabelObstacleConflicts(
 ): void {
   if (labels.length === 0 || obstacles.length === 0) return
 
-  const spacingX = width / (cols + 1)
-  const spacingY = height / (rows + 1)
-
   const conflicts: string[] = []
 
   for (const label of labels) {
-    // Parse nodeId to get row and col (format: prefix-row-col)
-    const parts = label.nodeId.split('-')
-    if (parts.length < 3 || parts[0] !== gridPrefix) continue
+    const coord = parseNodeIdToGridCoord(label.nodeId, gridPrefix)
+    if (!coord) continue
 
-    const row = parseInt(parts[1], 10)
-    const col = parseInt(parts[2], 10)
-    if (isNaN(row) || isNaN(col)) continue
+    const { x, y } = gridCoordToPixel(coord, width, height, cols, rows)
+    const obstacle = findObstacleContainingPoint(x, y, obstacles)
 
-    const x = Math.round(spacingX * (col + 1))
-    const y = Math.round(spacingY * (row + 1))
-
-    for (const obstacle of obstacles) {
-      if (isPointInsideObstacle(x, y, obstacle)) {
-        conflicts.push(
-          `  - Label "${label.label}" (${label.nodeId}) at (${x}, ${y}) is inside obstacle "${obstacle.label ?? obstacle.id}" at (${obstacle.x}, ${obstacle.y}, ${obstacle.width}x${obstacle.height})`
-        )
-        break
-      }
+    if (obstacle) {
+      conflicts.push(
+        `  - Label "${label.label}" (${label.nodeId}) at (${x}, ${y}) is inside obstacle "${obstacle.label ?? obstacle.id}" at (${obstacle.x}, ${obstacle.y}, ${obstacle.width}x${obstacle.height})`
+      )
     }
   }
 
@@ -69,18 +133,34 @@ export async function loadMapConfigs(): Promise<MapConfigJson[]> {
 }
 
 export function buildMapFromConfig(config: MapConfigJson): GameMap {
-  // Convert obstacle configs to obstacles with generated IDs
-  const obstacles: Obstacle[] = (config.obstacles ?? []).map((obs, index) => ({
-    id: obs.id ?? `${config.id}-obstacle-${index}`,
-    x: obs.x,
-    y: obs.y,
-    width: obs.width,
-    height: obs.height,
-    label: obs.label,
-  }))
+  const defaults = getGridDefaults()
+  const cols = config.grid.cols ?? defaults.cols
+  const rows = config.grid.rows ?? defaults.rows
 
-  const cols = config.grid.cols ?? DEFAULT_COLS
-  const rows = config.grid.rows ?? DEFAULT_ROWS
+  // Validate obstacle fields (row, col, tileWidth, tileHeight must be valid numbers)
+  validateObstacleFields(config.id, config.obstacles ?? [])
+
+  // Validate minimum obstacle size
+  validateObstacleMinSize(config.id, config.obstacles ?? [])
+
+  // Convert obstacle configs from tile coordinates to pixel coordinates
+  const gridConfigForConversion: TileToPixelConfig = {
+    cols,
+    rows,
+    width: config.width,
+    height: config.height,
+  }
+  const obstacles: Obstacle[] = (config.obstacles ?? []).map((obs, index) => {
+    const pixelCoords = tileToPixelObstacle(obs, gridConfigForConversion)
+    return {
+      id: obs.id ?? `${config.id}-obstacle-${index}`,
+      x: pixelCoords.x,
+      y: pixelCoords.y,
+      width: pixelCoords.width,
+      height: pixelCoords.height,
+      label: obs.label,
+    }
+  })
 
   // Validate that no labeled nodes fall inside obstacles
   validateLabelObstacleConflicts(
