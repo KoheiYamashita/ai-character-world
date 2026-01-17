@@ -104,3 +104,28 @@ export interface MapConfigJson {
 export interface MapsDataJson {
   maps: MapConfigJson[]
 }
+
+// Cross-map navigation types
+export interface RouteSegment {
+  mapId: string
+  path: string[]           // Node IDs within this map
+  exitEntranceId?: string  // Entrance to next map (undefined for final segment)
+}
+
+export interface CrossMapRoute {
+  segments: RouteSegment[]
+}
+
+export interface CrossMapNavigationResult {
+  success: boolean
+  error?: string
+  cancelled?: boolean
+}
+
+export interface CrossMapNavigationState {
+  isActive: boolean
+  targetMapId: string
+  targetNodeId: string
+  route: CrossMapRoute
+  currentSegmentIndex: number
+}

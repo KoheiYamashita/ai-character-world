@@ -1,14 +1,17 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Application, Container, Graphics, AnimatedSprite, Text, TextStyle } from 'pixi.js'
+import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
 import { useGameStore, useCharacterStore, useNavigationStore } from '@/stores'
 import { getMaps, loadMaps, getNode, clearMapsCache } from '@/data/maps'
 import { findPath } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance, getMovementSpeed } from '@/lib/movement'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
-import { loadGameConfig, parseColor, getObstacleTheme } from '@/lib/gameConfigLoader'
-import type { PathNode, Direction, Position, GameConfig, Obstacle, WallSide, ObstacleTheme } from '@/types'
+import { loadGameConfig, parseColor } from '@/lib/gameConfigLoader'
+import { hasMoreSegments } from '@/lib/crossMapNavigation'
+import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections } from '@/lib/pixiRenderers'
+import { useCharacterNavigation, setGlobalNavigationAPI } from '@/hooks'
+import type { PathNode, Direction, Position, GameConfig, RouteSegment } from '@/types'
 
 interface ActiveNavigation {
   path: string[]
@@ -35,10 +38,15 @@ export default function PixiApp(): React.ReactNode {
   const updateCharacter = useCharacterStore((s) => s.updateCharacter)
 
   const getNavigation = useNavigationStore((s) => s.getNavigation)
+  const navigations = useNavigationStore((s) => s.navigations)
   const startNavigation = useNavigationStore((s) => s.startNavigation)
   const updateProgress = useNavigationStore((s) => s.updateProgress)
   const advanceToNextNode = useNavigationStore((s) => s.advanceToNextNode)
   const completeNavigation = useNavigationStore((s) => s.completeNavigation)
+  const getCrossMapNavigation = useNavigationStore((s) => s.getCrossMapNavigation)
+  const advanceCrossMapSegment = useNavigationStore((s) => s.advanceCrossMapSegment)
+  const completeCrossMapNavigation = useNavigationStore((s) => s.completeCrossMapNavigation)
+  const isCrossMapNavigating = useNavigationStore((s) => s.isCrossMapNavigating)
 
   // PixiJS refs
   const containerRef = useRef<HTMLDivElement>(null)
@@ -69,6 +77,9 @@ export default function PixiApp(): React.ReactNode {
   // Config ref to avoid stale closures (initialized after config loads)
   const configRef = useRef<GameConfig | null>(null)
 
+  // External navigation API
+  const navigationAPI = useCharacterNavigation()
+
   // Sync refs with latest values
   useEffect(() => {
     activeCharacterRef.current = activeCharacter
@@ -80,6 +91,13 @@ export default function PixiApp(): React.ReactNode {
   useEffect(() => {
     currentMapIdRef.current = currentMapId
   }, [currentMapId])
+
+  // Register global navigation API for console testing
+  useEffect(() => {
+    if (isReady && mapsLoaded) {
+      setGlobalNavigationAPI(navigationAPI)
+    }
+  }, [isReady, mapsLoaded, navigationAPI])
 
   // Load config first, then maps (sequential to ensure config paths are used)
   useEffect(() => {
@@ -183,13 +201,13 @@ export default function PixiApp(): React.ReactNode {
     pathLineRef.current = null
   }, [])
 
-  const drawPathLine = useCallback((path: string[], startPosition: Position) => {
+  const drawPathLine = useCallback((path: string[], startPosition: Position, mapId?: string) => {
     const app = appRef.current
     if (!app) return
 
     clearPathLine()
 
-    const map = getMaps()[currentMapIdRef.current]
+    const map = getMaps()[mapId ?? currentMapIdRef.current]
     if (!map || path.length < 2) return
 
     const pathLine = new Graphics()
@@ -208,6 +226,30 @@ export default function PixiApp(): React.ReactNode {
     pathLineRef.current = pathLine
   }, [clearPathLine])
 
+  const startCrossMapSegment = useCallback((characterId: string, segment: RouteSegment, currentPosition: Position): boolean => {
+    const map = getMaps()[segment.mapId]
+    if (!map) return false
+
+    // Handle single-node segment - return false to indicate caller should handle completion
+    if (segment.path.length < 2) {
+      console.log(`[CrossMap] Single-node segment in map "${segment.mapId}", needs completion handling`)
+      return false
+    }
+
+    const firstTargetNode = map.nodes.find(n => n.id === segment.path[1])
+    if (!firstTargetNode) return false
+
+    const targetPosition = { x: firstTargetNode.x, y: firstTargetNode.y }
+    startNavigation(characterId, segment.path, currentPosition, targetPosition)
+    drawPathLine(segment.path, currentPosition, segment.mapId)
+
+    const direction = getDirection(currentPosition, targetPosition)
+    updateDirection(characterId, direction)
+
+    console.log(`[CrossMap] Starting segment in map "${segment.mapId}", path: [${segment.path.join(' -> ')}]`)
+    return true
+  }, [startNavigation, drawPathLine, updateDirection])
+
   const moveToRandomNode = useCallback(() => {
     const character = activeCharacterRef.current
     const mapId = currentMapIdRef.current
@@ -216,12 +258,40 @@ export default function PixiApp(): React.ReactNode {
     const nav = getNavigation(character.id)
     if (nav?.isMoving) return
 
-    const map = getMaps()[mapId]
+    // Skip if cross-map navigating
+    if (isCrossMapNavigating(character.id)) return
+
+    const allMaps = getMaps()
+    const map = allMaps[mapId]
     if (!map) return
 
     const config = configRef.current
     if (!config) return
 
+    // 50% chance of cross-map movement
+    const shouldCrossMap = Math.random() < 0.5
+    const allMapIds = Object.keys(allMaps)
+
+    if (shouldCrossMap && allMapIds.length > 1) {
+      // Select a random different map
+      const otherMapIds = allMapIds.filter(id => id !== mapId)
+      const randomMapId = otherMapIds[Math.floor(Math.random() * otherMapIds.length)]
+      const randomMap = allMaps[randomMapId]
+
+      if (randomMap && randomMap.nodes.length > 0) {
+        // Select a random non-entrance node in the target map
+        const targetNodes = randomMap.nodes.filter(n => n.type !== 'entrance')
+        const randomNode = targetNodes.length > 0
+          ? targetNodes[Math.floor(Math.random() * targetNodes.length)]
+          : randomMap.nodes[Math.floor(Math.random() * randomMap.nodes.length)]
+
+        console.log(`[RandomMove] Initiating cross-map navigation to ${randomMapId}:${randomNode.id}`)
+        navigationAPI.moveToNode(character.id, randomMapId, randomNode.id)
+        return
+      }
+    }
+
+    // Same-map movement (original logic)
     const shouldGoToEntrance = Math.random() < config.movement.entranceProbability
     const otherNodes = map.nodes.filter((n) => n.id !== character.currentNodeId)
     const nonEntranceNodes = otherNodes.filter((n) => n.type !== 'entrance')
@@ -253,16 +323,24 @@ export default function PixiApp(): React.ReactNode {
     startNavigation,
     updateDirection,
     drawPathLine,
+    isCrossMapNavigating,
+    navigationAPI,
   ])
 
   const scheduleNextMove = useCallback(() => {
+    // Skip scheduling if cross-map navigating
+    const character = activeCharacterRef.current
+    if (character && isCrossMapNavigating(character.id)) {
+      return
+    }
+
     clearIdleTimer()
     const config = configRef.current
     if (!config) return
     const { idleTimeMin, idleTimeMax } = config.timing
     const idleTime = idleTimeMin + Math.random() * (idleTimeMax - idleTimeMin)
     idleTimerRef.current = setTimeout(moveToRandomNode, idleTime)
-  }, [clearIdleTimer, moveToRandomNode])
+  }, [clearIdleTimer, moveToRandomNode, isCrossMapNavigating])
 
   const startFadeIn = useCallback(() => {
     const config = configRef.current
@@ -279,9 +357,38 @@ export default function PixiApp(): React.ReactNode {
           fadeInIntervalRef.current = null
         }
         endTransition()
+
+        // Check if we should continue cross-map navigation
+        const character = activeCharacterRef.current
+        if (character) {
+          const crossNav = getCrossMapNavigation(character.id)
+          if (crossNav?.isActive) {
+            const currentSegment = crossNav.route.segments[crossNav.currentSegmentIndex]
+            if (currentSegment) {
+              // Get the current position from the entry node
+              const currentMap = getMaps()[currentSegment.mapId]
+              const entryNode = currentMap?.nodes.find(n => n.id === currentSegment.path[0])
+              if (entryNode) {
+                const started = startCrossMapSegment(character.id, currentSegment, { x: entryNode.x, y: entryNode.y })
+                if (!started) {
+                  // Single-node segment - handle completion
+                  if (hasMoreSegments(crossNav.route, crossNav.currentSegmentIndex)) {
+                    // This shouldn't happen after a transition (entry node should have path)
+                    // But handle gracefully by completing navigation
+                    console.log(`[CrossMap] Unexpected single-node segment after transition, completing`)
+                    completeCrossMapNavigation(character.id)
+                  } else {
+                    // Final destination reached
+                    completeCrossMapNavigation(character.id)
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }, fadeIntervalMs)
-  }, [updateTransitionProgress, endTransition])
+  }, [updateTransitionProgress, endTransition, getCrossMapNavigation, startCrossMapSegment, completeCrossMapNavigation])
 
   const handleMapTransition = useCallback((entranceNode: PathNode) => {
     const character = activeCharacterRef.current
@@ -487,6 +594,30 @@ export default function PixiApp(): React.ReactNode {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded, mapsLoaded])
 
+  // Draw path line when navigation starts (for cross-map navigation initiated via hook)
+  const lastDrawnPathRef = useRef<string[] | null>(null)
+  const currentNavigation = activeCharacter ? navigations.get(activeCharacter.id) : undefined
+  const currentNavPath = currentNavigation?.path
+
+  useEffect(() => {
+    const character = activeCharacterRef.current
+    if (!isReady || !character || !currentNavigation?.isMoving || !currentNavPath || currentNavPath.length < 2) {
+      lastDrawnPathRef.current = null
+      return
+    }
+
+    // Check if this is a new path we haven't drawn yet
+    const pathKey = currentNavPath.join(',')
+    const lastPathKey = lastDrawnPathRef.current?.join(',')
+
+    if (pathKey !== lastPathKey) {
+      // Draw path line for the new path
+      const currentPosition = positionRef.current ?? character.position
+      drawPathLine(currentNavPath, currentPosition)
+      lastDrawnPathRef.current = currentNavPath
+    }
+  }, [isReady, currentNavigation?.isMoving, currentNavPath, drawPathLine])
+
   // Schedule movement when idle
   useEffect(() => {
     const character = activeCharacterRef.current
@@ -587,6 +718,28 @@ export default function PixiApp(): React.ReactNode {
         characterSpriteRef.current.texture = getIdleTexture(spritesheetRef.current, finalDirection)
       }
 
+      // Check if we're in cross-map navigation mode
+      const crossNav = getCrossMapNavigation(characterId)
+      if (crossNav?.isActive) {
+        const currentSegmentIndex = crossNav.currentSegmentIndex
+        const route = crossNav.route
+
+        // If this is an entrance and there are more segments, advance to next segment
+        if (finalNode?.type === 'entrance' && finalNode.leadsTo && hasMoreSegments(route, currentSegmentIndex)) {
+          console.log(`[CrossMap] Completed segment ${currentSegmentIndex}, transitioning to next map`)
+          advanceCrossMapSegment(characterId)
+          handleMapTransition(finalNode)
+          return
+        }
+
+        // If no more segments, we've reached the final destination
+        console.log(`[CrossMap] Reached final destination: ${finalNodeId}`)
+        completeCrossMapNavigation(characterId)
+        scheduleNextMove()
+        return
+      }
+
+      // Normal navigation (not cross-map)
       if (finalNode?.type === 'entrance' && finalNode.leadsTo) {
         handleMapTransition(finalNode)
       } else {
@@ -628,6 +781,9 @@ export default function PixiApp(): React.ReactNode {
     advanceToNextNode,
     updateDirection,
     clearPathLine,
+    getCrossMapNavigation,
+    advanceCrossMapSegment,
+    completeCrossMapNavigation,
   ])
 
   // Transition overlay
@@ -663,233 +819,4 @@ export default function PixiApp(): React.ReactNode {
       style={{ width: canvasSize.width, height: canvasSize.height }}
     />
   )
-}
-
-function getNodeTheme(nodeType: string, nodes: GameConfig['theme']['nodes']) {
-  switch (nodeType) {
-    case 'entrance':
-      return nodes.entrance
-    case 'spawn':
-      return nodes.spawn
-    default:
-      return nodes.waypoint
-  }
-}
-
-function renderNode(graphics: Graphics, node: PathNode, config: GameConfig): void {
-  const theme = getNodeTheme(node.type, config.theme.nodes)
-  const alpha = 'alpha' in theme ? theme.alpha : 1
-
-  graphics.circle(node.x, node.y, theme.radius)
-  graphics.fill({ color: parseColor(theme.fill), alpha })
-
-  if ('stroke' in theme && theme.stroke) {
-    graphics.stroke({ color: parseColor(theme.stroke), width: theme.strokeWidth ?? 1 })
-  }
-}
-
-function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: GameConfig): void {
-  const theme = getObstacleTheme(config, obstacle.type)
-
-  if (obstacle.type === 'zone') {
-    renderZoneObstacle(graphics, obstacle, theme)
-  } else {
-    // Building type: draw full rectangle
-    graphics.rect(obstacle.x, obstacle.y, obstacle.width, obstacle.height)
-    graphics.fill({ color: parseColor(theme.fill), alpha: theme.alpha })
-    graphics.stroke({ color: parseColor(theme.stroke), width: theme.strokeWidth })
-  }
-}
-
-/**
- * Zone障害物の描画
- *
- * シンプルなルール:
- * - 壁はノード位置に描画（半タイル外側にoutset）
- * - ドア位置は1-indexed（角=1）
- * - start〜endの間は壁を描画しない（開口部）
- */
-function renderZoneObstacle(graphics: Graphics, obstacle: Obstacle, theme: ObstacleTheme): void {
-  const { x, y, width, height, wallSides, door, tileWidth, tileHeight } = obstacle
-
-  // Fill background (if any)
-  graphics.rect(x, y, width, height)
-  graphics.fill({ color: parseColor(theme.fill), alpha: theme.alpha })
-
-  if (!wallSides || wallSides.length === 0) return
-
-  const strokeColor = parseColor(theme.stroke)
-  const strokeWidth = theme.strokeWidth
-  const tileSizeX = width / tileWidth
-  const tileSizeY = height / tileHeight
-
-  // 壁はノード位置に描画するため、半タイル外側にoutset
-  const outsetX = tileSizeX / 2
-  const outsetY = tileSizeY / 2
-
-  for (const side of wallSides) {
-    drawWallSide(graphics, side, x, y, width, height, tileSizeX, tileSizeY, outsetX, outsetY, tileWidth, tileHeight, door, strokeColor, strokeWidth)
-  }
-}
-
-/**
- * 壁の描画
- *
- * - 壁はノード位置に描画（outsetで外側に配置）
- * - ドア: 1-indexed（角=1）、start〜endの間が開口部
- */
-function drawWallSide(
-  graphics: Graphics,
-  side: WallSide,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  tileSizeX: number,
-  tileSizeY: number,
-  outsetX: number,
-  outsetY: number,
-  tileWidth: number,
-  tileHeight: number,
-  door: Obstacle['door'],
-  strokeColor: number,
-  strokeWidth: number
-): void {
-  // 壁の始点・終点（ノード位置 = zone境界 + outset）
-  let wallStartX: number, wallStartY: number, wallEndX: number, wallEndY: number
-  let tileCount: number
-  let tileSize: number
-  let isHorizontal: boolean
-
-  switch (side) {
-    case 'top':
-      wallStartX = x - outsetX
-      wallStartY = y - outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y - outsetY
-      tileCount = tileWidth + 1  // outsetで+1
-      tileSize = tileSizeX
-      isHorizontal = true
-      break
-    case 'bottom':
-      wallStartX = x - outsetX
-      wallStartY = y + height + outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileWidth + 1
-      tileSize = tileSizeX
-      isHorizontal = true
-      break
-    case 'left':
-      wallStartX = x - outsetX
-      wallStartY = y - outsetY
-      wallEndX = x - outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileHeight + 1
-      tileSize = tileSizeY
-      isHorizontal = false
-      break
-    case 'right':
-      wallStartX = x + width + outsetX
-      wallStartY = y - outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileHeight + 1
-      tileSize = tileSizeY
-      isHorizontal = false
-      break
-  }
-
-  if (door && door.side === side) {
-    // ドアあり: 2つのセグメントに分けて描画
-    // 1-indexed: 位置1〜start（壁）、start+1〜end-1（開口部）、end〜最後（壁）
-    const doorStartPos = door.start * tileSize  // 位置startまで壁
-    const doorEndPos = door.end * tileSize      // 位置endから壁
-
-    // セグメント1: 始点〜位置start
-    if (door.start >= 1) {
-      if (isHorizontal) {
-        graphics.moveTo(wallStartX, wallStartY)
-        graphics.lineTo(wallStartX + doorStartPos, wallStartY)
-      } else {
-        graphics.moveTo(wallStartX, wallStartY)
-        graphics.lineTo(wallStartX, wallStartY + doorStartPos)
-      }
-      graphics.stroke({ color: strokeColor, width: strokeWidth })
-    }
-
-    // セグメント2: 位置end〜終点
-    if (door.end <= tileCount) {
-      if (isHorizontal) {
-        graphics.moveTo(wallStartX + doorEndPos, wallStartY)
-        graphics.lineTo(wallEndX, wallEndY)
-      } else {
-        graphics.moveTo(wallStartX, wallStartY + doorEndPos)
-        graphics.lineTo(wallEndX, wallEndY)
-      }
-      graphics.stroke({ color: strokeColor, width: strokeWidth })
-    }
-  } else {
-    // ドアなし: 全体を描画
-    graphics.moveTo(wallStartX, wallStartY)
-    graphics.lineTo(wallEndX, wallEndY)
-    graphics.stroke({ color: strokeColor, width: strokeWidth })
-  }
-}
-
-function createObstacleLabel(obstacle: Obstacle, config: GameConfig): Text {
-  const PADDING = 4
-  const MIN_FONT_SIZE = 6
-  const MAX_FONT_SIZE = 16
-
-  const maxWidth = obstacle.width - PADDING * 2
-  const maxHeight = obstacle.height - PADDING * 2
-  const theme = getObstacleTheme(config, obstacle.type)
-  const labelColor = theme.labelColor ?? '0xffffff'
-
-  const style = new TextStyle({
-    fontFamily: '"Hiragino Sans", "Meiryo", "Yu Gothic", "Noto Sans JP", sans-serif',
-    fontSize: Math.min(maxHeight * 0.8, MAX_FONT_SIZE),
-    fill: parseColor(labelColor),
-    align: 'center',
-    wordWrap: true,
-    wordWrapWidth: maxWidth,
-  })
-
-  const text = new Text({ text: obstacle.label ?? '', style })
-
-  // Scale down proportionally if text exceeds bounds
-  if (text.width > maxWidth || text.height > maxHeight) {
-    const scale = Math.max(
-      MIN_FONT_SIZE / style.fontSize,
-      Math.min(maxWidth / text.width, maxHeight / text.height)
-    )
-    style.fontSize = Math.floor(style.fontSize * scale)
-    text.style = style
-  }
-
-  text.anchor.set(0.5, 0.5)
-  text.x = obstacle.x + obstacle.width / 2
-  text.y = obstacle.y + obstacle.height / 2
-
-  return text
-}
-
-function renderEntranceConnections(
-  container: Container,
-  entranceNode: PathNode,
-  allNodes: PathNode[],
-  config: GameConfig
-): void {
-  const lineTheme = config.theme.nodes.connectionLine
-  for (const connectedId of entranceNode.connectedTo) {
-    const connectedNode = allNodes.find((n) => n.id === connectedId)
-    if (connectedNode) {
-      const lineGraphics = new Graphics()
-      lineGraphics.moveTo(entranceNode.x, entranceNode.y)
-      lineGraphics.lineTo(connectedNode.x, connectedNode.y)
-      lineGraphics.stroke({ color: parseColor(lineTheme.color), width: lineTheme.width, alpha: lineTheme.alpha })
-      container.addChildAt(lineGraphics, 0)
-    }
-  }
 }
