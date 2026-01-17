@@ -12,10 +12,21 @@
 ## アーキテクチャ
 
 ### ノードベースのパス探索
-- マップはグリッド状のノード（12x9=108個/マップ）で構成
+- マップはグリッド状のノード（12x9グリッド、障害物内は除外）で構成
 - ノード間は8方向（上下左右+斜め）で接続
 - BFSで最短経路を計算
-- 障害物はノードを配置しないことで表現
+- 障害物領域内のノードは生成時にスキップ
+
+### 障害物システム
+- 各マップに`obstacles`配列で定義（ピクセル座標指定）
+- 障害物内のノードは自動的に生成されず、キャラクターは通過不可
+- 描画: 黄色枠線（デバッグ用、`game-config.json`で設定可能）
+- ラベル-障害物衝突バリデーション: 起動時にラベル付きノードが障害物内にないかチェック
+
+### 経路表示
+- 移動開始時に目的地までのルートを白線で描画
+- 移動完了時に自動で消去
+- `pathLineRef`で管理、`drawPathLine`/`clearPathLine`で操作
 
 ### ノードタイプ
 - `waypoint` - 通常の移動可能ポイント（青）
@@ -59,12 +70,17 @@ src/
 │   ├── pathfinding.ts     # BFSパス探索
 │   ├── movement.ts        # 補間・方向計算
 │   ├── spritesheet.ts     # スプライトシート読み込み・テクスチャ生成
-│   └── characterLoader.ts # JSON設定からキャラクター生成
+│   ├── characterLoader.ts # JSON設定からキャラクター生成
+│   ├── mapLoader.ts       # マップJSON読み込み・障害物バリデーション
+│   └── gameConfigLoader.ts # ゲーム設定JSON読み込み
 └── types/                 # 型定義
 
 public/
 ├── assets/sprites/        # スプライト画像（288x384px、96x96フレーム）
-└── data/characters.json   # キャラクター設定JSON
+└── data/
+    ├── characters.json    # キャラクター設定
+    ├── maps.json          # マップ定義（障害物、entrance含む）
+    └── game-config.json   # ゲーム設定（テーマ、タイミング等）
 
 scripts/
 └── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
@@ -78,10 +94,13 @@ scripts/
 - Reactの再レンダリングを介さずパフォーマンス向上
 - stale closure対策: `activeCharacterRef`, `currentMapIdRef` でtickerコールバック内の最新値を参照
 - Graphics再利用: transition overlayは単一インスタンスを`clear()`して再描画
+- 経路ライン: 移動開始時に新規作成、到着時に`destroy()`で破棄（parent存在チェック必須）
 
 ### グリッドノード
 - 自由な移動感を出すため高密度のノードを配置
 - `src/data/maps/grid.ts` で共通生成
+- 障害物領域内のノードは生成時にスキップ、接続も自動フィルタリング
+- キャッシュ管理: `mapLoader.ts`が一元管理、`clearMapCache()`でHMR時にリセット
 
 ### キャラクター移動
 - ランダム自動移動
