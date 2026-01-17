@@ -53,6 +53,12 @@
         "alpha": 0.5
       }
     },
+    "obstacle": {
+      "fill": "0x1a1a1a",
+      "alpha": 0,
+      "stroke": "0xffff00",
+      "strokeWidth": 2
+    },
     "characterFallback": {
       "fill": "0xf39c12",
       "stroke": "0xe67e22",

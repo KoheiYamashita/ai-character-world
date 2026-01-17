@@ -1,4 +1,4 @@
-import type { PathNode } from '@/types'
+import type { PathNode, Obstacle } from '@/types'
 import { isConfigLoaded, getConfig } from '@/lib/gameConfigLoader'
 
 export interface GridConfig {
@@ -22,6 +22,19 @@ export interface EntranceConfig {
   connectedNodeIds: string[]
   leadsTo: { mapId: string; nodeId: string }
   label: string
+}
+
+export function isPointInsideObstacle(x: number, y: number, obstacle: Obstacle): boolean {
+  return (
+    x >= obstacle.x &&
+    x <= obstacle.x + obstacle.width &&
+    y >= obstacle.y &&
+    y <= obstacle.y + obstacle.height
+  )
+}
+
+function isInsideAnyObstacle(x: number, y: number, obstacles: Obstacle[]): boolean {
+  return obstacles.some((obstacle) => isPointInsideObstacle(x, y, obstacle))
 }
 
 // Defaults matching game-config.json
@@ -76,7 +89,8 @@ function generateConnections(
 export function generateGridNodes(
   config: GridConfig,
   labels: NodeLabel[] = [],
-  entrances: EntranceConfig[] = []
+  entrances: EntranceConfig[] = [],
+  obstacles: Obstacle[] = []
 ): PathNode[] {
   const defaults = getGridDefaults()
   const {
@@ -93,20 +107,33 @@ export function generateGridNodes(
   const nodes: PathNode[] = []
   const nodeMap = new Map<string, PathNode>()
 
-  // Generate grid nodes
+  // Generate grid nodes, skipping those inside obstacles
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
+      const x = Math.round(spacingX * (col + 1))
+      const y = Math.round(spacingY * (row + 1))
+
+      // Skip nodes inside obstacles
+      if (isInsideAnyObstacle(x, y, obstacles)) {
+        continue
+      }
+
       const id = getNodeId(prefix, row, col)
       const node: PathNode = {
         id,
-        x: Math.round(spacingX * (col + 1)),
-        y: Math.round(spacingY * (row + 1)),
+        x,
+        y,
         type: 'waypoint',
         connectedTo: generateConnections(prefix, row, col, rows, cols),
       }
       nodes.push(node)
       nodeMap.set(id, node)
     }
+  }
+
+  // Filter connections to only include nodes that exist
+  for (const node of nodes) {
+    node.connectedTo = node.connectedTo.filter((id) => nodeMap.has(id))
   }
 
   // Apply labels and type overrides
@@ -125,7 +152,7 @@ export function generateGridNodes(
       x: entrance.x,
       y: entrance.y,
       type: 'entrance',
-      connectedTo: [...entrance.connectedNodeIds],
+      connectedTo: [...entrance.connectedNodeIds].filter((id) => nodeMap.has(id)),
       leadsTo: entrance.leadsTo,
       label: entrance.label,
     }

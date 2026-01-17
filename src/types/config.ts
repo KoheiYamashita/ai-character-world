@@ -47,6 +47,13 @@ export interface ConnectionLineTheme {
   alpha: number
 }
 
+export interface ObstacleTheme {
+  fill: string
+  alpha: number
+  stroke: string
+  strokeWidth: number
+}
+
 export interface ThemeConfig {
   nodes: {
     entrance: NodeTheme
@@ -54,6 +61,7 @@ export interface ThemeConfig {
     waypoint: NodeTheme
     connectionLine: ConnectionLineTheme
   }
+  obstacle: ObstacleTheme
   characterFallback: {
     fill: string
     stroke: string

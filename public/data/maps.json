@@ -27,11 +27,56 @@
         {
           "id": "cafe-entrance",
           "x": 770,
-          "y": 300,
-          "connectedNodeIds": ["town-4-11", "town-5-11"],
+          "y": 150,
+          "connectedNodeIds": ["town-2-11", "town-3-11"],
           "leadsTo": { "mapId": "cafe", "nodeId": "cafe-door" },
           "label": "Cafe"
+        },
+        {
+          "id": "office-entrance",
+          "x": 30,
+          "y": 150,
+          "connectedNodeIds": ["town-2-0", "town-3-0"],
+          "leadsTo": { "mapId": "office", "nodeId": "office-door" },
+          "label": "Office"
+        },
+        {
+          "id": "convenience-entrance",
+          "x": 30,
+          "y": 450,
+          "connectedNodeIds": ["town-6-0", "town-7-0"],
+          "leadsTo": { "mapId": "convenience", "nodeId": "convenience-door" },
+          "label": "Convenience Store"
+        },
+        {
+          "id": "gym-entrance",
+          "x": 770,
+          "y": 450,
+          "connectedNodeIds": ["town-6-11", "town-7-11"],
+          "leadsTo": { "mapId": "gym", "nodeId": "gym-door" },
+          "label": "Gym"
+        },
+        {
+          "id": "cafe2-entrance",
+          "x": 770,
+          "y": 300,
+          "connectedNodeIds": ["town-4-11", "town-5-11"],
+          "leadsTo": { "mapId": "cafe2", "nodeId": "cafe2-door" },
+          "label": "Cafe 2"
+        },
+        {
+          "id": "cafe3-entrance",
+          "x": 200,
+          "y": 570,
+          "connectedNodeIds": ["town-8-2", "town-8-3"],
+          "leadsTo": { "mapId": "cafe3", "nodeId": "cafe3-door" },
+          "label": "Cafe 3"
         }
+      ],
+      "obstacles": [
+        { "x": 340, "y": 150, "width": 120, "height": 100, "label": "Fountain" },
+        { "x": 150, "y": 380, "width": 80, "height": 40, "label": "Bench" },
+        { "x": 570, "y": 380, "width": 80, "height": 40, "label": "Bench" }
       ]
     },
     {
@@ -61,6 +106,12 @@
           "leadsTo": { "mapId": "town", "nodeId": "home-entrance" },
           "label": "Exit"
         }
+      ],
+      "obstacles": [
+        { "x": 80, "y": 80, "width": 100, "height": 100, "label": "Bed" },
+        { "x": 320, "y": 180, "width": 160, "height": 60, "label": "Sofa" },
+        { "x": 520, "y": 350, "width": 120, "height": 80, "label": "Dining Table" },
+        { "x": 580, "y": 50, "width": 160, "height": 50, "label": "Kitchen Counter" }
       ]
     },
     {
@@ -91,6 +142,193 @@
           "leadsTo": { "mapId": "town", "nodeId": "cafe-entrance" },
           "label": "Exit"
         }
+      ],
+      "obstacles": [
+        { "x": 300, "y": 180, "width": 200, "height": 60, "label": "Counter" },
+        { "x": 650, "y": 80, "width": 80, "height": 60, "label": "Table 1" },
+        { "x": 650, "y": 260, "width": 80, "height": 60, "label": "Table 2" },
+        { "x": 650, "y": 440, "width": 80, "height": 60, "label": "Table 3" }
+      ]
+    },
+    {
+      "id": "office",
+      "name": "Office",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x607080",
+      "spawnNodeId": "office-door",
+      "grid": {
+        "prefix": "office",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "office-4-5", "label": "Reception", "type": "spawn" },
+        { "nodeId": "office-1-2", "label": "Meeting Room" },
+        { "nodeId": "office-1-9", "label": "Manager Office" },
+        { "nodeId": "office-4-2", "label": "Desk Area 1" },
+        { "nodeId": "office-4-9", "label": "Desk Area 2" },
+        { "nodeId": "office-7-5", "label": "Break Room" }
+      ],
+      "entrances": [
+        {
+          "id": "office-door",
+          "x": 770,
+          "y": 300,
+          "connectedNodeIds": ["office-4-11", "office-5-11"],
+          "leadsTo": { "mapId": "town", "nodeId": "office-entrance" },
+          "label": "Exit"
+        }
+      ],
+      "obstacles": [
+        { "x": 100, "y": 200, "width": 200, "height": 50, "label": "Desk Row 1" },
+        { "x": 100, "y": 380, "width": 200, "height": 50, "label": "Desk Row 2" },
+        { "x": 80, "y": 80, "width": 100, "height": 80, "label": "Meeting Table" },
+        { "x": 650, "y": 80, "width": 90, "height": 80, "label": "Manager Desk" }
+      ]
+    },
+    {
+      "id": "convenience",
+      "name": "Convenience Store",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x87ceeb",
+      "spawnNodeId": "convenience-door",
+      "grid": {
+        "prefix": "convenience",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "convenience-4-5", "label": "Entrance", "type": "spawn" },
+        { "nodeId": "convenience-1-2", "label": "Snacks" },
+        { "nodeId": "convenience-1-5", "label": "Drinks" },
+        { "nodeId": "convenience-1-9", "label": "Bento" },
+        { "nodeId": "convenience-4-9", "label": "Magazine" },
+        { "nodeId": "convenience-7-5", "label": "Register" }
+      ],
+      "entrances": [
+        {
+          "id": "convenience-door",
+          "x": 770,
+          "y": 300,
+          "connectedNodeIds": ["convenience-4-11", "convenience-5-11"],
+          "leadsTo": { "mapId": "town", "nodeId": "convenience-entrance" },
+          "label": "Exit"
+        }
+      ],
+      "obstacles": [
+        { "x": 100, "y": 80, "width": 60, "height": 180, "label": "Shelf 1" },
+        { "x": 250, "y": 80, "width": 60, "height": 180, "label": "Shelf 2" },
+        { "x": 400, "y": 80, "width": 60, "height": 180, "label": "Shelf 3" },
+        { "x": 200, "y": 420, "width": 120, "height": 60, "label": "Register" }
+      ]
+    },
+    {
+      "id": "gym",
+      "name": "Gym",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0xcd5c5c",
+      "spawnNodeId": "gym-door",
+      "grid": {
+        "prefix": "gym",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "gym-4-5", "label": "Lobby", "type": "spawn" },
+        { "nodeId": "gym-1-2", "label": "Treadmills" },
+        { "nodeId": "gym-1-9", "label": "Weight Area" },
+        { "nodeId": "gym-4-2", "label": "Yoga Room" },
+        { "nodeId": "gym-7-5", "label": "Locker Room" }
+      ],
+      "entrances": [
+        {
+          "id": "gym-door",
+          "x": 30,
+          "y": 300,
+          "connectedNodeIds": ["gym-4-0", "gym-5-0"],
+          "leadsTo": { "mapId": "town", "nodeId": "gym-entrance" },
+          "label": "Exit"
+        }
+      ],
+      "obstacles": [
+        { "x": 100, "y": 80, "width": 80, "height": 60, "label": "Treadmill 1" },
+        { "x": 200, "y": 80, "width": 80, "height": 60, "label": "Treadmill 2" },
+        { "x": 660, "y": 80, "width": 80, "height": 100, "label": "Weight Rack" },
+        { "x": 100, "y": 200, "width": 140, "height": 60, "label": "Bench Press" }
+      ]
+    },
+    {
+      "id": "cafe2",
+      "name": "Cafe 2",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0xc4a484",
+      "spawnNodeId": "cafe2-door",
+      "grid": {
+        "prefix": "cafe2",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "cafe2-4-2", "label": "Entrance", "type": "spawn" },
+        { "nodeId": "cafe2-4-6", "label": "Bar Counter" },
+        { "nodeId": "cafe2-1-9", "label": "Sofa Area" },
+        { "nodeId": "cafe2-4-9", "label": "Window Seat" },
+        { "nodeId": "cafe2-7-9", "label": "Terrace" }
+      ],
+      "entrances": [
+        {
+          "id": "cafe2-door",
+          "x": 30,
+          "y": 300,
+          "connectedNodeIds": ["cafe2-4-0", "cafe2-5-0"],
+          "leadsTo": { "mapId": "town", "nodeId": "cafe2-entrance" },
+          "label": "Exit"
+        }
+      ],
+      "obstacles": [
+        { "x": 300, "y": 180, "width": 180, "height": 50, "label": "Bar Counter" },
+        { "x": 650, "y": 80, "width": 100, "height": 80, "label": "Sofa" },
+        { "x": 650, "y": 260, "width": 80, "height": 60, "label": "Table 1" },
+        { "x": 650, "y": 420, "width": 80, "height": 60, "label": "Table 2" }
+      ]
+    },
+    {
+      "id": "cafe3",
+      "name": "Cafe 3",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0xb8860b",
+      "spawnNodeId": "cafe3-door",
+      "grid": {
+        "prefix": "cafe3",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        { "nodeId": "cafe3-4-2", "label": "Hall", "type": "spawn" },
+        { "nodeId": "cafe3-4-6", "label": "Order Counter" },
+        { "nodeId": "cafe3-1-3", "label": "Booth 1" },
+        { "nodeId": "cafe3-1-9", "label": "Booth 2" },
+        { "nodeId": "cafe3-7-6", "label": "Outdoor Seats" }
+      ],
+      "entrances": [
+        {
+          "id": "cafe3-door",
+          "x": 400,
+          "y": 30,
+          "connectedNodeIds": ["cafe3-0-5", "cafe3-0-6"],
+          "leadsTo": { "mapId": "town", "nodeId": "cafe3-entrance" },
+          "label": "Exit"
+        }
+      ],
+      "obstacles": [
+        { "x": 300, "y": 180, "width": 180, "height": 50, "label": "Counter" },
+        { "x": 100, "y": 140, "width": 100, "height": 80, "label": "Booth 1" },
+        { "x": 650, "y": 80, "width": 100, "height": 80, "label": "Booth 2" }
       ]
     }
   ]

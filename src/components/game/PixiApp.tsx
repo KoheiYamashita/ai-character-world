@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
 import { useGameStore, useCharacterStore, useNavigationStore } from '@/stores'
-import { getMaps, loadMaps, getNode } from '@/data/maps'
+import { getMaps, loadMaps, getNode, clearMapsCache } from '@/data/maps'
 import { findPath } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance, getMovementSpeed } from '@/lib/movement'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
 import { loadGameConfig, parseColor } from '@/lib/gameConfigLoader'
-import type { PathNode, Direction, Position, GameConfig } from '@/types'
+import type { PathNode, Direction, Position, GameConfig, Obstacle } from '@/types'
 
 interface ActiveNavigation {
   path: string[]
@@ -46,6 +46,7 @@ export default function PixiApp(): React.ReactNode {
   const characterSpriteRef = useRef<AnimatedSprite | null>(null)
   const spritesheetRef = useRef<CharacterSpritesheet | null>(null)
   const transitionOverlayRef = useRef<Graphics | null>(null)
+  const pathLineRef = useRef<Graphics | null>(null)
 
   // Timer refs
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -91,10 +92,21 @@ export default function PixiApp(): React.ReactNode {
         if (alreadyLoaded) {
           // Still need to set local state and configRef for this component instance
           const config = await loadGameConfig()
+          if (cancelled) return
           configRef.current = config
+          // Ensure maps are loaded in cache (may have been cleared by hot reload)
+          const loadedMaps = await loadMaps()
+          if (cancelled) return
+          const currentMap = loadedMaps[useGameStore.getState().currentMapId]
+          if (currentMap) {
+            setCanvasSize({ width: currentMap.width, height: currentMap.height })
+          }
           setMapsLoaded(true)
           return
         }
+
+        // First load: clear cache to ensure fresh data
+        clearMapsCache()
 
         // Load config first so mapLoader can use config.paths
         const config = await loadGameConfig()
@@ -160,6 +172,42 @@ export default function PixiApp(): React.ReactNode {
     }
   }, [])
 
+  const clearPathLine = useCallback(() => {
+    if (!pathLineRef.current) return
+
+    // Safe removal: only removeChild if still attached to a parent
+    if (pathLineRef.current.parent) {
+      pathLineRef.current.parent.removeChild(pathLineRef.current)
+    }
+    pathLineRef.current.destroy()
+    pathLineRef.current = null
+  }, [])
+
+  const drawPathLine = useCallback((path: string[], startPosition: Position) => {
+    const app = appRef.current
+    if (!app) return
+
+    clearPathLine()
+
+    const map = getMaps()[currentMapIdRef.current]
+    if (!map || path.length < 2) return
+
+    const pathLine = new Graphics()
+    pathLine.label = 'pathLine'
+    pathLine.moveTo(startPosition.x, startPosition.y)
+
+    for (let i = 1; i < path.length; i++) {
+      const node = map.nodes.find((n) => n.id === path[i])
+      if (node) {
+        pathLine.lineTo(node.x, node.y)
+      }
+    }
+
+    pathLine.stroke({ color: 0xffffff, width: 2, alpha: 0.7 })
+    app.stage.addChild(pathLine)
+    pathLineRef.current = pathLine
+  }, [clearPathLine])
+
   const moveToRandomNode = useCallback(() => {
     const character = activeCharacterRef.current
     const mapId = currentMapIdRef.current
@@ -195,6 +243,7 @@ export default function PixiApp(): React.ReactNode {
     const currentPosition = positionRef.current ?? character.position
     const targetPosition = { x: firstTargetNode.x, y: firstTargetNode.y }
     startNavigation(character.id, path, currentPosition, targetPosition)
+    drawPathLine(path, currentPosition)
 
     const direction = getDirection(currentPosition, targetPosition)
     updateDirection(character.id, direction)
@@ -203,6 +252,7 @@ export default function PixiApp(): React.ReactNode {
     getNavigation,
     startNavigation,
     updateDirection,
+    drawPathLine,
   ])
 
   const scheduleNextMove = useCallback(() => {
@@ -362,19 +412,30 @@ export default function PixiApp(): React.ReactNode {
 
     app.stage.removeChildren()
 
+    // Get config early
+    const config = configRef.current
+    if (!config) return
+
     // Background
     const bgGraphics = new Graphics()
     bgGraphics.rect(0, 0, map.width, map.height)
     bgGraphics.fill(map.backgroundColor)
     app.stage.addChild(bgGraphics)
 
+    // Obstacles container (rendered above background, below nodes)
+    const obstaclesContainer = new Container()
+    app.stage.addChild(obstaclesContainer)
+
+    // Render obstacles
+    for (const obstacle of map.obstacles) {
+      const obstacleGraphics = new Graphics()
+      renderObstacle(obstacleGraphics, obstacle, config)
+      obstaclesContainer.addChild(obstacleGraphics)
+    }
+
     // Nodes container
     const nodesContainer = new Container()
     app.stage.addChild(nodesContainer)
-
-    // Render nodes
-    const config = configRef.current
-    if (!config) return
 
     for (const node of map.nodes) {
       const nodeGraphics = new Graphics()
@@ -459,7 +520,6 @@ export default function PixiApp(): React.ReactNode {
       const nav = getNavigation(characterId)
       const character = activeCharacterRef.current
 
-      // Update idle animation when not moving
       if (characterSpriteRef.current && character && !nav?.isMoving) {
         updateSpriteAnimation(character.direction, false)
       }
@@ -476,45 +536,40 @@ export default function PixiApp(): React.ReactNode {
       if (characterSpriteRef.current) {
         characterSpriteRef.current.x = newPosition.x
         characterSpriteRef.current.y = newPosition.y
-        const direction = getDirection(nav.startPosition, nav.targetPosition)
-        updateSpriteAnimation(direction, true)
+        updateSpriteAnimation(getDirection(nav.startPosition, nav.targetPosition), true)
       }
 
-      if (newProgress >= 1) {
-        handleMovementComplete({
-          path: nav.path,
-          currentPathIndex: nav.currentPathIndex,
-          startPosition: nav.startPosition,
-          targetPosition: nav.targetPosition,
-        }, newPosition)
-      } else {
+      if (newProgress < 1) {
         updateProgress(characterId, newProgress)
+        return
       }
-    }
 
-    function handleMovementComplete(nav: ActiveNavigation, newPosition: Position): void {
+      const activeNav: ActiveNavigation = {
+        path: nav.path,
+        currentPathIndex: nav.currentPathIndex,
+        startPosition: nav.startPosition,
+        targetPosition: nav.targetPosition,
+      }
       const nextIndex = nav.currentPathIndex + 1
-      const finalNodeIndex = nav.path.length - 1
-      const hasReachedFinalNode = nextIndex >= finalNodeIndex
 
-      if (hasReachedFinalNode) {
-        handleArrivalAtDestination(nav, characterId)
+      if (nextIndex >= nav.path.length - 1) {
+        handleArrivalAtDestination(activeNav)
       } else {
-        handleContinueToNextNode(nav, nextIndex, newPosition, characterId)
+        handleContinueToNextNode(activeNav, nextIndex, newPosition)
       }
     }
 
-    function handleArrivalAtDestination(nav: ActiveNavigation, charId: string): void {
+    function handleArrivalAtDestination(nav: ActiveNavigation): void {
       const finalNodeId = nav.path[nav.path.length - 1]
-      const mapId = currentMapIdRef.current
-      const map = getMaps()[mapId]
+      const map = getMaps()[currentMapIdRef.current]
       const finalNode = map?.nodes.find((n) => n.id === finalNodeId)
-
       const finalDirection = getDirection(nav.startPosition, nav.targetPosition)
-      updatePosition(charId, nav.targetPosition)
-      updateDirection(charId, finalDirection)
-      updateCharacter(charId, { currentNodeId: finalNodeId })
-      completeNavigation(charId)
+
+      updatePosition(characterId, nav.targetPosition)
+      updateDirection(characterId, finalDirection)
+      updateCharacter(characterId, { currentNodeId: finalNodeId })
+      completeNavigation(characterId)
+      clearPathLine()
 
       if (characterSpriteRef.current && spritesheetRef.current) {
         characterSpriteRef.current.stop()
@@ -528,28 +583,19 @@ export default function PixiApp(): React.ReactNode {
       }
     }
 
-    function handleContinueToNextNode(
-      nav: ActiveNavigation,
-      nextIndex: number,
-      newPosition: Position,
-      charId: string
-    ): void {
+    function handleContinueToNextNode(nav: ActiveNavigation, nextIndex: number, newPosition: Position): void {
       const nextNodeId = nav.path[nextIndex + 1]
-      const mapId = currentMapIdRef.current
-      const map = getMaps()[mapId]
+      const map = getMaps()[currentMapIdRef.current]
       const nextNode = map?.nodes.find((n) => n.id === nextNodeId)
-
       if (!nextNode) return
 
       const currentNodeId = nav.path[nextIndex]
       const nextPosition: Position = { x: nextNode.x, y: nextNode.y }
 
-      updatePosition(charId, newPosition)
-      updateCharacter(charId, { currentNodeId })
-      advanceToNextNode(charId, nextPosition)
-
-      const direction = getDirection(newPosition, nextPosition)
-      updateDirection(charId, direction)
+      updatePosition(characterId, newPosition)
+      updateCharacter(characterId, { currentNodeId })
+      advanceToNextNode(characterId, nextPosition)
+      updateDirection(characterId, getDirection(newPosition, nextPosition))
     }
 
     app.ticker.add(ticker)
@@ -570,6 +616,7 @@ export default function PixiApp(): React.ReactNode {
     completeNavigation,
     advanceToNextNode,
     updateDirection,
+    clearPathLine,
   ])
 
   // Transition overlay
@@ -608,11 +655,9 @@ export default function PixiApp(): React.ReactNode {
 }
 
 function getNodeTheme(nodeType: string, nodes: GameConfig['theme']['nodes']) {
-  const themeMap = {
-    entrance: nodes.entrance,
-    spawn: nodes.spawn,
-  } as const
-  return themeMap[nodeType as keyof typeof themeMap] ?? nodes.waypoint
+  if (nodeType === 'entrance') return nodes.entrance
+  if (nodeType === 'spawn') return nodes.spawn
+  return nodes.waypoint
 }
 
 function renderNode(graphics: Graphics, node: PathNode, config: GameConfig): void {
@@ -625,6 +670,13 @@ function renderNode(graphics: Graphics, node: PathNode, config: GameConfig): voi
   if ('stroke' in theme && theme.stroke) {
     graphics.stroke({ color: parseColor(theme.stroke), width: theme.strokeWidth ?? 1 })
   }
+}
+
+function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: GameConfig): void {
+  const theme = config.theme.obstacle
+  graphics.rect(obstacle.x, obstacle.y, obstacle.width, obstacle.height)
+  graphics.fill({ color: parseColor(theme.fill), alpha: theme.alpha })
+  graphics.stroke({ color: parseColor(theme.stroke), width: theme.strokeWidth })
 }
 
 function renderEntranceConnections(

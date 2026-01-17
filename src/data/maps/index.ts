@@ -1,29 +1,27 @@
 import type { GameMap } from '@/types'
-import { loadMaps as loadMapsFromJson } from '@/lib/mapLoader'
+import {
+  loadMaps as loadMapsFromLoader,
+  clearMapCache as clearLoaderCache,
+  getCachedMaps,
+  isMapsLoaded as checkMapsLoaded,
+} from '@/lib/mapLoader'
 
-// Mutable reference updated after JSON loading
-let mapsRef: Record<string, GameMap> | null = null
-
-// Async loader that fetches from JSON and caches result
+// Re-export async loader (mapLoader handles caching)
 export async function loadMaps(): Promise<Record<string, GameMap>> {
-  if (mapsRef) {
-    return mapsRef
-  }
-  const loadedMaps = await loadMapsFromJson()
-  mapsRef = loadedMaps
-  return loadedMaps
+  return loadMapsFromLoader()
 }
 
-// Getter that returns loaded maps (throws if not loaded)
+// Synchronous getter for already-loaded maps
 export function getMaps(): Record<string, GameMap> {
-  if (!mapsRef) {
-    throw new Error('Maps not loaded. Call loadMaps() first.')
-  }
-  return mapsRef
+  return getCachedMaps()
 }
 
 export function isMapsLoaded(): boolean {
-  return mapsRef !== null
+  return checkMapsLoaded()
+}
+
+export function clearMapsCache(): void {
+  clearLoaderCache()
 }
 
 export function getMap(mapId: string): GameMap | undefined {
