@@ -9,6 +9,23 @@ function formatTime(hour: number, minute: number): string {
   return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
 }
 
+interface StatBarProps {
+  label: string
+  value: number
+}
+
+function StatBar({ label, value }: StatBarProps): React.ReactNode {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-sm">
+        <span>{label}</span>
+        <span>{value}%</span>
+      </div>
+      <Progress value={value} className="h-2" />
+    </div>
+  )
+}
+
 export function StatusPanel(): React.ReactNode {
   const time = useWorldStore((s) => s.time)
   const currentMapId = useWorldStore((s) => s.currentMapId)
@@ -38,13 +55,11 @@ export function StatusPanel(): React.ReactNode {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Hunger</span>
-                  <span>{activeCharacter.hunger}%</span>
-                </div>
-                <Progress value={activeCharacter.hunger} className="h-2" />
-              </div>
+              <StatBar label="Hunger" value={activeCharacter.hunger} />
+              <StatBar label="Energy" value={activeCharacter.energy} />
+              <StatBar label="Hygiene" value={activeCharacter.hygiene} />
+              <StatBar label="Mood" value={activeCharacter.mood} />
+              <StatBar label="Bladder" value={activeCharacter.bladder} />
 
               <div className="flex justify-between items-center">
                 <span className="text-sm">Money</span>

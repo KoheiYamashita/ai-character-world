@@ -40,6 +40,10 @@ function simCharacterToCharacter(simChar: SimCharacter): Character {
     sprite: simChar.sprite,
     money: simChar.money,
     hunger: simChar.hunger,
+    energy: simChar.energy,
+    hygiene: simChar.hygiene,
+    mood: simChar.mood,
+    bladder: simChar.bladder,
     currentMapId: simChar.currentMapId,
     currentNodeId: simChar.currentNodeId,
     position: simChar.position,
@@ -93,6 +97,10 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
           currentNodeId: simChar.currentNodeId,
           money: simChar.money,
           hunger: simChar.hunger,
+          energy: simChar.energy,
+          hygiene: simChar.hygiene,
+          mood: simChar.mood,
+          bladder: simChar.bladder,
         })
       } else {
         // Add new character (sprite info comes from server)

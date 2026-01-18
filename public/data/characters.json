@@ -18,7 +18,11 @@
       },
       "defaultStats": {
         "money": 100,
-        "hunger": 100
+        "hunger": 100,
+        "energy": 100,
+        "hygiene": 100,
+        "mood": 100,
+        "bladder": 100
       }
     }
   ]

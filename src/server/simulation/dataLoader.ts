@@ -316,6 +316,10 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
     sprite: charConfig.sprite,
     money: charConfig.defaultStats.money,
     hunger: charConfig.defaultStats.hunger,
+    energy: charConfig.defaultStats.energy,
+    hygiene: charConfig.defaultStats.hygiene,
+    mood: charConfig.defaultStats.mood,
+    bladder: charConfig.defaultStats.bladder,
     currentMapId: cfg.initialState.mapId,
     currentNodeId: initialMap?.spawnNodeId ?? '',
     position: spawnNode

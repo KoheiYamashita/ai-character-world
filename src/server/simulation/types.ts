@@ -23,6 +23,10 @@ export interface SimCharacter {
   sprite: SpriteConfig
   money: number
   hunger: number
+  energy: number
+  hygiene: number
+  mood: number
+  bladder: number
   currentMapId: string
   currentNodeId: string
   position: Position
@@ -127,6 +131,10 @@ export function createSimCharacter(char: Character): SimCharacter {
     sprite: { ...char.sprite },
     money: char.money,
     hunger: char.hunger,
+    energy: char.energy,
+    hygiene: char.hygiene,
+    mood: char.mood,
+    bladder: char.bladder,
     currentMapId: char.currentMapId,
     currentNodeId: char.currentNodeId,
     position: { ...char.position },

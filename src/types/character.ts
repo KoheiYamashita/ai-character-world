@@ -21,6 +21,10 @@ export interface CharacterConfig {
   defaultStats: {
     money: number
     hunger: number
+    energy: number
+    hygiene: number
+    mood: number
+    bladder: number
   }
 }
 
@@ -39,6 +43,10 @@ export interface Character {
   sprite: SpriteConfig
   money: number
   hunger: number
+  energy: number
+  hygiene: number
+  mood: number
+  bladder: number
   currentMapId: string
   currentNodeId: string
   position: Position

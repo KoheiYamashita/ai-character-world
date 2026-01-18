@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import type { Character, Position, Direction } from '@/types'
 
+// Clamp a value to 0-100 range
+function clampStat(value: number): number {
+  return Math.max(0, Math.min(100, value))
+}
+
+// Status fields that are clamped to 0-100
+type ClampedStatKey = 'hunger' | 'energy' | 'hygiene' | 'mood' | 'bladder'
+
 interface CharacterStore {
   characters: Map<string, Character>
   activeCharacterId: string | null
@@ -14,8 +22,14 @@ interface CharacterStore {
   getCharacter: (id: string) => Character | undefined
   getActiveCharacter: () => Character | undefined
   setCharacterMap: (id: string, mapId: string, nodeId: string, position: Position) => void
-  updateHunger: (id: string, delta: number) => void
+  updateStat: (id: string, stat: ClampedStatKey, delta: number) => void
   updateMoney: (id: string, delta: number) => void
+  // Convenience aliases for individual stats
+  updateHunger: (id: string, delta: number) => void
+  updateEnergy: (id: string, delta: number) => void
+  updateHygiene: (id: string, delta: number) => void
+  updateMood: (id: string, delta: number) => void
+  updateBladder: (id: string, delta: number) => void
 }
 
 export const useCharacterStore = create<CharacterStore>((set, get) => ({
@@ -87,13 +101,12 @@ export const useCharacterStore = create<CharacterStore>((set, get) => ({
       return { characters: newMap }
     }),
 
-  updateHunger: (id, delta) =>
+  updateStat: (id, stat, delta) =>
     set((state) => {
       const char = state.characters.get(id)
       if (!char) return state
       const newMap = new Map(state.characters)
-      const newHunger = Math.max(0, Math.min(100, char.hunger + delta))
-      newMap.set(id, { ...char, hunger: newHunger })
+      newMap.set(id, { ...char, [stat]: clampStat(char[stat] + delta) })
       return { characters: newMap }
     }),
 
@@ -105,4 +118,11 @@ export const useCharacterStore = create<CharacterStore>((set, get) => ({
       newMap.set(id, { ...char, money: char.money + delta })
       return { characters: newMap }
     }),
+
+  // Convenience aliases
+  updateHunger: (id, delta) => get().updateStat(id, 'hunger', delta),
+  updateEnergy: (id, delta) => get().updateStat(id, 'energy', delta),
+  updateHygiene: (id, delta) => get().updateStat(id, 'hygiene', delta),
+  updateMood: (id, delta) => get().updateStat(id, 'mood', delta),
+  updateBladder: (id, delta) => get().updateStat(id, 'bladder', delta),
 }))

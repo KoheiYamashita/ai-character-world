@@ -7,17 +7,17 @@
 
 ## Phase 1: LLMなしで実装可能な範囲
 
-### Step 1: ステータス拡張（全層対応）
+### ✅ Step 1: ステータス拡張（全層対応）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 1-1 | `src/types/character.ts` に `energy`, `hygiene`, `mood`, `bladder` 追加 | ビルド通過 |
-| 1-2 | `src/server/simulation/types.ts` の `SimCharacter` に新ステータス追加 | ビルド通過 |
-| 1-3 | `public/data/characters.json` に新ステータスの初期値追加 | JSON読み込み成功 |
-| 1-4 | `src/server/simulation/dataLoader.ts` でロード処理更新 | サーバー起動成功 |
-| 1-5 | `src/hooks/useSimulationSync.ts` でSSE同期に新ステータス反映 | クライアント同期確認 |
-| 1-6 | `src/stores/characterStore.ts` に新ステータス用アクション追加 | ストア更新成功 |
-| 1-7 | `src/components/panels/StatusPanel.tsx` に全ステータス表示 | UIで6ステータスが表示される |
+| ✅ 1-1 | `src/types/character.ts` に `energy`, `hygiene`, `mood`, `bladder` 追加 | ビルド通過 |
+| ✅ 1-2 | `src/server/simulation/types.ts` の `SimCharacter` に新ステータス追加 | ビルド通過 |
+| ✅ 1-3 | `public/data/characters.json` に新ステータスの初期値追加 | JSON読み込み成功 |
+| ✅ 1-4 | `src/server/simulation/dataLoader.ts` でロード処理更新 | サーバー起動成功 |
+| ✅ 1-5 | `src/hooks/useSimulationSync.ts` でSSE同期に新ステータス反映 | クライアント同期確認 |
+| ✅ 1-6 | `src/stores/characterStore.ts` に新ステータス用アクション追加 | ストア更新成功 |
+| ✅ 1-7 | `src/components/panels/StatusPanel.tsx` に全ステータス表示 | UIで6ステータスが表示される |
 
 ---
 

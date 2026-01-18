@@ -178,3 +178,25 @@ node scripts/generate-placeholder-sprite.mjs
 # マップデータ検証
 node scripts/validate-maps.mjs
 ```
+
+## 実装プラン管理
+
+実装計画は `docs/implementation-plan.md` に記載されている。
+
+### 実装済みマーク
+各タスクの実装が完了したら、タスク番号の前に `✅` マークを追加する。
+
+```markdown
+# 実装前
+| 1-1 | `src/types/character.ts` に `energy` 追加 | ビルド通過 |
+
+# 実装後
+| ✅ 1-1 | `src/types/character.ts` に `energy` 追加 | ビルド通過 |
+```
+
+Stepの全タスクが完了したら、Step見出しにも `✅` を追加する。
+
+```markdown
+# 全タスク完了後
+### ✅ Step 1: ステータス拡張（全層対応）
+```
