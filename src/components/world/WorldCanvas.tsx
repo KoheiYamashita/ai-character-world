@@ -11,7 +11,7 @@ const PixiAppSync = dynamic(() => import('./PixiAppSync'), {
   ),
 })
 
-export function GameCanvas() {
+export function WorldCanvas() {
   return (
     <div className="w-full h-full">
       <PixiAppSync />

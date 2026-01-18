@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import {
   getSimulationEngine,
-  loadGameDataServer,
+  loadWorldDataServer,
   type SerializedWorldState,
 } from '@/server/simulation'
 
@@ -15,7 +15,7 @@ async function ensureEngineRunning(): Promise<void> {
   if (!engineInitialized) {
     console.log('[API] Initializing simulation engine...')
     try {
-      const { maps, characters, config, npcBlockedNodes, npcs } = await loadGameDataServer()
+      const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldDataServer()
       await engine.initialize(maps, characters, config.initialState.mapId, config.initialState.time, npcBlockedNodes, npcs)
       engine.start()
       engineInitialized = true

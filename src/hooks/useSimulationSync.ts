@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useCharacterStore, useGameStore, useNPCStore } from '@/stores'
+import { useCharacterStore, useWorldStore, useNPCStore } from '@/stores'
 import type { SerializedWorldState, SimCharacter, SimNPC } from '@/server/simulation/types'
 import type { Character } from '@/types'
 
@@ -68,8 +68,8 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
   const getCharacter = useCharacterStore((s) => s.getCharacter)
   const setActiveCharacter = useCharacterStore((s) => s.setActiveCharacter)
 
-  const setCurrentMap = useGameStore((s) => s.setCurrentMap)
-  const setTime = useGameStore((s) => s.setTime)
+  const setCurrentMap = useWorldStore((s) => s.setCurrentMap)
+  const setTime = useWorldStore((s) => s.setTime)
 
   const updateNPC = useNPCStore((s) => s.updateNPC)
 

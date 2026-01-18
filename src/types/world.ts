@@ -1,4 +1,4 @@
-export interface GameTime {
+export interface WorldTime {
   hour: number
   minute: number
   day: number
@@ -11,9 +11,9 @@ export interface TransitionState {
   progress: number
 }
 
-export interface GameState {
+export interface WorldState {
   currentMapId: string
-  time: GameTime
+  time: WorldTime
   isPaused: boolean
   transition: TransitionState
 }

@@ -1,4 +1,4 @@
-import type { GameMap, Character, GameTime, NPC } from '@/types'
+import type { GameMap, Character, WorldTime, NPC } from '@/types'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -30,7 +30,7 @@ export class SimulationEngine {
     maps: Record<string, GameMap>,
     characters: Character[],
     initialMapId?: string,
-    initialTime?: GameTime,
+    initialTime?: WorldTime,
     npcBlockedNodes?: Map<string, Set<string>>,
     npcs?: NPC[]
   ): Promise<void> {

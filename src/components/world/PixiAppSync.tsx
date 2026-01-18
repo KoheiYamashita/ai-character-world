@@ -2,20 +2,20 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Application, Container, Graphics, AnimatedSprite, Text, TextStyle } from 'pixi.js'
-import { useGameStore, useCharacterStore, useNPCStore } from '@/stores'
+import { useWorldStore, useCharacterStore, useNPCStore } from '@/stores'
 import { getMaps, loadMaps, clearMapsCache } from '@/data/maps'
 import { getNPCConfigsForMap } from '@/lib/mapLoader'
 import { loadNPCsFromMapConfig } from '@/lib/npcLoader'
-import { loadGameConfig, parseColor } from '@/lib/gameConfigLoader'
+import { loadWorldConfig, parseColor } from '@/lib/worldConfigLoader'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
 import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections } from '@/lib/pixiRenderers'
 import { useSimulationSync } from '@/hooks'
-import type { Direction, GameConfig, PathNode, NPC } from '@/types'
+import type { Direction, WorldConfig, PathNode, NPC } from '@/types'
 
 export default function PixiAppSync(): React.ReactNode {
   // Store selectors
-  const currentMapId = useGameStore((s) => s.currentMapId)
-  const setStoreMapsLoaded = useGameStore((s) => s.setMapsLoaded)
+  const currentMapId = useWorldStore((s) => s.currentMapId)
+  const setStoreMapsLoaded = useWorldStore((s) => s.setMapsLoaded)
 
   const activeCharacter = useCharacterStore((s) => s.getActiveCharacter())
 
@@ -58,7 +58,7 @@ export default function PixiAppSync(): React.ReactNode {
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
 
   // Config ref
-  const configRef = useRef<GameConfig | null>(null)
+  const configRef = useRef<WorldConfig | null>(null)
 
   // Keep refs in sync (avoid stale closure in ticker)
   useEffect(() => {
@@ -80,7 +80,7 @@ export default function PixiAppSync(): React.ReactNode {
     async function loadData() {
       try {
         clearMapsCache()
-        const config = await loadGameConfig()
+        const config = await loadWorldConfig()
         if (cancelled) return
 
         configRef.current = config
@@ -344,7 +344,7 @@ export default function PixiAppSync(): React.ReactNode {
     npc: NPC,
     spritesheet: CharacterSpritesheet,
     container: Container,
-    config: GameConfig
+    config: WorldConfig
   ): void {
     const idleTexture = getIdleTexture(spritesheet, npc.direction)
     const textures = getDirectionAnimation(spritesheet, npc.direction)
@@ -465,7 +465,7 @@ export default function PixiAppSync(): React.ReactNode {
     }
 
     function updatePathLine(nav: { isMoving: boolean; path: string[]; currentPathIndex: number } | undefined, x: number, y: number): void {
-      const map = getMaps()[useGameStore.getState().currentMapId]
+      const map = getMaps()[useWorldStore.getState().currentMapId]
       if (!map) return
 
       // Create a key to detect path changes

@@ -1,6 +1,6 @@
-import type { GameConfig, ObstacleTheme, ObstacleType } from '@/types'
+import type { WorldConfig, ObstacleTheme, ObstacleType } from '@/types'
 
-let cachedConfig: GameConfig | null = null
+let cachedConfig: WorldConfig | null = null
 
 export function parseColor(colorStr: string): number {
   if (colorStr.startsWith('0x')) {
@@ -20,7 +20,7 @@ function isObstacleThemeConfig(theme: unknown): theme is { building: ObstacleThe
  * Get obstacle theme for a specific type.
  * Handles migration from old format (single ObstacleTheme) to new format (ObstacleThemeConfig).
  */
-export function getObstacleTheme(config: GameConfig, type: ObstacleType): ObstacleTheme {
+export function getObstacleTheme(config: WorldConfig, type: ObstacleType): ObstacleTheme {
   const obstacleTheme = config.theme.obstacle
   if (isObstacleThemeConfig(obstacleTheme)) {
     return obstacleTheme[type]
@@ -29,22 +29,22 @@ export function getObstacleTheme(config: GameConfig, type: ObstacleType): Obstac
   return obstacleTheme
 }
 
-export async function loadGameConfig(): Promise<GameConfig> {
+export async function loadWorldConfig(): Promise<WorldConfig> {
   if (cachedConfig) {
     return cachedConfig
   }
 
-  const response = await fetch('/data/game-config.json')
+  const response = await fetch('/data/world-config.json')
   if (!response.ok) {
-    throw new Error(`Failed to load game config: ${response.status} ${response.statusText}`)
+    throw new Error(`Failed to load world config: ${response.status} ${response.statusText}`)
   }
   cachedConfig = await response.json()
   return cachedConfig!
 }
 
-export function getConfig(): GameConfig {
+export function getConfig(): WorldConfig {
   if (!cachedConfig) {
-    throw new Error('Game config not loaded. Call loadGameConfig() first.')
+    throw new Error('World config not loaded. Call loadWorldConfig() first.')
   }
   return cachedConfig
 }

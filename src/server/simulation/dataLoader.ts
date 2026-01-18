@@ -3,7 +3,7 @@ import path from 'path'
 import type {
   GameMap,
   Character,
-  GameConfig,
+  WorldConfig,
   MapConfigJson,
   MapsDataJson,
   CharacterConfig,
@@ -29,9 +29,9 @@ function parseColor(colorStr: string): number {
   return parseInt(colorStr.replace('#', ''), 16)
 }
 
-// Load game config
-export async function loadGameConfigServer(): Promise<GameConfig> {
-  const configPath = path.join(getPublicPath(), 'data', 'game-config.json')
+// Load world config
+export async function loadWorldConfigServer(): Promise<WorldConfig> {
+  const configPath = path.join(getPublicPath(), 'data', 'world-config.json')
   const content = await fs.readFile(configPath, 'utf-8')
   return JSON.parse(content)
 }
@@ -224,8 +224,8 @@ function generateGridNodesServer(
 }
 
 // Load and process maps
-export async function loadMapsServer(config?: GameConfig): Promise<Record<string, GameMap>> {
-  const cfg = config ?? (await loadGameConfigServer())
+export async function loadMapsServer(config?: WorldConfig): Promise<Record<string, GameMap>> {
+  const cfg = config ?? (await loadWorldConfigServer())
   const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
   const content = await fs.readFile(mapsPath, 'utf-8')
   const mapsData: MapsDataJson = JSON.parse(content)
@@ -240,7 +240,7 @@ export async function loadMapsServer(config?: GameConfig): Promise<Record<string
 }
 
 // Build map from config (server-side version)
-function buildMapFromConfigServer(mapConfig: MapConfigJson, config: GameConfig): GameMap {
+function buildMapFromConfigServer(mapConfig: MapConfigJson, config: WorldConfig): GameMap {
   const gridDefaults = config.grid
   const cols = mapConfig.grid.cols ?? gridDefaults.defaultCols
   const rows = mapConfig.grid.rows ?? gridDefaults.defaultRows
@@ -299,8 +299,8 @@ function buildMapFromConfigServer(mapConfig: MapConfigJson, config: GameConfig):
 }
 
 // Load characters
-export async function loadCharactersServer(config?: GameConfig): Promise<Character[]> {
-  const cfg = config ?? (await loadGameConfigServer())
+export async function loadCharactersServer(config?: WorldConfig): Promise<Character[]> {
+  const cfg = config ?? (await loadWorldConfigServer())
   const charactersPath = path.join(getPublicPath(), cfg.paths.charactersJson.replace(/^\//, ''))
   const content = await fs.readFile(charactersPath, 'utf-8')
   const charactersData: CharactersData = JSON.parse(content)
@@ -328,8 +328,8 @@ export async function loadCharactersServer(config?: GameConfig): Promise<Charact
 }
 
 // Extract NPC blocked nodes from maps data
-export async function loadNPCBlockedNodesServer(config?: GameConfig): Promise<Map<string, Set<string>>> {
-  const cfg = config ?? (await loadGameConfigServer())
+export async function loadNPCBlockedNodesServer(config?: WorldConfig): Promise<Map<string, Set<string>>> {
+  const cfg = config ?? (await loadWorldConfigServer())
   const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
   const content = await fs.readFile(mapsPath, 'utf-8')
   const mapsData: MapsDataJson = JSON.parse(content)
@@ -354,8 +354,8 @@ export async function loadNPCBlockedNodesServer(config?: GameConfig): Promise<Ma
 }
 
 // Load NPCs from maps data
-export async function loadNPCsServer(config?: GameConfig): Promise<NPC[]> {
-  const cfg = config ?? (await loadGameConfigServer())
+export async function loadNPCsServer(config?: WorldConfig): Promise<NPC[]> {
+  const cfg = config ?? (await loadWorldConfigServer())
   const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
   const content = await fs.readFile(mapsPath, 'utf-8')
   const mapsData: MapsDataJson = JSON.parse(content)
@@ -395,16 +395,16 @@ export async function loadNPCsServer(config?: GameConfig): Promise<NPC[]> {
 }
 
 // Load all game data needed for simulation
-export interface GameData {
-  config: GameConfig
+export interface WorldData {
+  config: WorldConfig
   maps: Record<string, GameMap>
   characters: Character[]
   npcs: NPC[]
   npcBlockedNodes: Map<string, Set<string>>
 }
 
-export async function loadGameDataServer(): Promise<GameData> {
-  const config = await loadGameConfigServer()
+export async function loadWorldDataServer(): Promise<WorldData> {
+  const config = await loadWorldConfigServer()
   const maps = await loadMapsServer(config)
   const characters = await loadCharactersServer(config)
   const npcs = await loadNPCsServer(config)

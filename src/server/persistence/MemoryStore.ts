@@ -1,6 +1,6 @@
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { GameTime } from '@/types'
+import type { WorldTime } from '@/types'
 
 /**
  * In-memory implementation of StateStore.
@@ -10,7 +10,7 @@ import type { GameTime } from '@/types'
 export class MemoryStore implements StateStore {
   private state: SerializedWorldState | null = null
   private characters: Map<string, SimCharacter> = new Map()
-  private time: GameTime | null = null
+  private time: WorldTime | null = null
   private currentMapId: string | null = null
 
   async saveState(state: SerializedWorldState): Promise<void> {
@@ -62,14 +62,14 @@ export class MemoryStore implements StateStore {
     }
   }
 
-  async saveTime(time: GameTime): Promise<void> {
+  async saveTime(time: WorldTime): Promise<void> {
     this.time = { ...time }
     if (this.state) {
       this.state.time = { ...time }
     }
   }
 
-  async loadTime(): Promise<GameTime | null> {
+  async loadTime(): Promise<WorldTime | null> {
     if (!this.time) return null
     return { ...this.time }
   }

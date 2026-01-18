@@ -1,4 +1,4 @@
-import type { GameMap, GameTime, Position, Direction, CrossMapRoute, NPC } from '@/types'
+import type { GameMap, WorldTime, Position, Direction, CrossMapRoute, NPC } from '@/types'
 import type {
   WorldState,
   SimCharacter,
@@ -10,7 +10,7 @@ import type {
 } from './types'
 import { serializeWorldState, createSimNPC } from './types'
 
-const INITIAL_TIME: GameTime = { hour: 8, minute: 0, day: 1 }
+const INITIAL_TIME: WorldTime = { hour: 8, minute: 0, day: 1 }
 const INITIAL_MAP_ID = 'home'
 
 export class WorldStateManager {
@@ -301,11 +301,11 @@ export class WorldStateManager {
   }
 
   // Time management
-  getTime(): GameTime {
+  getTime(): WorldTime {
     return this.state.time
   }
 
-  setTime(time: GameTime): void {
+  setTime(time: WorldTime): void {
     this.state.time = { ...time }
   }
 

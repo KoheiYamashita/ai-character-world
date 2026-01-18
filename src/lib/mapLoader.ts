@@ -1,7 +1,7 @@
 import type { GameMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson, NPCConfigJson } from '@/types'
 import type { NodeLabel, TileToPixelConfig } from '@/data/maps/grid'
 import { generateGridNodes, isPointInsideObstacle, tileToPixelObstacle, getGridDefaults } from '@/data/maps/grid'
-import { isConfigLoaded, getConfig, parseColor } from './gameConfigLoader'
+import { isConfigLoaded, getConfig, parseColor } from './worldConfigLoader'
 
 const DEFAULT_MAPS_PATH = '/data/maps.json'
 

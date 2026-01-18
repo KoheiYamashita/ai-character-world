@@ -1,12 +1,12 @@
 import { Graphics, Text, TextStyle, Container } from 'pixi.js'
 import type { PathNode, Obstacle, WallSide } from '@/types'
-import type { GameConfig, ObstacleTheme } from '@/types/config'
-import { parseColor, getObstacleTheme } from './gameConfigLoader'
+import type { WorldConfig, ObstacleTheme } from '@/types/config'
+import { parseColor, getObstacleTheme } from './worldConfigLoader'
 
 /**
  * ノードタイプに対応するテーマを取得
  */
-export function getNodeTheme(nodeType: string, nodes: GameConfig['theme']['nodes']) {
+export function getNodeTheme(nodeType: string, nodes: WorldConfig['theme']['nodes']) {
   switch (nodeType) {
     case 'entrance':
       return nodes.entrance
@@ -20,7 +20,7 @@ export function getNodeTheme(nodeType: string, nodes: GameConfig['theme']['nodes
 /**
  * ノードを描画
  */
-export function renderNode(graphics: Graphics, node: PathNode, config: GameConfig): void {
+export function renderNode(graphics: Graphics, node: PathNode, config: WorldConfig): void {
   const theme = getNodeTheme(node.type, config.theme.nodes)
   const alpha = 'alpha' in theme ? theme.alpha : 1
 
@@ -35,7 +35,7 @@ export function renderNode(graphics: Graphics, node: PathNode, config: GameConfi
 /**
  * 障害物を描画（building/zone両対応）
  */
-export function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: GameConfig): void {
+export function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: WorldConfig): void {
   const theme = getObstacleTheme(config, obstacle.type)
 
   if (obstacle.type === 'zone') {
@@ -187,7 +187,7 @@ function drawWallSide(
 /**
  * 障害物ラベルのテキストを作成
  */
-export function createObstacleLabel(obstacle: Obstacle, config: GameConfig): Text {
+export function createObstacleLabel(obstacle: Obstacle, config: WorldConfig): Text {
   const PADDING = 4
   const MIN_FONT_SIZE = 6
   const MAX_FONT_SIZE = 16
@@ -232,7 +232,7 @@ export function renderEntranceConnections(
   container: Container,
   entranceNode: PathNode,
   allNodes: PathNode[],
-  config: GameConfig
+  config: WorldConfig
 ): void {
   const lineTheme = config.theme.nodes.connectionLine
   for (const connectedId of entranceNode.connectedTo) {

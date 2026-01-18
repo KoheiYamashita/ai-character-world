@@ -1,5 +1,5 @@
 import type { CharacterConfig, CharactersData, Character, Position } from '@/types'
-import { isConfigLoaded, getConfig } from './gameConfigLoader'
+import { isConfigLoaded, getConfig } from './worldConfigLoader'
 
 const DEFAULT_CHARACTERS_PATH = '/data/characters.json'
 

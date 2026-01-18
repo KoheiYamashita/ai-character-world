@@ -1,5 +1,5 @@
 export * from './map'
 export * from './character'
-export * from './game'
+export * from './world'
 export * from './config'
 export * from './npc'

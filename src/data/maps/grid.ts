@@ -1,5 +1,5 @@
 import type { PathNode, Obstacle, WallSide, DoorConfig } from '@/types'
-import { isConfigLoaded, getConfig } from '@/lib/gameConfigLoader'
+import { isConfigLoaded, getConfig } from '@/lib/worldConfigLoader'
 
 export interface GridConfig {
   prefix: string
@@ -311,7 +311,7 @@ function filterConnectionsByZoneWalls(
   })
 }
 
-// Defaults matching game-config.json
+// Defaults matching world-config.json
 const FALLBACK_DEFAULTS = {
   cols: 12,
   rows: 9,

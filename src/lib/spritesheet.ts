@@ -1,8 +1,8 @@
 import { Assets, Texture, Spritesheet } from 'pixi.js'
 import type { SpriteConfig, Direction } from '@/types'
-import { isConfigLoaded, getConfig } from './gameConfigLoader'
+import { isConfigLoaded, getConfig } from './worldConfigLoader'
 
-// Default fallbacks (matches game-config.json)
+// Default fallbacks (matches world-config.json)
 const DEFAULT_ANIMATION_SEQUENCE = [0, 1, 2, 1]
 const DEFAULT_IDLE_FRAME = 1
 

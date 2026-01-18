@@ -1,7 +1,16 @@
 # AI Agent World
 
 ## 概要
-2Dマップ上でキャラクターがノードに沿って移動するシミュレーター
+キャラクターエージェントが行動できる仮想世界をシミュレートし、エージェントの記憶・経験を蓄積していくシステム。
+
+### 目的
+- AIエージェントが自律的に行動できる2D仮想世界の提供
+- エージェントの行動履歴・経験の記録と記憶の形成
+- エージェント同士やNPCとのインタラクションを通じた経験の蓄積
+
+### 技術的実現
+- 2Dマップ上でキャラクターがノードに沿って移動するシミュレーション基盤
+- サーバーサイドでのシミュレーション実行とSSEによるクライアント同期
 
 ## 技術スタック
 - Next.js 15 (App Router) + TypeScript
@@ -81,7 +90,7 @@
 - unmount時や新規遷移開始時に`clearTransitionIntervals()`でクリーンアップ
 
 ### 状態管理 (Zustand)
-- `gameStore` - 現在マップ、時間、遷移状態
+- `worldStore` - 現在マップ、時間、遷移状態
 - `characterStore` - キャラクター情報（位置、空腹、所持金）
 - `npcStore` - NPC情報
 
@@ -98,8 +107,8 @@
 src/
 ├── app/                    # Next.js App Router
 ├── components/
-│   ├── game/              # PixiJS関連
-│   │   ├── GameCanvas.tsx # dynamic importラッパー
+│   ├── world/             # PixiJS関連
+│   │   ├── WorldCanvas.tsx # dynamic importラッパー
 │   │   └── PixiAppSync.tsx # SSE同期・描画（サーバーモード）
 │   ├── panels/            # UIパネル
 │   └── ui/                # shadcn/ui
@@ -113,7 +122,7 @@ src/
 │   ├── spritesheet.ts     # スプライトシート読み込み・テクスチャ生成
 │   ├── characterLoader.ts # JSON設定からキャラクター生成
 │   ├── mapLoader.ts       # マップJSON読み込み・障害物バリデーション
-│   └── gameConfigLoader.ts # ゲーム設定JSON読み込み
+│   └── worldConfigLoader.ts # ワールド設定JSON読み込み
 └── types/                 # 型定義
 
 public/
@@ -121,7 +130,7 @@ public/
 └── data/
     ├── characters.json    # キャラクター設定
     ├── maps.json          # マップ定義（障害物、entrance含む）
-    └── game-config.json   # ゲーム設定（テーマ、タイミング等）
+    └── world-config.json  # ワールド設定（テーマ、タイミング等）
 
 scripts/
 ├── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
@@ -148,7 +157,7 @@ scripts/
 - 壁を横切る斜め接続は自動フィルタリング
 - 描画と探索で同じノードリストを使用（`grid.ts`が正本、`PixiAppSync.tsx`は追加フィルタなし）
 - キャッシュ管理: `mapLoader.ts`が一元管理、`clearMapCache()`でHMR時にリセット
-- デフォルト値: `getGridDefaults()`で一元管理（game-config.jsonから取得、未ロード時はフォールバック）
+- デフォルト値: `getGridDefaults()`で一元管理（world-config.jsonから取得、未ロード時はフォールバック）
 
 ### キャラクター移動
 - ランダム自動移動

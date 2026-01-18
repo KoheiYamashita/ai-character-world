@@ -1,7 +1,7 @@
 import type {
   Position,
   Direction,
-  GameTime,
+  WorldTime,
   Character,
   CrossMapRoute,
   SpriteConfig,
@@ -68,7 +68,7 @@ export interface WorldState {
   characters: Map<string, SimCharacter>
   npcs: Map<string, SimNPC>
   currentMapId: string
-  time: GameTime
+  time: WorldTime
   isPaused: boolean
   transition: SimTransitionState
   tick: number // For client reconciliation
@@ -87,7 +87,7 @@ export interface SerializedWorldState {
   characters: Record<string, SimCharacter>
   npcs: Record<string, SimNPC>
   currentMapId: string
-  time: GameTime
+  time: WorldTime
   isPaused: boolean
   transition: SimTransitionState
   tick: number

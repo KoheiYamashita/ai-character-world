@@ -1,19 +1,19 @@
 import { create } from 'zustand'
-import type { GameTime, TransitionState } from '@/types'
+import type { WorldTime, TransitionState } from '@/types'
 
 // Initial state defaults (will be overridden when config loads in PixiAppSync)
 const INITIAL_MAP_ID = 'town'
-const INITIAL_TIME: GameTime = { hour: 8, minute: 0, day: 1 }
+const INITIAL_TIME: WorldTime = { hour: 8, minute: 0, day: 1 }
 
-interface GameStore {
+interface WorldStore {
   currentMapId: string
-  time: GameTime
+  time: WorldTime
   isPaused: boolean
   transition: TransitionState
   mapsLoaded: boolean
 
   setCurrentMap: (mapId: string) => void
-  setTime: (time: GameTime) => void
+  setTime: (time: WorldTime) => void
   advanceTime: (minutes: number) => void
   togglePause: () => void
   startTransition: (fromMapId: string, toMapId: string) => void
@@ -22,7 +22,7 @@ interface GameStore {
   setMapsLoaded: (loaded: boolean) => void
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
+export const useWorldStore = create<WorldStore>((set, get) => ({
   currentMapId: INITIAL_MAP_ID,
   time: INITIAL_TIME,
   isPaused: false,

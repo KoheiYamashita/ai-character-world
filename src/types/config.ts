@@ -93,7 +93,7 @@ export interface PathsConfig {
   charactersJson: string
 }
 
-export interface GameConfig {
+export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
   character: CharacterRenderConfig

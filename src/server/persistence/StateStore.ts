@@ -1,5 +1,5 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { GameTime } from '@/types'
+import type { WorldTime } from '@/types'
 
 /**
  * Abstract interface for state persistence.
@@ -41,12 +41,12 @@ export interface StateStore {
   /**
    * Save game time
    */
-  saveTime(time: GameTime): Promise<void>
+  saveTime(time: WorldTime): Promise<void>
 
   /**
    * Load game time
    */
-  loadTime(): Promise<GameTime | null>
+  loadTime(): Promise<WorldTime | null>
 
   /**
    * Save current map ID

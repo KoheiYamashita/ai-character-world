@@ -1,5 +1,5 @@
 import type { Position, Direction } from '@/types'
-import { isConfigLoaded, getConfig } from './gameConfigLoader'
+import { isConfigLoaded, getConfig } from './worldConfigLoader'
 
 export function lerp(start: number, end: number, t: number): number {
   return start + (end - start) * t
@@ -37,7 +37,7 @@ export function getDistance(from: Position, to: Position): number {
   return Math.sqrt(dx * dx + dy * dy)
 }
 
-// Default fallback speed (matches game-config.json)
+// Default fallback speed (matches world-config.json)
 const DEFAULT_MOVEMENT_SPEED = 150
 
 export function getMovementSpeed(): number {
