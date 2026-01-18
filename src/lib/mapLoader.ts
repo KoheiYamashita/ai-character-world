@@ -1,4 +1,4 @@
-import type { GameMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson } from '@/types'
+import type { GameMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson, NPCConfigJson } from '@/types'
 import type { NodeLabel, TileToPixelConfig } from '@/data/maps/grid'
 import { generateGridNodes, isPointInsideObstacle, tileToPixelObstacle, getGridDefaults } from '@/data/maps/grid'
 import { isConfigLoaded, getConfig, parseColor } from './gameConfigLoader'
@@ -218,10 +218,15 @@ export function buildMapFromConfig(config: MapConfigJson): GameMap {
 
 export async function loadMaps(): Promise<Record<string, GameMap>> {
   if (cachedMaps) {
+    // Ensure NPC configs are also cached (might be cleared on HMR)
+    if (!cachedMapConfigs) {
+      cachedMapConfigs = await loadMapConfigs()
+    }
     return cachedMaps
   }
 
   const configs = await loadMapConfigs()
+  cachedMapConfigs = configs  // Cache configs for NPC loading
   const mapsRecord: Record<string, GameMap> = {}
 
   for (const config of configs) {
@@ -234,15 +239,49 @@ export async function loadMaps(): Promise<Record<string, GameMap>> {
 
 export function clearMapCache(): void {
   cachedMaps = null
+  cachedMapConfigs = null
 }
 
 export function getCachedMaps(): Record<string, GameMap> {
   if (!cachedMaps) {
-    throw new Error('Maps not loaded. Call loadMaps() first.')
+    console.warn('Maps not loaded yet')
+    return {}
   }
   return cachedMaps
 }
 
 export function isMapsLoaded(): boolean {
   return cachedMaps !== null
+}
+
+// NPC configs cache (separate from map cache since we need raw configs)
+let cachedMapConfigs: MapConfigJson[] | null = null
+
+export async function loadMapConfigsWithCache(): Promise<MapConfigJson[]> {
+  if (cachedMapConfigs) {
+    return cachedMapConfigs
+  }
+  cachedMapConfigs = await loadMapConfigs()
+  return cachedMapConfigs
+}
+
+export function getNPCConfigsForMap(mapId: string): NPCConfigJson[] {
+  if (!cachedMapConfigs) {
+    return []
+  }
+  const mapConfig = cachedMapConfigs.find((m) => m.id === mapId)
+  return mapConfig?.npcs ?? []
+}
+
+export function getAllNPCConfigs(): { mapId: string; npcs: NPCConfigJson[] }[] {
+  if (!cachedMapConfigs) {
+    return []
+  }
+  return cachedMapConfigs
+    .filter((m) => m.npcs && m.npcs.length > 0)
+    .map((m) => ({ mapId: m.id, npcs: m.npcs! }))
+}
+
+export function clearMapConfigCache(): void {
+  cachedMapConfigs = null
 }

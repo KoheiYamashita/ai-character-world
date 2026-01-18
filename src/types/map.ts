@@ -1,3 +1,5 @@
+import type { NPCConfigJson } from './npc'
+
 export type NodeType = 'waypoint' | 'entrance' | 'spawn'
 
 export interface PathNode {
@@ -99,6 +101,7 @@ export interface MapConfigJson {
   labels: NodeLabelJson[]
   entrances: EntranceConfigJson[]
   obstacles?: ObstacleConfigJson[]
+  npcs?: NPCConfigJson[]
 }
 
 export interface MapsDataJson {
@@ -114,18 +117,4 @@ export interface RouteSegment {
 
 export interface CrossMapRoute {
   segments: RouteSegment[]
-}
-
-export interface CrossMapNavigationResult {
-  success: boolean
-  error?: string
-  cancelled?: boolean
-}
-
-export interface CrossMapNavigationState {
-  isActive: boolean
-  targetMapId: string
-  targetNodeId: string
-  route: CrossMapRoute
-  currentSegmentIndex: number
 }

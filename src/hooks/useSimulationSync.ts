@@ -11,7 +11,6 @@ interface SimulationSyncState {
   error: string | null
   lastTick: number
   reconnectAttempts: number
-  // Server character states including navigation
   serverCharacters: Record<string, SimCharacter>
 }
 
@@ -21,19 +20,22 @@ interface UseSimulationSyncOptions {
   reconnectDelay?: number
 }
 
-// Convert SimCharacter to client Character format
-function simCharacterToCharacter(simChar: SimCharacter, existingChar?: Character): Character {
+const INITIAL_STATE: SimulationSyncState = {
+  isConnected: false,
+  isConnecting: false,
+  error: null,
+  lastTick: 0,
+  reconnectAttempts: 0,
+  serverCharacters: {},
+}
+
+// Convert SimCharacter from server to client Character
+// Server now includes sprite info from characters.json
+function simCharacterToCharacter(simChar: SimCharacter): Character {
   return {
     id: simChar.id,
     name: simChar.name,
-    sprite: existingChar?.sprite ?? {
-      sheetUrl: '/assets/sprites/kanon.png',
-      frameWidth: 96,
-      frameHeight: 96,
-      cols: 3,
-      rows: 4,
-      rowMapping: { down: 0, left: 1, right: 2, up: 3 },
-    },
+    sprite: simChar.sprite,
     money: simChar.money,
     hunger: simChar.hunger,
     currentMapId: simChar.currentMapId,
@@ -50,14 +52,7 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
     reconnectDelay = 3000,
   } = options
 
-  const [state, setState] = useState<SimulationSyncState>({
-    isConnected: false,
-    isConnecting: false,
-    error: null,
-    lastTick: 0,
-    reconnectAttempts: 0,
-    serverCharacters: {},
-  })
+  const [state, setState] = useState<SimulationSyncState>(INITIAL_STATE)
 
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -69,6 +64,7 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
   const updatePosition = useCharacterStore((s) => s.updatePosition)
   const updateDirection = useCharacterStore((s) => s.updateDirection)
   const getCharacter = useCharacterStore((s) => s.getCharacter)
+  const setActiveCharacter = useCharacterStore((s) => s.setActiveCharacter)
 
   const setCurrentMap = useGameStore((s) => s.setCurrentMap)
   const setTime = useGameStore((s) => s.setTime)
@@ -80,14 +76,12 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
     setTime(worldState.time)
 
     // Update characters
+    const serverCharacterIds = Object.keys(worldState.characters)
     for (const [id, simChar] of Object.entries(worldState.characters)) {
       const existingChar = getCharacter(id)
 
-      if (!existingChar) {
-        // Add new character
-        addCharacter(simCharacterToCharacter(simChar))
-      } else {
-        // Update existing character position and direction
+      if (existingChar) {
+        // Update existing character
         updatePosition(id, simChar.position)
         updateDirection(id, simChar.direction)
         updateCharacter(id, {
@@ -96,7 +90,16 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
           money: simChar.money,
           hunger: simChar.hunger,
         })
+      } else {
+        // Add new character (sprite info comes from server)
+        addCharacter(simCharacterToCharacter(simChar))
       }
+    }
+
+    // Set active character if not already set (first character from server)
+    const currentActiveId = useCharacterStore.getState().activeCharacterId
+    if (!currentActiveId && serverCharacterIds.length > 0) {
+      setActiveCharacter(serverCharacterIds[0])
     }
 
     setState((prev) => ({
@@ -107,6 +110,7 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
   }, [
     addCharacter,
     getCharacter,
+    setActiveCharacter,
     setCurrentMap,
     setTime,
     updateCharacter,
@@ -213,17 +217,14 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
 
   // Auto-connect on mount - use setTimeout to avoid synchronous setState in effect body
   useEffect(() => {
-    if (autoConnect) {
-      // Defer connect to avoid React's warning about synchronous setState in effects
-      const timeoutId = setTimeout(() => {
-        connect()
-      }, 0)
-      return () => {
-        clearTimeout(timeoutId)
-        disconnect()
-      }
+    if (!autoConnect) {
+      return disconnect
     }
+
+    // Defer connect to avoid React's warning about synchronous setState in effects
+    const timeoutId = setTimeout(connect, 0)
     return () => {
+      clearTimeout(timeoutId)
       disconnect()
     }
   }, [autoConnect, connect, disconnect])

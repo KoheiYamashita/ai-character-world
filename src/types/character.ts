@@ -44,12 +44,3 @@ export interface Character {
   position: Position
   direction: Direction
 }
-
-export interface NavigationState {
-  isMoving: boolean
-  path: string[]
-  currentPathIndex: number
-  progress: number
-  startPosition: Position | null
-  targetPosition: Position | null
-}

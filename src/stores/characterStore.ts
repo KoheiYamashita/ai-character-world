@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { Character, Position, Direction } from '@/types'
-import { defaultCharacter } from '@/data/characters'
 
 interface CharacterStore {
   characters: Map<string, Character>
@@ -20,8 +19,9 @@ interface CharacterStore {
 }
 
 export const useCharacterStore = create<CharacterStore>((set, get) => ({
-  characters: new Map([[defaultCharacter.id, defaultCharacter]]),
-  activeCharacterId: defaultCharacter.id,
+  // Start with empty state - characters will be loaded from server via SSE
+  characters: new Map<string, Character>(),
+  activeCharacterId: null,
 
   addCharacter: (character) =>
     set((state) => {

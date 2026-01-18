@@ -326,17 +326,45 @@ export async function loadCharactersServer(config?: GameConfig): Promise<Charact
   return characters
 }
 
+// Extract NPC blocked nodes from maps data
+export async function loadNPCBlockedNodesServer(config?: GameConfig): Promise<Map<string, Set<string>>> {
+  const cfg = config ?? (await loadGameConfigServer())
+  const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
+  const content = await fs.readFile(mapsPath, 'utf-8')
+  const mapsData: MapsDataJson = JSON.parse(content)
+
+  const blockedNodesPerMap = new Map<string, Set<string>>()
+
+  for (const mapConfig of mapsData.maps) {
+    if (mapConfig.npcs && mapConfig.npcs.length > 0) {
+      const blockedNodes = new Set<string>()
+      for (const npc of mapConfig.npcs) {
+        if (npc.spawnNodeId) {
+          blockedNodes.add(npc.spawnNodeId)
+        }
+      }
+      if (blockedNodes.size > 0) {
+        blockedNodesPerMap.set(mapConfig.id, blockedNodes)
+      }
+    }
+  }
+
+  return blockedNodesPerMap
+}
+
 // Load all game data needed for simulation
 export interface GameData {
   config: GameConfig
   maps: Record<string, GameMap>
   characters: Character[]
+  npcBlockedNodes: Map<string, Set<string>>
 }
 
 export async function loadGameDataServer(): Promise<GameData> {
   const config = await loadGameConfigServer()
   const maps = await loadMapsServer(config)
   const characters = await loadCharactersServer(config)
+  const npcBlockedNodes = await loadNPCBlockedNodesServer(config)
 
-  return { config, maps, characters }
+  return { config, maps, characters, npcBlockedNodes }
 }

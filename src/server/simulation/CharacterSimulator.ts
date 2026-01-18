@@ -1,7 +1,7 @@
 import type { Position, GameMap, PathNode, RouteSegment } from '@/types'
 import type { SimCharacter, SimulationConfig, SimCrossMapNavState } from './types'
 import type { WorldStateManager } from './WorldState'
-import { findPath } from '@/lib/pathfinding'
+import { findPathAvoidingNodes } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance } from '@/lib/movement'
 import { planCrossMapRoute, hasMoreSegments } from '@/lib/crossMapNavigation'
 
@@ -214,8 +214,12 @@ export class CharacterSimulator {
   }
 
   private moveToRandomNodeInMap(character: SimCharacter, map: GameMap): void {
+    const npcBlockedNodes = this.worldState.getNPCBlockedNodes(character.currentMapId)
+
     const shouldGoToEntrance = Math.random() < this.config.entranceProbability
-    const otherNodes = map.nodes.filter((n) => n.id !== character.currentNodeId)
+    const otherNodes = map.nodes.filter((n) =>
+      n.id !== character.currentNodeId && !npcBlockedNodes.has(n.id)
+    )
     const nonEntranceNodes = otherNodes.filter((n) => n.type !== 'entrance')
 
     const availableNodes =
@@ -227,7 +231,7 @@ export class CharacterSimulator {
     }
 
     const randomNode = availableNodes[Math.floor(Math.random() * availableNodes.length)]
-    const path = findPath(map, character.currentNodeId, randomNode.id)
+    const path = findPathAvoidingNodes(map, character.currentNodeId, randomNode.id, npcBlockedNodes)
 
     if (path.length <= 1) {
       this.scheduleNextMove(character.id)
@@ -239,12 +243,23 @@ export class CharacterSimulator {
 
   private initiateCrossMapNavigation(character: SimCharacter, targetMapId: string, targetNodeId: string): void {
     const maps = this.worldState.getMaps()
+
+    // Build blocked nodes map for all maps
+    const blockedNodesPerMap = new Map<string, Set<string>>()
+    for (const mapId of Object.keys(maps)) {
+      const blockedNodes = this.worldState.getNPCBlockedNodes(mapId)
+      if (blockedNodes.size > 0) {
+        blockedNodesPerMap.set(mapId, blockedNodes)
+      }
+    }
+
     const route = planCrossMapRoute(
       maps,
       character.currentMapId,
       character.currentNodeId,
       targetMapId,
-      targetNodeId
+      targetNodeId,
+      blockedNodesPerMap
     )
 
     if (!route || route.segments.length === 0) {

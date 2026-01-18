@@ -1,5 +1,5 @@
 import type { GameMap, PathNode, CrossMapRoute, RouteSegment } from '@/types'
-import { findPath } from './pathfinding'
+import { findPathAvoidingNodes } from './pathfinding'
 
 interface MapConnection {
   fromMapId: string
@@ -113,13 +113,15 @@ export function findMapSequence(
 
 /**
  * Plan a complete cross-map route from current position to target
+ * @param blockedNodesPerMap - Map of mapId to set of blocked node IDs (e.g., NPC positions)
  */
 export function planCrossMapRoute(
   maps: Record<string, GameMap>,
   currentMapId: string,
   currentNodeId: string,
   targetMapId: string,
-  targetNodeId: string
+  targetNodeId: string,
+  blockedNodesPerMap: Map<string, Set<string>> = new Map()
 ): CrossMapRoute | null {
   // Build the map graph
   const graph = buildMapGraph(maps)
@@ -162,8 +164,11 @@ export function planCrossMapRoute(
       endNodeId = step.exitEntranceId!
     }
 
-    // Find path within this map
-    const path = findPath(map, startNodeId, endNodeId)
+    // Get blocked nodes for this map (or empty set if none)
+    const blockedNodes = blockedNodesPerMap.get(step.mapId) ?? new Set<string>()
+
+    // Find path within this map, avoiding blocked nodes
+    const path = findPathAvoidingNodes(map, startNodeId, endNodeId, blockedNodes)
     if (path.length === 0) {
       console.error(`No path found in map "${step.mapId}" from "${startNodeId}" to "${endNodeId}"`)
       return null

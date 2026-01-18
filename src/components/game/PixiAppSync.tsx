@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
-import { useGameStore, useCharacterStore } from '@/stores'
+import { useGameStore, useCharacterStore, useNPCStore } from '@/stores'
 import { getMaps, loadMaps, clearMapsCache } from '@/data/maps'
+import { getNPCConfigsForMap } from '@/lib/mapLoader'
+import { loadNPCsFromMapConfig } from '@/lib/npcLoader'
 import { loadGameConfig, parseColor } from '@/lib/gameConfigLoader'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
 import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections } from '@/lib/pixiRenderers'
 import { useSimulationSync } from '@/hooks'
-import type { Direction, GameConfig, PathNode } from '@/types'
+import type { Direction, GameConfig, PathNode, NPC } from '@/types'
 
 export default function PixiAppSync(): React.ReactNode {
   // Store selectors
@@ -16,6 +18,10 @@ export default function PixiAppSync(): React.ReactNode {
   const setStoreMapsLoaded = useGameStore((s) => s.setMapsLoaded)
 
   const activeCharacter = useCharacterStore((s) => s.getActiveCharacter())
+
+  const addNPC = useNPCStore((s) => s.addNPC)
+  const getNPCsByMap = useNPCStore((s) => s.getNPCsByMap)
+  const clearNPCs = useNPCStore((s) => s.clearNPCs)
 
   // Connect to simulation server - get serverCharacters for navigation state
   const { isConnected, isConnecting, error, serverCharacters } = useSimulationSync()
@@ -27,9 +33,15 @@ export default function PixiAppSync(): React.ReactNode {
   const spritesheetRef = useRef<CharacterSpritesheet | null>(null)
   const pathLineRef = useRef<Graphics | null>(null)
 
+  // NPC refs (static display only)
+  const npcSpritesRef = useRef<Map<string, AnimatedSprite>>(new Map())
+  const npcSpritesheetsRef = useRef<Map<string, CharacterSpritesheet>>(new Map())
+  const npcContainerRef = useRef<Container | null>(null)
+
   // State refs
   const initializingRef = useRef(false)
   const currentDirectionRef = useRef<Direction>('down')
+  const currentMapIdRef = useRef(currentMapId)
   const serverCharactersRef = useRef(serverCharacters)
   const lastPathKeyRef = useRef<string>('')  // For path change detection
 
@@ -37,15 +49,20 @@ export default function PixiAppSync(): React.ReactNode {
   const [isReady, setIsReady] = useState(false)
   const [spritesheetLoaded, setSpritesheetLoaded] = useState(false)
   const [localMapsLoaded, setLocalMapsLoaded] = useState(false)
+  const [npcsLoaded, setNpcsLoaded] = useState(false)
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
 
   // Config ref
   const configRef = useRef<GameConfig | null>(null)
 
-  // Keep serverCharactersRef in sync (avoid stale closure in ticker)
+  // Keep refs in sync (avoid stale closure in ticker)
   useEffect(() => {
     serverCharactersRef.current = serverCharacters
   }, [serverCharacters])
+
+  useEffect(() => {
+    currentMapIdRef.current = currentMapId
+  }, [currentMapId])
 
   // Load config and maps for rendering (server will handle simulation)
   useEffect(() => {
@@ -80,6 +97,46 @@ export default function PixiAppSync(): React.ReactNode {
       cancelled = true
     }
   }, [setStoreMapsLoaded])
+
+  // Load NPCs when maps are loaded
+  useEffect(() => {
+    if (!localMapsLoaded) return
+
+    // Clear existing NPCs
+    clearNPCs()
+    setNpcsLoaded(false)
+
+    // Load NPCs for all maps
+    let allMaps: Record<string, import('@/types').GameMap>
+    try {
+      allMaps = getMaps()
+    } catch {
+      console.warn('Maps not yet available for NPC loading')
+      return
+    }
+
+    if (Object.keys(allMaps).length === 0) {
+      console.warn('[NPC] No maps available yet')
+      return
+    }
+
+    let totalNpcsLoaded = 0
+    for (const mapId of Object.keys(allMaps)) {
+      const npcConfigs = getNPCConfigsForMap(mapId)
+      if (npcConfigs.length > 0) {
+        const map = allMaps[mapId]
+        const npcs = loadNPCsFromMapConfig(mapId, npcConfigs, map)
+        for (const npc of npcs) {
+          addNPC(npc)
+          totalNpcsLoaded++
+        }
+      }
+    }
+
+    console.log(`[NPC] Loaded ${totalNpcsLoaded} NPCs`)
+    setNpcsLoaded(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localMapsLoaded])
 
   // Initialize PixiJS
   useEffect(() => {
@@ -242,7 +299,58 @@ export default function PixiAppSync(): React.ReactNode {
       charGraphics.y = activeCharacter.position.y
       app.stage.addChild(charGraphics)
     }
-  }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded, localMapsLoaded])
+
+    // NPC container
+    const npcContainer = new Container()
+    npcContainer.label = 'npcContainer'
+    app.stage.addChild(npcContainer)
+    npcContainerRef.current = npcContainer
+
+    // Clear old NPC sprites
+    npcSpritesRef.current.clear()
+
+    // Create NPC sprites for current map
+    const npcsOnMap = getNPCsByMap(currentMapId)
+    for (const npc of npcsOnMap) {
+      const cachedSpritesheet = npcSpritesheetsRef.current.get(npc.id)
+      if (cachedSpritesheet) {
+        createNPCSprite(npc, cachedSpritesheet, npcContainer, config)
+      } else {
+        loadCharacterSpritesheet(npc.sprite).then((spritesheet) => {
+          npcSpritesheetsRef.current.set(npc.id, spritesheet)
+          if (npcContainerRef.current && currentMapIdRef.current === npc.mapId) {
+            createNPCSprite(npc, spritesheet, npcContainerRef.current, configRef.current!)
+          }
+        }).catch((err) => {
+          console.error(`[NPC] Failed to load spritesheet for ${npc.id}:`, err)
+        })
+      }
+    }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded, localMapsLoaded, npcsLoaded])
+
+  // Helper function to create NPC sprite (static display only)
+  function createNPCSprite(
+    npc: NPC,
+    spritesheet: CharacterSpritesheet,
+    container: Container,
+    config: GameConfig
+  ): void {
+    const idleTexture = getIdleTexture(spritesheet, npc.direction)
+    const textures = getDirectionAnimation(spritesheet, npc.direction)
+    const sprite = new AnimatedSprite(textures)
+    sprite.anchor.set(0.5, 0.5)
+    sprite.scale.set(config.character.scale)
+    sprite.x = npc.position.x
+    sprite.y = npc.position.y
+    sprite.label = `npc-${npc.id}`
+    sprite.texture = idleTexture
+    sprite.stop()
+
+    npcSpritesRef.current.set(npc.id, sprite)
+    container.addChild(sprite)
+  }
 
   // Clear path line (safe removal with parent check)
   const clearPathLine = useCallback((): void => {

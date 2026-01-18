@@ -15,6 +15,7 @@ const INITIAL_MAP_ID = 'home'
 export class WorldStateManager {
   private state: WorldState
   private maps: Record<string, GameMap> = {}
+  private npcBlockedNodes: Map<string, Set<string>> = new Map()
 
   constructor() {
     this.state = {
@@ -47,6 +48,19 @@ export class WorldStateManager {
 
   getMap(mapId: string): GameMap | undefined {
     return this.maps[mapId]
+  }
+
+  // NPC blocked nodes management
+  setNPCBlockedNodes(mapId: string, nodeIds: Set<string>): void {
+    this.npcBlockedNodes.set(mapId, nodeIds)
+  }
+
+  getNPCBlockedNodes(mapId: string): Set<string> {
+    return this.npcBlockedNodes.get(mapId) ?? new Set()
+  }
+
+  clearNPCBlockedNodes(): void {
+    this.npcBlockedNodes.clear()
   }
 
   // Get current state (for read-only access)

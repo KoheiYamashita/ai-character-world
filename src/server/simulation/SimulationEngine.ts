@@ -30,12 +30,21 @@ export class SimulationEngine {
     maps: Record<string, GameMap>,
     characters: Character[],
     initialMapId?: string,
-    initialTime?: GameTime
+    initialTime?: GameTime,
+    npcBlockedNodes?: Map<string, Set<string>>
   ): Promise<void> {
     this.worldState.initialize(maps, initialMapId)
 
     if (initialTime) {
       this.worldState.setTime(initialTime)
+    }
+
+    // Set NPC blocked nodes for pathfinding
+    if (npcBlockedNodes) {
+      for (const [mapId, nodeIds] of npcBlockedNodes) {
+        this.worldState.setNPCBlockedNodes(mapId, nodeIds)
+      }
+      console.log(`[SimulationEngine] Loaded NPC blocked nodes for ${npcBlockedNodes.size} maps`)
     }
 
     // Add characters to world state

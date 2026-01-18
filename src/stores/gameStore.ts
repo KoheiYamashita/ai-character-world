@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { GameTime, TransitionState } from '@/types'
 
-// Initial state defaults (will be overridden when config loads in PixiApp)
+// Initial state defaults (will be overridden when config loads in PixiAppSync)
 const INITIAL_MAP_ID = 'town'
 const INITIAL_TIME: GameTime = { hour: 8, minute: 0, day: 1 }
 

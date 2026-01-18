@@ -83,7 +83,7 @@
 ### 状態管理 (Zustand)
 - `gameStore` - 現在マップ、時間、遷移状態
 - `characterStore` - キャラクター情報（位置、空腹、所持金）
-- `navigationStore` - 移動状態（パス、進捗、開始/目標位置）
+- `npcStore` - NPC情報
 
 ### スプライトシステム
 - 行ベースのスプライトシート（3列×4行、各方向3フレーム）
@@ -100,7 +100,7 @@ src/
 ├── components/
 │   ├── game/              # PixiJS関連
 │   │   ├── GameCanvas.tsx # dynamic importラッパー
-│   │   └── PixiApp.tsx    # メイン描画・ゲームロジック
+│   │   └── PixiAppSync.tsx # SSE同期・描画（サーバーモード）
 │   ├── panels/            # UIパネル
 │   └── ui/                # shadcn/ui
 ├── stores/                # Zustand stores
@@ -146,7 +146,7 @@ scripts/
   - Zone壁上のノード（扉位置を除く）
 - Zone領域内の移動可能ノードは生成される
 - 壁を横切る斜め接続は自動フィルタリング
-- 描画と探索で同じノードリストを使用（`grid.ts`が正本、`PixiApp.tsx`は追加フィルタなし）
+- 描画と探索で同じノードリストを使用（`grid.ts`が正本、`PixiAppSync.tsx`は追加フィルタなし）
 - キャッシュ管理: `mapLoader.ts`が一元管理、`clearMapCache()`でHMR時にリセット
 - デフォルト値: `getGridDefaults()`で一元管理（game-config.jsonから取得、未ロード時はフォールバック）
 

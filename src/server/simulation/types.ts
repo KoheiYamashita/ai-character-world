@@ -4,12 +4,14 @@ import type {
   GameTime,
   Character,
   CrossMapRoute,
+  SpriteConfig,
 } from '@/types'
 
 // Server-side character state (extends client Character with navigation)
 export interface SimCharacter {
   id: string
   name: string
+  sprite: SpriteConfig
   money: number
   hunger: number
   currentMapId: string
@@ -96,6 +98,7 @@ export function createSimCharacter(char: Character): SimCharacter {
   return {
     id: char.id,
     name: char.name,
+    sprite: { ...char.sprite },
     money: char.money,
     hunger: char.hunger,
     currentMapId: char.currentMapId,

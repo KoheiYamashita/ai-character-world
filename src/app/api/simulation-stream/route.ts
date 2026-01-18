@@ -14,8 +14,8 @@ async function ensureEngineRunning(): Promise<void> {
   if (!engineInitialized) {
     console.log('[SSE] Initializing simulation engine...')
     try {
-      const { maps, characters, config } = await loadGameDataServer()
-      await engine.initialize(maps, characters, config.initialState.mapId, config.initialState.time)
+      const { maps, characters, config, npcBlockedNodes } = await loadGameDataServer()
+      await engine.initialize(maps, characters, config.initialState.mapId, config.initialState.time, npcBlockedNodes)
       engine.start()
       engineInitialized = true
       console.log('[SSE] Simulation engine started')

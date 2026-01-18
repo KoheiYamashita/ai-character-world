@@ -183,7 +183,7 @@ function isNodeInsideZone(row: number, col: number, zone: Obstacle): boolean {
 
 /**
  * Check if a node at pixel position (x, y) is on a zone wall.
- * This is the source of truth - PixiApp.tsx renders all nodes returned by generateGridNodes.
+ * This is the source of truth - PixiAppSync.tsx renders all nodes returned by generateGridNodes.
  */
 function isOnZoneWall(nodeX: number, nodeY: number, obstacles: Obstacle[]): boolean {
   const TOLERANCE = 2
