@@ -1,37 +1,15 @@
 import {
-  getSimulationEngine,
-  loadWorldDataServer,
+  ensureEngineInitialized,
   type SerializedWorldState,
 } from '@/server/simulation'
-
-// Flag to track if engine has been initialized
-let engineInitialized = false
-
-// Initialize and start the simulation engine
-async function ensureEngineRunning(): Promise<void> {
-  const engine = getSimulationEngine()
-
-  if (!engineInitialized) {
-    console.log('[SSE] Initializing simulation engine...')
-    try {
-      const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldDataServer()
-      await engine.initialize(maps, characters, config.initialState.mapId, config.initialState.time, npcBlockedNodes, npcs)
-      engine.start()
-      engineInitialized = true
-      console.log('[SSE] Simulation engine started')
-    } catch (error) {
-      console.error('[SSE] Failed to initialize simulation engine:', error)
-      throw error
-    }
-  }
-}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  let engine
   try {
-    await ensureEngineRunning()
+    engine = await ensureEngineInitialized('[SSE]')
   } catch (error) {
     console.error('[SSE] Engine initialization failed:', error)
     return new Response('Failed to initialize simulation', { status: 500 })
@@ -42,7 +20,6 @@ export async function GET() {
 
   const stream = new ReadableStream({
     start(controller) {
-      const engine = getSimulationEngine()
 
       // Send initial state immediately
       const initialState = engine.getState()
@@ -54,7 +31,7 @@ export async function GET() {
         try {
           const message = `data: ${JSON.stringify({ type: 'state', data: state })}\n\n`
           controller.enqueue(encoder.encode(message))
-        } catch (error) {
+        } catch {
           // Stream closed, will be handled by cancel
           console.log('[SSE] Error sending state, client likely disconnected')
         }

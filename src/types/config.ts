@@ -5,6 +5,20 @@ export interface TimingConfig {
   fadeIntervalMs: number
 }
 
+export interface StatusDecayConfig {
+  hungerPerMinute: number
+  energyPerMinute: number
+  hygienePerMinute: number
+  moodPerMinute: number
+  bladderPerMinute: number
+}
+
+export interface TimeConfig {
+  timezone: string
+  statusDecayIntervalMs: number
+  decayRates: StatusDecayConfig
+}
+
 export interface MovementConfig {
   speed: number
   entranceProbability: number
@@ -103,4 +117,5 @@ export interface WorldConfig {
   theme: ThemeConfig
   initialState: InitialStateConfig
   paths: PathsConfig
+  time: TimeConfig
 }

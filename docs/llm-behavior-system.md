@@ -57,7 +57,7 @@ interface ScheduleEntry {
 }
 
 interface DailySchedule {
-  date: string           // ゲーム内日付
+  date: string           // 世界内日付
   entries: ScheduleEntry[]
 }
 ```

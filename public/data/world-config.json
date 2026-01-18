@@ -5,6 +5,17 @@
     "fadeStep": 0.05,
     "fadeIntervalMs": 16
   },
+  "time": {
+    "timezone": "Asia/Tokyo",
+    "statusDecayIntervalMs": 60000,
+    "decayRates": {
+      "hungerPerMinute": 0.1,
+      "energyPerMinute": 0.05,
+      "hygienePerMinute": 0.03,
+      "moodPerMinute": 0.02,
+      "bladderPerMinute": 0.15
+    }
+  },
   "movement": {
     "speed": 150,
     "entranceProbability": 0.1

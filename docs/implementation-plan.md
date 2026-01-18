@@ -21,15 +21,15 @@
 
 ---
 
-### Step 2: 時間システム＋ステータス減少
+### ✅ Step 2: 時間システム＋ステータス減少
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 2-1 | `src/types/config.ts` に `TimeConfig` 追加（timezone, statusDecayIntervalMs, decayRates） | ビルド通過 |
-| 2-2 | `public/data/world-config.json` に時間・減衰設定追加 | 設定読み込み成功 |
-| 2-3 | `SimulationEngine` の tick で `advanceTime()` を呼び出し | 時間が進む |
-| 2-4 | `SimulationEngine` にステータス減少タイマー追加 | 減衰ログ出力 |
-| 2-5 | SSE経由でクライアントに時間・ステータス変化を配信 | UIでリアルタイム反映 |
+| ✅ 2-1 | `src/types/config.ts` に `TimeConfig` 追加（timezone, statusDecayIntervalMs, decayRates） | ビルド通過 |
+| ✅ 2-2 | `public/data/world-config.json` に時間・減衰設定追加 | 設定読み込み成功 |
+| ✅ 2-3 | `SimulationEngine` の tick で現実時間と同期 | 時間が現実時間と一致 |
+| ✅ 2-4 | `SimulationEngine` にステータス減少タイマー追加 | 減衰ログ出力 |
+| ✅ 2-5 | SSE経由でクライアントに時間・ステータス変化を配信 | UIでリアルタイム反映 |
 
 ---
 

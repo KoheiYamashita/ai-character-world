@@ -1,38 +1,13 @@
 import { NextResponse } from 'next/server'
 import {
-  getSimulationEngine,
-  loadWorldDataServer,
+  ensureEngineInitialized,
   type SerializedWorldState,
 } from '@/server/simulation'
-
-// Flag to track if engine has been initialized
-let engineInitialized = false
-
-// Initialize and start the simulation engine
-async function ensureEngineRunning(): Promise<void> {
-  const engine = getSimulationEngine()
-
-  if (!engineInitialized) {
-    console.log('[API] Initializing simulation engine...')
-    try {
-      const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldDataServer()
-      await engine.initialize(maps, characters, config.initialState.mapId, config.initialState.time, npcBlockedNodes, npcs)
-      engine.start()
-      engineInitialized = true
-      console.log('[API] Simulation engine started')
-    } catch (error) {
-      console.error('[API] Failed to initialize simulation engine:', error)
-      throw error
-    }
-  }
-}
 
 // GET - Get current simulation state
 export async function GET() {
   try {
-    await ensureEngineRunning()
-
-    const engine = getSimulationEngine()
+    const engine = await ensureEngineInitialized('[API]')
     const state: SerializedWorldState = engine.getState()
 
     return NextResponse.json({
@@ -57,12 +32,9 @@ export async function GET() {
 // POST - Control simulation (pause/unpause/restart)
 export async function POST(request: Request) {
   try {
-    await ensureEngineRunning()
-
+    const engine = await ensureEngineInitialized('[API]')
     const body = await request.json()
     const { action } = body as { action: string }
-
-    const engine = getSimulationEngine()
 
     switch (action) {
       case 'pause':
