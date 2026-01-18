@@ -17,4 +17,5 @@ export interface NPC {
   currentNodeId: string  // Node occupied by NPC (blocks pathfinding)
   position: Position
   direction: Direction
+  isInConversation?: boolean  // Whether NPC is currently in conversation
 }

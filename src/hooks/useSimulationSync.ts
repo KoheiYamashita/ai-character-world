@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useCharacterStore, useGameStore } from '@/stores'
-import type { SerializedWorldState, SimCharacter } from '@/server/simulation/types'
+import { useCharacterStore, useGameStore, useNPCStore } from '@/stores'
+import type { SerializedWorldState, SimCharacter, SimNPC } from '@/server/simulation/types'
 import type { Character } from '@/types'
 
 interface SimulationSyncState {
@@ -12,6 +12,7 @@ interface SimulationSyncState {
   lastTick: number
   reconnectAttempts: number
   serverCharacters: Record<string, SimCharacter>
+  serverNPCs: Record<string, SimNPC>
 }
 
 interface UseSimulationSyncOptions {
@@ -27,6 +28,7 @@ const INITIAL_STATE: SimulationSyncState = {
   lastTick: 0,
   reconnectAttempts: 0,
   serverCharacters: {},
+  serverNPCs: {},
 }
 
 // Convert SimCharacter from server to client Character
@@ -69,6 +71,8 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
   const setCurrentMap = useGameStore((s) => s.setCurrentMap)
   const setTime = useGameStore((s) => s.setTime)
 
+  const updateNPC = useNPCStore((s) => s.updateNPC)
+
   // Sync state from server to Zustand stores
   const syncStateToStores = useCallback((worldState: SerializedWorldState) => {
     // Update game state
@@ -102,10 +106,19 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
       setActiveCharacter(serverCharacterIds[0])
     }
 
+    // Sync NPC state (direction and conversation state)
+    for (const [id, simNPC] of Object.entries(worldState.npcs)) {
+      updateNPC(id, {
+        direction: simNPC.direction,
+        isInConversation: simNPC.isInConversation,
+      })
+    }
+
     setState((prev) => ({
       ...prev,
       lastTick: worldState.tick,
       serverCharacters: worldState.characters,
+      serverNPCs: worldState.npcs,
     }))
   }, [
     addCharacter,
@@ -115,6 +128,7 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
     setTime,
     updateCharacter,
     updateDirection,
+    updateNPC,
     updatePosition,
   ])
 

@@ -1,13 +1,14 @@
-import type { GameMap, GameTime, Position, Direction, CrossMapRoute } from '@/types'
+import type { GameMap, GameTime, Position, Direction, CrossMapRoute, NPC } from '@/types'
 import type {
   WorldState,
   SimCharacter,
+  SimNPC,
   SimTransitionState,
   SimNavigationState,
   SimCrossMapNavState,
   SerializedWorldState,
 } from './types'
-import { serializeWorldState } from './types'
+import { serializeWorldState, createSimNPC } from './types'
 
 const INITIAL_TIME: GameTime = { hour: 8, minute: 0, day: 1 }
 const INITIAL_MAP_ID = 'home'
@@ -20,6 +21,7 @@ export class WorldStateManager {
   constructor() {
     this.state = {
       characters: new Map(),
+      npcs: new Map(),
       currentMapId: INITIAL_MAP_ID,
       time: { ...INITIAL_TIME },
       isPaused: false,
@@ -61,6 +63,46 @@ export class WorldStateManager {
 
   clearNPCBlockedNodes(): void {
     this.npcBlockedNodes.clear()
+  }
+
+  // NPC management
+  initializeNPCs(npcs: NPC[]): void {
+    this.state.npcs.clear()
+    for (const npc of npcs) {
+      const simNPC = createSimNPC(npc)
+      this.state.npcs.set(npc.id, simNPC)
+    }
+  }
+
+  addNPC(npc: NPC): void {
+    const simNPC = createSimNPC(npc)
+    this.state.npcs.set(npc.id, simNPC)
+  }
+
+  getNPC(id: string): SimNPC | undefined {
+    return this.state.npcs.get(id)
+  }
+
+  getAllNPCs(): SimNPC[] {
+    return Array.from(this.state.npcs.values())
+  }
+
+  getNPCsOnMap(mapId: string): SimNPC[] {
+    return Array.from(this.state.npcs.values()).filter((npc) => npc.mapId === mapId)
+  }
+
+  updateNPCDirection(id: string, direction: Direction): void {
+    const npc = this.state.npcs.get(id)
+    if (npc) {
+      npc.direction = direction
+    }
+  }
+
+  setNPCConversationState(id: string, isInConversation: boolean): void {
+    const npc = this.state.npcs.get(id)
+    if (npc) {
+      npc.isInConversation = isInConversation
+    }
   }
 
   // Get current state (for read-only access)

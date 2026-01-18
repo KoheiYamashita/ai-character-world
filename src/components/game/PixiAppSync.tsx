@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Application, Container, Graphics, AnimatedSprite } from 'pixi.js'
+import { Application, Container, Graphics, AnimatedSprite, Text, TextStyle } from 'pixi.js'
 import { useGameStore, useCharacterStore, useNPCStore } from '@/stores'
 import { getMaps, loadMaps, clearMapsCache } from '@/data/maps'
 import { getNPCConfigsForMap } from '@/lib/mapLoader'
@@ -23,8 +23,8 @@ export default function PixiAppSync(): React.ReactNode {
   const getNPCsByMap = useNPCStore((s) => s.getNPCsByMap)
   const clearNPCs = useNPCStore((s) => s.clearNPCs)
 
-  // Connect to simulation server - get serverCharacters for navigation state
-  const { isConnected, isConnecting, error, serverCharacters } = useSimulationSync()
+  // Connect to simulation server - get serverCharacters and serverNPCs for navigation/conversation state
+  const { isConnected, isConnecting, error, serverCharacters, serverNPCs } = useSimulationSync()
 
   // PixiJS refs
   const containerRef = useRef<HTMLDivElement>(null)
@@ -37,12 +37,17 @@ export default function PixiAppSync(): React.ReactNode {
   const npcSpritesRef = useRef<Map<string, AnimatedSprite>>(new Map())
   const npcSpritesheetsRef = useRef<Map<string, CharacterSpritesheet>>(new Map())
   const npcContainerRef = useRef<Container | null>(null)
+  const npcDirectionsRef = useRef<Map<string, Direction>>(new Map())  // Track NPC directions for change detection
+
+  // Conversation icon refs
+  const conversationIconsRef = useRef<Map<string, Text>>(new Map())  // Track 💬 icons by entity ID
 
   // State refs
   const initializingRef = useRef(false)
   const currentDirectionRef = useRef<Direction>('down')
   const currentMapIdRef = useRef(currentMapId)
   const serverCharactersRef = useRef(serverCharacters)
+  const serverNPCsRef = useRef(serverNPCs)
   const lastPathKeyRef = useRef<string>('')  // For path change detection
 
   // Component state
@@ -59,6 +64,10 @@ export default function PixiAppSync(): React.ReactNode {
   useEffect(() => {
     serverCharactersRef.current = serverCharacters
   }, [serverCharacters])
+
+  useEffect(() => {
+    serverNPCsRef.current = serverNPCs
+  }, [serverNPCs])
 
   useEffect(() => {
     currentMapIdRef.current = currentMapId
@@ -349,8 +358,42 @@ export default function PixiAppSync(): React.ReactNode {
     sprite.stop()
 
     npcSpritesRef.current.set(npc.id, sprite)
+    npcDirectionsRef.current.set(npc.id, npc.direction)
     container.addChild(sprite)
   }
+
+  // Create conversation icon (💬)
+  function createConversationIcon(x: number, y: number, entityId: string): Text {
+    const style = new TextStyle({
+      fontSize: 24,
+    })
+    const icon = new Text({ text: '💬', style })
+    icon.anchor.set(0.5, 1)
+    icon.x = x
+    icon.y = y - 50  // Above sprite head
+    icon.label = `conversation-icon-${entityId}`
+    return icon
+  }
+
+  // Remove conversation icon
+  function removeConversationIcon(entityId: string): void {
+    const icon = conversationIconsRef.current.get(entityId)
+    if (icon) {
+      if (icon.parent) {
+        icon.parent.removeChild(icon)
+      }
+      icon.destroy()
+      conversationIconsRef.current.delete(entityId)
+    }
+  }
+
+  // Clear all conversation icons
+  const clearAllConversationIcons = useCallback((): void => {
+    for (const [entityId] of conversationIconsRef.current) {
+      removeConversationIcon(entityId)
+    }
+    conversationIconsRef.current.clear()
+  }, [])
 
   // Clear path line (safe removal with parent check)
   const clearPathLine = useCallback((): void => {
@@ -444,6 +487,66 @@ export default function PixiAppSync(): React.ReactNode {
       }
     }
 
+    // Update NPC sprite direction when it changes
+    function updateNPCDirections(): void {
+      const serverNPCs = serverNPCsRef.current
+      for (const [npcId, simNPC] of Object.entries(serverNPCs)) {
+        const sprite = npcSpritesRef.current.get(npcId)
+        const spritesheet = npcSpritesheetsRef.current.get(npcId)
+        const lastDirection = npcDirectionsRef.current.get(npcId)
+
+        if (sprite && spritesheet && lastDirection !== simNPC.direction) {
+          sprite.texture = getIdleTexture(spritesheet, simNPC.direction)
+          npcDirectionsRef.current.set(npcId, simNPC.direction)
+        }
+      }
+    }
+
+    // Update conversation icons
+    function updateConversationIcons(charX: number, charY: number): void {
+      const serverChar = serverCharactersRef.current[characterId]
+      const conversation = serverChar?.conversation
+      const characterIconId = `char-${characterId}`
+
+      if (conversation?.isActive) {
+        const npcId = conversation.npcId
+        const npcSprite = npcSpritesRef.current.get(npcId)
+        const npcIconId = `npc-${npcId}`
+
+        // Create/update character conversation icon
+        if (!conversationIconsRef.current.has(characterIconId)) {
+          const icon = createConversationIcon(charX, charY, characterIconId)
+          conversationIconsRef.current.set(characterIconId, icon)
+          app.stage.addChild(icon)
+        } else {
+          const icon = conversationIconsRef.current.get(characterIconId)!
+          icon.x = charX
+          icon.y = charY - 50
+        }
+
+        // Create/update NPC conversation icon
+        if (npcSprite) {
+          if (!conversationIconsRef.current.has(npcIconId)) {
+            const icon = createConversationIcon(npcSprite.x, npcSprite.y, npcIconId)
+            conversationIconsRef.current.set(npcIconId, icon)
+            app.stage.addChild(icon)
+          } else {
+            const icon = conversationIconsRef.current.get(npcIconId)!
+            icon.x = npcSprite.x
+            icon.y = npcSprite.y - 50
+          }
+        }
+      } else {
+        // Remove conversation icons if conversation ended
+        removeConversationIcon(characterIconId)
+        for (const iconId of conversationIconsRef.current.keys()) {
+          if (iconId.startsWith('npc-')) {
+            removeConversationIcon(iconId)
+          }
+        }
+      }
+    }
+
     function ticker(): void {
       const sprite = characterSpriteRef.current
       const character = useCharacterStore.getState().getCharacter(characterId)
@@ -473,6 +576,12 @@ export default function PixiAppSync(): React.ReactNode {
       updatePathLine(nav, x, y)
 
       updateSpriteAnimation(character.direction, isMoving)
+
+      // Update NPC directions
+      updateNPCDirections()
+
+      // Update conversation icons
+      updateConversationIcons(x, y)
     }
 
     app.ticker.add(ticker)
@@ -480,8 +589,9 @@ export default function PixiAppSync(): React.ReactNode {
     return () => {
       appRef.current?.ticker.remove(ticker)
       clearPathLine()
+      clearAllConversationIcons()
     }
-  }, [isReady, activeCharacter?.id, localMapsLoaded, clearPathLine, drawPathLine])
+  }, [isReady, activeCharacter?.id, localMapsLoaded, clearPathLine, drawPathLine, clearAllConversationIcons])
 
   // Connection status overlay
   const renderConnectionStatus = () => {

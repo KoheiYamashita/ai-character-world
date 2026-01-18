@@ -10,6 +10,7 @@ import type {
   CharactersData,
   Obstacle,
   PathNode,
+  NPC,
 } from '@/types'
 import type { TileToPixelConfig, NodeLabel, EntranceConfig } from '@/data/maps/grid'
 import { tileToPixelObstacle, tileToPixelEntrance } from '@/data/maps/grid'
@@ -352,11 +353,53 @@ export async function loadNPCBlockedNodesServer(config?: GameConfig): Promise<Ma
   return blockedNodesPerMap
 }
 
+// Load NPCs from maps data
+export async function loadNPCsServer(config?: GameConfig): Promise<NPC[]> {
+  const cfg = config ?? (await loadGameConfigServer())
+  const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
+  const content = await fs.readFile(mapsPath, 'utf-8')
+  const mapsData: MapsDataJson = JSON.parse(content)
+
+  // Get all maps to find node positions
+  const maps = await loadMapsServer(cfg)
+  const npcs: NPC[] = []
+
+  for (const mapConfig of mapsData.maps) {
+    if (!mapConfig.npcs || mapConfig.npcs.length === 0) continue
+
+    const map = maps[mapConfig.id]
+    if (!map) continue
+
+    for (const npcConfig of mapConfig.npcs) {
+      // Find the node where the NPC is placed
+      const node = map.nodes.find((n) => n.id === npcConfig.spawnNodeId)
+      if (!node) {
+        console.warn(`[NPC] Node ${npcConfig.spawnNodeId} not found for NPC ${npcConfig.id}`)
+        continue
+      }
+
+      const npc: NPC = {
+        id: npcConfig.id,
+        name: npcConfig.name,
+        sprite: npcConfig.sprite,
+        mapId: mapConfig.id,
+        currentNodeId: npcConfig.spawnNodeId,
+        position: { x: node.x, y: node.y },
+        direction: 'down', // Default direction
+      }
+      npcs.push(npc)
+    }
+  }
+
+  return npcs
+}
+
 // Load all game data needed for simulation
 export interface GameData {
   config: GameConfig
   maps: Record<string, GameMap>
   characters: Character[]
+  npcs: NPC[]
   npcBlockedNodes: Map<string, Set<string>>
 }
 
@@ -364,7 +407,8 @@ export async function loadGameDataServer(): Promise<GameData> {
   const config = await loadGameConfigServer()
   const maps = await loadMapsServer(config)
   const characters = await loadCharactersServer(config)
+  const npcs = await loadNPCsServer(config)
   const npcBlockedNodes = await loadNPCBlockedNodesServer(config)
 
-  return { config, maps, characters, npcBlockedNodes }
+  return { config, maps, characters, npcs, npcBlockedNodes }
 }

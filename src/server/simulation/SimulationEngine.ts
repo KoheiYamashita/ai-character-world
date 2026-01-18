@@ -1,4 +1,4 @@
-import type { GameMap, Character, GameTime } from '@/types'
+import type { GameMap, Character, GameTime, NPC } from '@/types'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -31,7 +31,8 @@ export class SimulationEngine {
     characters: Character[],
     initialMapId?: string,
     initialTime?: GameTime,
-    npcBlockedNodes?: Map<string, Set<string>>
+    npcBlockedNodes?: Map<string, Set<string>>,
+    npcs?: NPC[]
   ): Promise<void> {
     this.worldState.initialize(maps, initialMapId)
 
@@ -45,6 +46,12 @@ export class SimulationEngine {
         this.worldState.setNPCBlockedNodes(mapId, nodeIds)
       }
       console.log(`[SimulationEngine] Loaded NPC blocked nodes for ${npcBlockedNodes.size} maps`)
+    }
+
+    // Add NPCs to world state
+    if (npcs && npcs.length > 0) {
+      this.worldState.initializeNPCs(npcs)
+      console.log(`[SimulationEngine] Loaded ${npcs.length} NPCs`)
     }
 
     // Add characters to world state

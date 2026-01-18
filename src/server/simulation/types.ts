@@ -5,7 +5,16 @@ import type {
   Character,
   CrossMapRoute,
   SpriteConfig,
+  NPC,
 } from '@/types'
+
+// Conversation state for character-NPC dialogue
+export interface ConversationState {
+  isActive: boolean
+  npcId: string
+  startTime: number
+  duration: number // ms
+}
 
 // Server-side character state (extends client Character with navigation)
 export interface SimCharacter {
@@ -22,6 +31,8 @@ export interface SimCharacter {
   navigation: SimNavigationState
   // Cross-map navigation state
   crossMapNavigation: SimCrossMapNavState | null
+  // Conversation state
+  conversation: ConversationState | null
 }
 
 export interface SimNavigationState {
@@ -41,9 +52,21 @@ export interface SimCrossMapNavState {
   currentSegmentIndex: number
 }
 
+// Server-side NPC state
+export interface SimNPC {
+  id: string
+  name: string
+  mapId: string
+  currentNodeId: string
+  position: Position
+  direction: Direction
+  isInConversation: boolean
+}
+
 // World state broadcast to clients
 export interface WorldState {
   characters: Map<string, SimCharacter>
+  npcs: Map<string, SimNPC>
   currentMapId: string
   time: GameTime
   isPaused: boolean
@@ -62,6 +85,7 @@ export interface SimTransitionState {
 // Serializable world state for SSE/API
 export interface SerializedWorldState {
   characters: Record<string, SimCharacter>
+  npcs: Record<string, SimNPC>
   currentMapId: string
   time: GameTime
   isPaused: boolean
@@ -73,6 +97,7 @@ export interface SerializedWorldState {
 export function serializeWorldState(state: WorldState): SerializedWorldState {
   return {
     characters: Object.fromEntries(state.characters),
+    npcs: Object.fromEntries(state.npcs),
     currentMapId: state.currentMapId,
     time: { ...state.time },
     isPaused: state.isPaused,
@@ -85,6 +110,7 @@ export function serializeWorldState(state: WorldState): SerializedWorldState {
 export function deserializeWorldState(state: SerializedWorldState): WorldState {
   return {
     characters: new Map(Object.entries(state.characters)),
+    npcs: new Map(Object.entries(state.npcs)),
     currentMapId: state.currentMapId,
     time: { ...state.time },
     isPaused: state.isPaused,
@@ -114,6 +140,20 @@ export function createSimCharacter(char: Character): SimCharacter {
       targetPosition: null,
     },
     crossMapNavigation: null,
+    conversation: null,
+  }
+}
+
+// Create SimNPC from client NPC
+export function createSimNPC(npc: NPC): SimNPC {
+  return {
+    id: npc.id,
+    name: npc.name,
+    mapId: npc.mapId,
+    currentNodeId: npc.currentNodeId,
+    position: { ...npc.position },
+    direction: npc.direction,
+    isInConversation: false,
   }
 }
 
@@ -125,6 +165,8 @@ export interface SimulationConfig {
   idleTimeMax: number // ms
   entranceProbability: number // 0-1
   crossMapProbability: number // 0-1
+  conversationProbability: number // 0-1 (probability of starting a conversation)
+  conversationDuration: number // ms (how long conversation lasts)
 }
 
 export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
@@ -134,6 +176,8 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   idleTimeMax: 1500,
   entranceProbability: 0.1,
   crossMapProbability: 0.5,
+  conversationProbability: 0.3,
+  conversationDuration: 5000,
 }
 
 // SSE event types
