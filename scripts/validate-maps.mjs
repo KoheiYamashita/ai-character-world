@@ -5,6 +5,7 @@
  * - 入口の接続先ノードの存在チェック
  * - spawnNodeIdの存在チェック
  * - 障害物タイプ（building/zone）のバリデーション
+ * - ゾーン交差チェック（辺の共有はOK、内部の重なりはNG）
  *
  * Usage: node scripts/validate-maps.mjs
  */
@@ -31,23 +32,25 @@ const VALID_WALL_SIDES = ['top', 'bottom', 'left', 'right']
 function tileToPixelObstacle(obs, cols, rows, width, height) {
   const spacingX = width / (cols + 1)
   const spacingY = height / (rows + 1)
-  const centerX = spacingX * (obs.col + 1)
-  const centerY = spacingY * (obs.row + 1)
+  // 起点ベース: row/col = 左上ノード位置
+  const x = spacingX * (obs.col + 1)
+  const y = spacingY * (obs.row + 1)
   const pixelWidth = spacingX * obs.tileWidth
   const pixelHeight = spacingY * obs.tileHeight
   return {
     label: obs.label,
     row: obs.row,
     col: obs.col,
-    x: Math.round(centerX - pixelWidth / 2),
-    y: Math.round(centerY - pixelHeight / 2),
+    x: Math.round(x),
+    y: Math.round(y),
     width: Math.round(pixelWidth),
     height: Math.round(pixelHeight)
   }
 }
 
 function isPointInsideObstacle(x, y, obs) {
-  return x >= obs.x && x <= obs.x + obs.width && y >= obs.y && y <= obs.y + obs.height
+  // 起点ベース: 境界ノードは含まない（< を使用）
+  return x >= obs.x && x < obs.x + obs.width && y >= obs.y && y < obs.y + obs.height
 }
 
 function getNodePosition(nodeId, prefix, cols, rows, width, height) {
@@ -64,6 +67,25 @@ function getNodePosition(nodeId, prefix, cols, rows, width, height) {
     row,
     col
   }
+}
+
+/**
+ * Check if two zones have overlapping interiors (not just touching edges).
+ * 辺の共有（線が重なる）はOK、内部の交差（面が重なる）はNG
+ */
+function zonesIntersect(zoneA, zoneB) {
+  const aLeft = zoneA.col
+  const aRight = zoneA.col + zoneA.tileWidth
+  const aTop = zoneA.row
+  const aBottom = zoneA.row + zoneA.tileHeight
+
+  const bLeft = zoneB.col
+  const bRight = zoneB.col + zoneB.tileWidth
+  const bTop = zoneB.row
+  const bBottom = zoneB.row + zoneB.tileHeight
+
+  // Strict inequality: touching (sharing edge) is OK, overlapping interior is NG
+  return aLeft < bRight && aRight > bLeft && aTop < bBottom && aBottom > bTop
 }
 
 function generateValidNodeIds(prefix, cols, rows, obstacles, width, height, rawObstacles) {
@@ -189,7 +211,19 @@ for (const map of maps) {
     }
   }
 
-  // 2. Check label-obstacle conflicts (only for building-type obstacles)
+  // 2. Check zone intersections (all obstacles, not just zones with walls)
+  const allZones = (map.obstacles || []).filter(obs => obs.type === 'zone')
+  for (let i = 0; i < allZones.length; i++) {
+    for (let j = i + 1; j < allZones.length; j++) {
+      const zoneA = allZones[i]
+      const zoneB = allZones[j]
+      if (zonesIntersect(zoneA, zoneB)) {
+        errors.push(`❌ ゾーン "${zoneA.label}" と "${zoneB.label}" が交差しています`)
+      }
+    }
+  }
+
+  // 3. Check label-obstacle conflicts (only for building-type obstacles)
   const buildingObstacles = obstacles.filter(obs => {
     const rawObs = (map.obstacles || []).find(o => o.label === obs.label && o.row === obs.row && o.col === obs.col)
     return !rawObs?.type || rawObs.type === 'building'
@@ -206,12 +240,12 @@ for (const map of maps) {
     }
   }
 
-  // 3. Check if spawnNodeId exists
+  // 4. Check if spawnNodeId exists
   if (!validNodeIds.has(map.spawnNodeId)) {
     errors.push(`❌ spawnNodeId "${map.spawnNodeId}" が存在しないか障害物内にあります`)
   }
 
-  // 4. Check entrance connectedNodeIds
+  // 5. Check entrance connectedNodeIds
   for (const entrance of map.entrances || []) {
     for (const connectedId of entrance.connectedNodeIds) {
       if (!validNodeIds.has(connectedId)) {
@@ -220,7 +254,7 @@ for (const map of maps) {
     }
   }
 
-  // 5. Check if labels reference valid nodes
+  // 6. Check if labels reference valid nodes
   for (const label of map.labels || []) {
     if (!validNodeIds.has(label.nodeId)) {
       errors.push(`❌ ラベル "${label.label}" のノード "${label.nodeId}" が存在しないか障害物内にあります`)

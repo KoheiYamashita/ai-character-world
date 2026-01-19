@@ -8,7 +8,7 @@ import { getNPCConfigsForMap } from '@/lib/mapLoader'
 import { loadNPCsFromMapConfig } from '@/lib/npcLoader'
 import { loadWorldConfig, parseColor } from '@/lib/worldConfigLoader'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
-import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections } from '@/lib/pixiRenderers'
+import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections, createNPCSprite } from '@/lib/pixiRenderers'
 import { useSimulationSync } from '@/hooks'
 import type { Direction, WorldConfig, PathNode, NPC } from '@/types'
 
@@ -323,12 +323,18 @@ export default function PixiAppSync(): React.ReactNode {
     for (const npc of npcsOnMap) {
       const cachedSpritesheet = npcSpritesheetsRef.current.get(npc.id)
       if (cachedSpritesheet) {
-        createNPCSprite(npc, cachedSpritesheet, npcContainer, config)
+        const sprite = createNPCSprite(npc, cachedSpritesheet, config)
+        npcSpritesRef.current.set(npc.id, sprite)
+        npcDirectionsRef.current.set(npc.id, npc.direction)
+        npcContainer.addChild(sprite)
       } else {
         loadCharacterSpritesheet(npc.sprite).then((spritesheet) => {
           npcSpritesheetsRef.current.set(npc.id, spritesheet)
           if (npcContainerRef.current && currentMapIdRef.current === npc.mapId) {
-            createNPCSprite(npc, spritesheet, npcContainerRef.current, configRef.current!)
+            const sprite = createNPCSprite(npc, spritesheet, configRef.current!)
+            npcSpritesRef.current.set(npc.id, sprite)
+            npcDirectionsRef.current.set(npc.id, npc.direction)
+            npcContainerRef.current.addChild(sprite)
           }
         }).catch((err) => {
           console.error(`[NPC] Failed to load spritesheet for ${npc.id}:`, err)
@@ -338,29 +344,6 @@ export default function PixiAppSync(): React.ReactNode {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded, localMapsLoaded, npcsLoaded])
-
-  // Helper function to create NPC sprite (static display only)
-  function createNPCSprite(
-    npc: NPC,
-    spritesheet: CharacterSpritesheet,
-    container: Container,
-    config: WorldConfig
-  ): void {
-    const idleTexture = getIdleTexture(spritesheet, npc.direction)
-    const textures = getDirectionAnimation(spritesheet, npc.direction)
-    const sprite = new AnimatedSprite(textures)
-    sprite.anchor.set(0.5, 0.5)
-    sprite.scale.set(config.character.scale)
-    sprite.x = npc.position.x
-    sprite.y = npc.position.y
-    sprite.label = `npc-${npc.id}`
-    sprite.texture = idleTexture
-    sprite.stop()
-
-    npcSpritesRef.current.set(npc.id, sprite)
-    npcDirectionsRef.current.set(npc.id, npc.direction)
-    container.addChild(sprite)
-  }
 
   // Create conversation icon (💬)
   function createConversationIcon(x: number, y: number, entityId: string): Text {

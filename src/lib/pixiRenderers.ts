@@ -1,7 +1,8 @@
-import { Graphics, Text, TextStyle, Container } from 'pixi.js'
-import type { PathNode, Obstacle, WallSide } from '@/types'
+import { Graphics, Text, TextStyle, Container, AnimatedSprite } from 'pixi.js'
+import type { PathNode, Obstacle, WallSide, NPC } from '@/types'
 import type { WorldConfig, ObstacleTheme } from '@/types/config'
 import { parseColor, getObstacleTheme } from './worldConfigLoader'
+import { getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from './spritesheet'
 
 /**
  * ノードタイプに対応するテーマを取得
@@ -51,39 +52,39 @@ export function renderObstacle(graphics: Graphics, obstacle: Obstacle, config: W
 /**
  * Zone障害物の描画
  *
- * シンプルなルール:
- * - 壁はノード位置に描画（半タイル外側にoutset）
- * - ドア位置は1-indexed（角=1）
- * - start〜endの間は壁を描画しない（開口部）
+ * シンプルなルール（起点ベース座標系）:
+ * - x, y = 起点ノードのピクセル位置
+ * - 壁はノード位置に直接描画（outset不要）
+ * - ドアのstart/endは起点からのオフセット
  */
 function renderZoneObstacle(graphics: Graphics, obstacle: Obstacle, theme: ObstacleTheme): void {
   const { x, y, width, height, wallSides, door, tileWidth, tileHeight } = obstacle
+  const strokeColor = parseColor(theme.stroke)
+  const strokeWidth = theme.strokeWidth
 
-  // Fill background (if any)
+  // Fill background
   graphics.rect(x, y, width, height)
   graphics.fill({ color: parseColor(theme.fill), alpha: theme.alpha })
 
-  if (!wallSides || wallSides.length === 0) return
+  // No walls: draw boundary outline only
+  if (!wallSides || wallSides.length === 0) {
+    graphics.stroke({ color: strokeColor, width: strokeWidth, alpha: 0.4 })
+    return
+  }
 
-  const strokeColor = parseColor(theme.stroke)
-  const strokeWidth = theme.strokeWidth
+  // Draw each wall side
   const tileSizeX = width / tileWidth
   const tileSizeY = height / tileHeight
-
-  // 壁はノード位置に描画するため、半タイル外側にoutset
-  const outsetX = tileSizeX / 2
-  const outsetY = tileSizeY / 2
-
   for (const side of wallSides) {
-    drawWallSide(graphics, side, x, y, width, height, tileSizeX, tileSizeY, outsetX, outsetY, tileWidth, tileHeight, door, strokeColor, strokeWidth)
+    drawWallSide(graphics, side, x, y, width, height, tileSizeX, tileSizeY, tileWidth, tileHeight, door, strokeColor, strokeWidth)
   }
 }
 
 /**
- * 壁の描画
+ * 壁の描画（起点ベース座標系）
  *
- * - 壁はノード位置に描画（outsetで外側に配置）
- * - ドア: 1-indexed（角=1）、start〜endの間が開口部
+ * - 壁はノード位置に直接描画
+ * - ドア: start〜endの間が開口部（0-indexed）
  */
 function drawWallSide(
   graphics: Graphics,
@@ -94,15 +95,13 @@ function drawWallSide(
   height: number,
   tileSizeX: number,
   tileSizeY: number,
-  outsetX: number,
-  outsetY: number,
   tileWidth: number,
   tileHeight: number,
   door: Obstacle['door'],
   strokeColor: number,
   strokeWidth: number
 ): void {
-  // 壁の始点・終点（ノード位置 = zone境界 + outset）
+  // 壁の始点・終点（ノード位置に直接）
   let wallStartX: number, wallStartY: number, wallEndX: number, wallEndY: number
   let tileCount: number
   let tileSize: number
@@ -110,38 +109,38 @@ function drawWallSide(
 
   switch (side) {
     case 'top':
-      wallStartX = x - outsetX
-      wallStartY = y - outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y - outsetY
-      tileCount = tileWidth + 1  // outsetで+1
+      wallStartX = x
+      wallStartY = y
+      wallEndX = x + width
+      wallEndY = y
+      tileCount = tileWidth
       tileSize = tileSizeX
       isHorizontal = true
       break
     case 'bottom':
-      wallStartX = x - outsetX
-      wallStartY = y + height + outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileWidth + 1
+      wallStartX = x
+      wallStartY = y + height
+      wallEndX = x + width
+      wallEndY = y + height
+      tileCount = tileWidth
       tileSize = tileSizeX
       isHorizontal = true
       break
     case 'left':
-      wallStartX = x - outsetX
-      wallStartY = y - outsetY
-      wallEndX = x - outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileHeight + 1
+      wallStartX = x
+      wallStartY = y
+      wallEndX = x
+      wallEndY = y + height
+      tileCount = tileHeight
       tileSize = tileSizeY
       isHorizontal = false
       break
     case 'right':
-      wallStartX = x + width + outsetX
-      wallStartY = y - outsetY
-      wallEndX = x + width + outsetX
-      wallEndY = y + height + outsetY
-      tileCount = tileHeight + 1
+      wallStartX = x + width
+      wallStartY = y
+      wallEndX = x + width
+      wallEndY = y + height
+      tileCount = tileHeight
       tileSize = tileSizeY
       isHorizontal = false
       break
@@ -149,12 +148,11 @@ function drawWallSide(
 
   if (door && door.side === side) {
     // ドアあり: 2つのセグメントに分けて描画
-    // 1-indexed: 位置1〜start（壁）、start+1〜end-1（開口部）、end〜最後（壁）
-    const doorStartPos = door.start * tileSize  // 位置startまで壁
-    const doorEndPos = door.end * tileSize      // 位置endから壁
+    const doorStartPos = door.start * tileSize
+    const doorEndPos = door.end * tileSize
 
-    // セグメント1: 始点〜位置start
-    if (door.start >= 1) {
+    // セグメント1: 始点〜ドア開始位置
+    if (door.start > 0) {
       if (isHorizontal) {
         graphics.moveTo(wallStartX, wallStartY)
         graphics.lineTo(wallStartX + doorStartPos, wallStartY)
@@ -165,8 +163,8 @@ function drawWallSide(
       graphics.stroke({ color: strokeColor, width: strokeWidth })
     }
 
-    // セグメント2: 位置end〜終点
-    if (door.end <= tileCount) {
+    // セグメント2: ドア終了位置〜終点
+    if (door.end < tileCount) {
       if (isHorizontal) {
         graphics.moveTo(wallStartX + doorEndPos, wallStartY)
         graphics.lineTo(wallEndX, wallEndY)
@@ -245,4 +243,26 @@ export function renderEntranceConnections(
       container.addChildAt(lineGraphics, 0)
     }
   }
+}
+
+/**
+ * NPCスプライトを作成
+ */
+export function createNPCSprite(
+  npc: NPC,
+  spritesheet: CharacterSpritesheet,
+  config: WorldConfig
+): AnimatedSprite {
+  const idleTexture = getIdleTexture(spritesheet, npc.direction)
+  const textures = getDirectionAnimation(spritesheet, npc.direction)
+  const sprite = new AnimatedSprite(textures)
+  sprite.anchor.set(0.5, 0.5)
+  sprite.scale.set(config.character.scale)
+  sprite.x = npc.position.x
+  sprite.y = npc.position.y
+  sprite.label = `npc-${npc.id}`
+  sprite.texture = idleTexture
+  sprite.stop()
+
+  return sprite
 }

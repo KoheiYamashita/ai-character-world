@@ -56,17 +56,16 @@ export function tileToPixelObstacle(
 ): { x: number; y: number; width: number; height: number } {
   const spacing = getGridSpacing(gridConfig)
 
-  // Calculate center position (exact, before rounding)
-  const centerX = spacing.x * (obsConfig.col + 1)
-  const centerY = spacing.y * (obsConfig.row + 1)
-
+  // row/col = 起点ノード位置（左上角）
+  // ピクセル座標はそのノードの位置
+  const x = spacing.x * (obsConfig.col + 1)
+  const y = spacing.y * (obsConfig.row + 1)
   const pixelWidth = spacing.x * obsConfig.tileWidth
   const pixelHeight = spacing.y * obsConfig.tileHeight
 
-  // Round once at the end to avoid accumulating rounding errors
   return {
-    x: Math.round(centerX - pixelWidth / 2),
-    y: Math.round(centerY - pixelHeight / 2),
+    x: Math.round(x),
+    y: Math.round(y),
     width: Math.round(pixelWidth),
     height: Math.round(pixelHeight),
   }
@@ -81,11 +80,12 @@ export function tileToPixelEntrance(
 }
 
 export function isPointInsideObstacle(x: number, y: number, obstacle: Obstacle): boolean {
+  // 起点ベース: 境界ノードは含まない（< を使用）
   return (
     x >= obstacle.x &&
-    x <= obstacle.x + obstacle.width &&
+    x < obstacle.x + obstacle.width &&
     y >= obstacle.y &&
-    y <= obstacle.y + obstacle.height
+    y < obstacle.y + obstacle.height
   )
 }
 
@@ -104,6 +104,7 @@ interface WallGeometry {
 
 /**
  * Calculate wall geometry for a given side.
+ * 壁はノード位置に直接描画（outset不要）
  */
 function getWallGeometry(
   side: WallSide,
@@ -114,38 +115,15 @@ function getWallGeometry(
   tileSizeX: number,
   tileSizeY: number
 ): WallGeometry {
-  const outsetX = tileSizeX / 2
-  const outsetY = tileSizeY / 2
-
   switch (side) {
     case 'top':
-      return {
-        fixedPos: y - outsetY,
-        rangeStart: x - outsetX,
-        rangeEnd: x + width + outsetX,
-        tileSize: tileSizeX,
-      }
+      return { fixedPos: y, rangeStart: x, rangeEnd: x + width, tileSize: tileSizeX }
     case 'bottom':
-      return {
-        fixedPos: y + height + outsetY,
-        rangeStart: x - outsetX,
-        rangeEnd: x + width + outsetX,
-        tileSize: tileSizeX,
-      }
+      return { fixedPos: y + height, rangeStart: x, rangeEnd: x + width, tileSize: tileSizeX }
     case 'left':
-      return {
-        fixedPos: x - outsetX,
-        rangeStart: y - outsetY,
-        rangeEnd: y + height + outsetY,
-        tileSize: tileSizeY,
-      }
+      return { fixedPos: x, rangeStart: y, rangeEnd: y + height, tileSize: tileSizeY }
     case 'right':
-      return {
-        fixedPos: x + width + outsetX,
-        rangeStart: y - outsetY,
-        rangeEnd: y + height + outsetY,
-        tileSize: tileSizeY,
-      }
+      return { fixedPos: x + width, rangeStart: y, rangeEnd: y + height, tileSize: tileSizeY }
   }
 }
 
@@ -167,17 +145,15 @@ function isOffsetInDoor(offset: number, side: WallSide, door: DoorConfig | undef
 
 /**
  * Check if a node at (row, col) is inside a zone's boundary.
- * Note: zone.tileRow/tileCol are CENTER positions, not top-left corner.
+ * zone.tileRow/tileCol = 起点ノード位置
+ * 内部ノード = 壁の内側（壁上は含まない）
  */
-function isNodeInsideZone(row: number, col: number, zone: Obstacle): boolean {
-  const halfWidth = zone.tileWidth / 2
-  const halfHeight = zone.tileHeight / 2
-
+export function isNodeInsideZone(row: number, col: number, zone: Obstacle): boolean {
   return (
-    row >= zone.tileRow - halfHeight &&
-    row < zone.tileRow + halfHeight &&
-    col >= zone.tileCol - halfWidth &&
-    col < zone.tileCol + halfWidth
+    row > zone.tileRow &&
+    row < zone.tileRow + zone.tileHeight &&
+    col > zone.tileCol &&
+    col < zone.tileCol + zone.tileWidth
   )
 }
 
@@ -222,7 +198,7 @@ function isOnZoneWall(nodeX: number, nodeY: number, obstacles: Obstacle[]): bool
 /**
  * Check if a connection between two nodes crosses a zone wall (and not through a door).
  * Returns true if the connection should be blocked.
- * Note: zone.tileRow/tileCol are CENTER positions, not top-left corner
+ * zone.tileRow/tileCol = 起点ノード位置
  */
 function connectionCrossesZoneWall(
   fromRow: number,
@@ -243,40 +219,34 @@ function connectionCrossesZoneWall(
   const [insideRow, insideCol] = fromInside ? [fromRow, fromCol] : [toRow, toCol]
   const [outsideRow, outsideCol] = fromInside ? [toRow, toCol] : [fromRow, fromCol]
 
-  const halfWidth = zone.tileWidth / 2
-  const halfHeight = zone.tileHeight / 2
-  const topEdge = zone.tileRow - halfHeight
-  const bottomEdge = zone.tileRow + halfHeight
-  const leftEdge = zone.tileCol - halfWidth
-  const rightEdge = zone.tileCol + halfWidth
+  // Zone edges (起点ベース)
+  const topEdge = zone.tileRow
+  const bottomEdge = zone.tileRow + zone.tileHeight
+  const leftEdge = zone.tileCol
+  const rightEdge = zone.tileCol + zone.tileWidth
 
-  // Calculate first actual node positions (for door offset calculation)
-  // 0-indexed: first node on wall = offset 0
-  const firstNodeRow = Math.max(0, Math.ceil(topEdge))
-  const firstNodeCol = Math.max(0, Math.ceil(leftEdge))
-
+  // Door offset calculation: 0-indexed from zone origin
   // Top wall: outside node is above the zone's top edge
-  if (outsideRow < topEdge && zone.wallSides?.includes('top')) {
-    // 0-indexed offset (first node = 0)
-    const offset = insideCol - firstNodeCol
+  if (outsideRow <= topEdge && zone.wallSides?.includes('top')) {
+    const offset = insideCol - zone.tileCol
     if (!isOffsetInDoor(offset, 'top', zone.door)) return true
   }
 
   // Bottom wall: outside node is below the zone's bottom edge
   if (outsideRow >= bottomEdge && zone.wallSides?.includes('bottom')) {
-    const offset = insideCol - firstNodeCol
+    const offset = insideCol - zone.tileCol
     if (!isOffsetInDoor(offset, 'bottom', zone.door)) return true
   }
 
   // Left wall: outside node is to the left of the zone's left edge
-  if (outsideCol < leftEdge && zone.wallSides?.includes('left')) {
-    const offset = insideRow - firstNodeRow
+  if (outsideCol <= leftEdge && zone.wallSides?.includes('left')) {
+    const offset = insideRow - zone.tileRow
     if (!isOffsetInDoor(offset, 'left', zone.door)) return true
   }
 
   // Right wall: outside node is to the right of the zone's right edge
   if (outsideCol >= rightEdge && zone.wallSides?.includes('right')) {
-    const offset = insideRow - firstNodeRow
+    const offset = insideRow - zone.tileRow
     if (!isOffsetInDoor(offset, 'right', zone.door)) return true
   }
 

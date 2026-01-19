@@ -265,6 +265,7 @@ function buildMapFromConfigServer(mapConfig: MapConfigJson, config: WorldConfig)
       type: obs.type ?? 'building',
       wallSides: obs.wallSides,
       door: obs.door,
+      facility: obs.facility,
       tileRow: obs.row,
       tileCol: obs.col,
       tileWidth: obs.tileWidth,

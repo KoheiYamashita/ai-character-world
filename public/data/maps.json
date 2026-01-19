@@ -77,66 +77,38 @@
           "label": "コンビニ"
         },
         {
-          "id": "gym-entrance",
-          "row": 6,
-          "col": 12,
-          "connectedNodeIds": [
-            "town-6-11",
-            "town-7-11"
-          ],
-          "leadsTo": {
-            "mapId": "gym",
-            "nodeId": "gym-door"
-          },
-          "label": "ジム"
-        },
-        {
-          "id": "cafe2-entrance",
-          "row": 4,
-          "col": 12,
-          "connectedNodeIds": [
-            "town-4-11",
-            "town-5-11"
-          ],
-          "leadsTo": {
-            "mapId": "cafe2",
-            "nodeId": "cafe2-door"
-          },
-          "label": "喫茶店"
-        },
-        {
-          "id": "bar-entrance",
+          "id": "park-entrance",
           "row": 9,
-          "col": 2,
+          "col": 5,
           "connectedNodeIds": [
-            "town-8-2",
-            "town-8-3"
+            "town-8-5",
+            "town-8-6"
           ],
           "leadsTo": {
-            "mapId": "bar",
-            "nodeId": "bar-door"
+            "mapId": "park",
+            "nodeId": "park-town-entrance"
           },
-          "label": "バー"
+          "label": "公園"
         }
       ],
       "obstacles": [
         {
-          "row": 2,
-          "col": 5,
+          "row": 1,
+          "col": 4,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "噴水"
         },
         {
-          "row": 6,
-          "col": 2,
+          "row": 5,
+          "col": 1,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ベンチ"
         },
         {
-          "row": 6,
-          "col": 9,
+          "row": 5,
+          "col": 8,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ベンチ"
@@ -218,11 +190,11 @@
           "type": "spawn"
         },
         {
-          "nodeId": "home-1-9",
+          "nodeId": "home-2-10",
           "label": "キッチン"
         },
         {
-          "nodeId": "home-1-5",
+          "nodeId": "home-7-2",
           "label": "浴室"
         }
       ],
@@ -244,9 +216,9 @@
       ],
       "obstacles": [
         {
-          "row": 1,
-          "col": 0,
-          "tileWidth": 5,
+          "row": -1,
+          "col": -1,
+          "tileWidth": 6,
           "tileHeight": 5,
           "label": "寝室",
           "type": "zone",
@@ -260,35 +232,97 @@
             "side": "right",
             "start": 2,
             "end": 4
+          },
+          "facility": {
+            "tags": [
+              "bedroom"
+            ],
+            "owner": "kanon"
           }
         },
         {
-          "row": 2,
-          "col": 1,
+          "row": 0,
+          "col": 0,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ベッド"
         },
         {
-          "row": 3,
-          "col": 8,
+          "row": 6,
+          "col": 9,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ソファ"
         },
         {
-          "row": 6,
-          "col": 10,
-          "tileWidth": 2,
-          "tileHeight": 2,
-          "label": "テーブル"
+          "row": -1,
+          "col": 7,
+          "tileWidth": 5,
+          "tileHeight": 4,
+          "label": "キッチン",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "kitchen"
+            ],
+            "owner": "kanon"
+          }
         },
         {
-          "row": 0,
-          "col": 11,
+          "row": -1,
+          "col": 9,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "調理台"
+        },
+        {
+          "row": 4,
+          "col": -2,
+          "tileWidth": 7,
+          "tileHeight": 5,
+          "label": "浴室",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "right",
+            "start": 1,
+            "end": 3
+          },
+          "facility": {
+            "tags": [
+              "bathroom",
+              "toilet"
+            ],
+            "owner": "kanon"
+          }
+        },
+        {
+          "row": 3,
+          "col": 7,
+          "tileWidth": 5,
+          "tileHeight": 6,
+          "label": "書斎",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "workspace"
+            ],
+            "owner": "kanon"
+          }
+        },
+        {
+          "row": 4,
+          "col": 9,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "デスク"
         }
       ]
     },
@@ -346,28 +380,44 @@
       "obstacles": [
         {
           "row": 3,
-          "col": 5,
+          "col": 3,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "飲食エリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "restaurant"
+            ],
+            "cost": 800,
+            "quality": 70
+          }
+        },
+        {
+          "row": 2,
+          "col": 3,
           "tileWidth": 4,
           "tileHeight": 2,
           "label": "カウンター"
         },
         {
-          "row": 1,
-          "col": 11,
+          "row": 0,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "テーブル"
         },
         {
-          "row": 4,
-          "col": 11,
+          "row": 3,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "テーブル"
         },
         {
-          "row": 7,
-          "col": 11,
+          "row": 6,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "テーブル"
@@ -435,10 +485,6 @@
           "label": "会議室"
         },
         {
-          "nodeId": "office-1-9",
-          "label": "社長室"
-        },
-        {
           "nodeId": "office-5-2",
           "label": "作業エリア"
         },
@@ -447,8 +493,8 @@
           "label": "作業エリア"
         },
         {
-          "nodeId": "office-8-2",
-          "label": "休憩室"
+          "nodeId": "office-7-2",
+          "label": "トイレ"
         }
       ],
       "entrances": [
@@ -469,32 +515,64 @@
       ],
       "obstacles": [
         {
-          "row": 3,
+          "row": -1,
+          "col": 3,
+          "tileWidth": 9,
+          "tileHeight": 10,
+          "label": "作業エリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "workspace"
+            ]
+          }
+        },
+        {
+          "row": 2,
           "col": 5,
           "tileWidth": 4,
           "tileHeight": 2,
           "label": "デスク列"
         },
         {
-          "row": 6,
+          "row": 5,
           "col": 5,
           "tileWidth": 4,
           "tileHeight": 2,
           "label": "デスク列"
         },
         {
-          "row": 1,
-          "col": 0,
+          "row": 0,
+          "col": -1,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "会議机"
         },
         {
-          "row": 1,
-          "col": 11,
-          "tileWidth": 2,
-          "tileHeight": 2,
-          "label": "社長机"
+          "row": 4,
+          "col": -2,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "トイレ",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "right",
+            "start": 1,
+            "end": 3
+          },
+          "facility": {
+            "tags": [
+              "toilet",
+              "public"
+            ]
+          }
         }
       ]
     },
@@ -555,29 +633,45 @@
       ],
       "obstacles": [
         {
-          "row": 2,
-          "col": 0,
+          "row": 1,
+          "col": -1,
           "tileWidth": 2,
           "tileHeight": 3,
           "label": "棚"
         },
         {
-          "row": 2,
-          "col": 4,
-          "tileWidth": 2,
-          "tileHeight": 3,
-          "label": "棚"
-        },
-        {
-          "row": 2,
-          "col": 8,
-          "tileWidth": 2,
-          "tileHeight": 3,
-          "label": "棚"
-        },
-        {
-          "row": 7,
+          "row": 1,
           "col": 3,
+          "tileWidth": 2,
+          "tileHeight": 3,
+          "label": "棚"
+        },
+        {
+          "row": 1,
+          "col": 7,
+          "tileWidth": 2,
+          "tileHeight": 3,
+          "label": "棚"
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "店内エリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "restaurant"
+            ],
+            "cost": 400,
+            "quality": 40
+          }
+        },
+        {
+          "row": 6,
+          "col": 2,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "レジ"
@@ -641,6 +735,181 @@
       ]
     },
     {
+      "id": "park",
+      "name": "桜木公園",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x228b22",
+      "spawnNodeId": "park-town-entrance",
+      "grid": {
+        "prefix": "park",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        {
+          "nodeId": "park-6-5",
+          "label": "広場",
+          "type": "spawn"
+        },
+        {
+          "nodeId": "park-3-2",
+          "label": "ベンチ"
+        },
+        {
+          "nodeId": "park-3-9",
+          "label": "ベンチ"
+        }
+      ],
+      "entrances": [
+        {
+          "id": "park-town-entrance",
+          "row": -1,
+          "col": 5,
+          "connectedNodeIds": [
+            "park-0-5",
+            "park-0-6"
+          ],
+          "leadsTo": {
+            "mapId": "town",
+            "nodeId": "park-entrance"
+          },
+          "label": "広場へ"
+        },
+        {
+          "id": "gym-entrance",
+          "row": 4,
+          "col": 12,
+          "connectedNodeIds": [
+            "park-4-11",
+            "park-5-11"
+          ],
+          "leadsTo": {
+            "mapId": "gym",
+            "nodeId": "gym-door"
+          },
+          "label": "ジム"
+        },
+        {
+          "id": "cafe2-entrance",
+          "row": 2,
+          "col": 12,
+          "connectedNodeIds": [
+            "park-2-11",
+            "park-3-11"
+          ],
+          "leadsTo": {
+            "mapId": "cafe2",
+            "nodeId": "cafe2-door"
+          },
+          "label": "喫茶店"
+        },
+        {
+          "id": "bar-entrance",
+          "row": 6,
+          "col": 12,
+          "connectedNodeIds": [
+            "park-6-11",
+            "park-7-11"
+          ],
+          "leadsTo": {
+            "mapId": "bar",
+            "nodeId": "bar-door"
+          },
+          "label": "バー"
+        },
+        {
+          "id": "hotspring-entrance",
+          "row": 9,
+          "col": 3,
+          "connectedNodeIds": [
+            "park-8-3",
+            "park-8-4"
+          ],
+          "leadsTo": {
+            "mapId": "hotspring",
+            "nodeId": "hotspring-door"
+          },
+          "label": "温泉"
+        },
+        {
+          "id": "hotel-entrance",
+          "row": 9,
+          "col": 8,
+          "connectedNodeIds": [
+            "park-8-8",
+            "park-8-9"
+          ],
+          "leadsTo": {
+            "mapId": "hotel",
+            "nodeId": "hotel-door"
+          },
+          "label": "ホテル"
+        }
+      ],
+      "obstacles": [
+        {
+          "row": 0,
+          "col": 1,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "ベンチ"
+        },
+        {
+          "row": 0,
+          "col": 8,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "ベンチ"
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "噴水"
+        }
+      ],
+      "npcs": [
+        {
+          "id": "park-haruka",
+          "name": "はるか",
+          "spawnNodeId": "park-3-3",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/park/haruka.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        },
+        {
+          "id": "park-takeshi",
+          "name": "たけし",
+          "spawnNodeId": "park-6-8",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/park/takeshi.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "gym",
       "name": "マッスルファクトリー",
       "width": 800,
@@ -685,7 +954,7 @@
             "gym-5-0"
           ],
           "leadsTo": {
-            "mapId": "town",
+            "mapId": "park",
             "nodeId": "gym-entrance"
           },
           "label": "外へ"
@@ -693,29 +962,29 @@
       ],
       "obstacles": [
         {
-          "row": 1,
-          "col": 0,
+          "row": 0,
+          "col": -1,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ランニング\nマシン"
         },
         {
-          "row": 1,
-          "col": 5,
+          "row": 0,
+          "col": 4,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ランニング\nマシン"
         },
         {
-          "row": 1,
-          "col": 11,
+          "row": 0,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ダンベル"
         },
         {
-          "row": 3,
-          "col": 8,
+          "row": 2,
+          "col": 7,
           "tileWidth": 3,
           "tileHeight": 2,
           "label": "ベンチ\nプレス"
@@ -823,7 +1092,7 @@
             "cafe2-5-0"
           ],
           "leadsTo": {
-            "mapId": "town",
+            "mapId": "park",
             "nodeId": "cafe2-entrance"
           },
           "label": "外へ"
@@ -832,28 +1101,44 @@
       "obstacles": [
         {
           "row": 3,
-          "col": 5,
+          "col": 3,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "飲食エリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "restaurant"
+            ],
+            "cost": 600,
+            "quality": 65
+          }
+        },
+        {
+          "row": 2,
+          "col": 4,
           "tileWidth": 3,
           "tileHeight": 2,
           "label": "カウンター"
         },
         {
-          "row": 1,
-          "col": 11,
+          "row": 0,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ソファ"
         },
         {
-          "row": 4,
-          "col": 11,
+          "row": 3,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "テーブル"
         },
         {
-          "row": 7,
-          "col": 11,
+          "row": 6,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "テーブル"
@@ -936,14 +1221,14 @@
       "entrances": [
         {
           "id": "bar-door",
-          "row": -1,
-          "col": 5,
+          "row": 4,
+          "col": -1,
           "connectedNodeIds": [
-            "bar-0-5",
-            "bar-0-6"
+            "bar-4-0",
+            "bar-5-0"
           ],
           "leadsTo": {
-            "mapId": "town",
+            "mapId": "park",
             "nodeId": "bar-entrance"
           },
           "label": "外へ"
@@ -952,21 +1237,37 @@
       "obstacles": [
         {
           "row": 3,
-          "col": 5,
+          "col": 3,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "飲食エリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "tags": [
+              "restaurant"
+            ],
+            "cost": 1000,
+            "quality": 75
+          }
+        },
+        {
+          "row": 2,
+          "col": 4,
           "tileWidth": 3,
           "tileHeight": 2,
           "label": "カウンター"
         },
         {
-          "row": 2,
-          "col": 1,
+          "row": 1,
+          "col": 0,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ボックス席"
         },
         {
-          "row": 1,
-          "col": 11,
+          "row": 0,
+          "col": 10,
           "tileWidth": 2,
           "tileHeight": 2,
           "label": "ボックス席"
@@ -979,6 +1280,320 @@
           "spawnNodeId": "bar-5-6",
           "sprite": {
             "sheetUrl": "/assets/sprites/npcs/bar/koji.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "hotspring",
+      "name": "さくらの湯",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x8fbc8f",
+      "spawnNodeId": "hotspring-door",
+      "grid": {
+        "prefix": "hotspring",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        {
+          "nodeId": "hotspring-4-2",
+          "label": "ロビー",
+          "type": "spawn"
+        },
+        {
+          "nodeId": "hotspring-2-8",
+          "label": "大浴場"
+        },
+        {
+          "nodeId": "hotspring-7-8",
+          "label": "脱衣所"
+        }
+      ],
+      "entrances": [
+        {
+          "id": "hotspring-door",
+          "row": 4,
+          "col": -1,
+          "connectedNodeIds": [
+            "hotspring-4-0",
+            "hotspring-5-0"
+          ],
+          "leadsTo": {
+            "mapId": "park",
+            "nodeId": "hotspring-entrance"
+          },
+          "label": "外へ"
+        }
+      ],
+      "obstacles": [
+        {
+          "row": 0,
+          "col": -1,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "受付"
+        },
+        {
+          "row": -2,
+          "col": 3,
+          "tileWidth": 6,
+          "tileHeight": 5,
+          "label": "大浴場",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "left",
+            "start": 2,
+            "end": 4
+          },
+          "facility": {
+            "tags": [
+              "hotspring",
+              "bathroom",
+              "public"
+            ],
+            "cost": 800,
+            "quality": 85
+          }
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "tileWidth": 6,
+          "tileHeight": 4,
+          "label": "脱衣所",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "left",
+            "start": 1,
+            "end": 3
+          },
+          "facility": {
+            "tags": [
+              "bathroom",
+              "public"
+            ]
+          }
+        }
+      ],
+      "npcs": [
+        {
+          "id": "hotspring-yuki",
+          "name": "ゆき",
+          "spawnNodeId": "hotspring-0-5",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/hotspring/yuki.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        },
+        {
+          "id": "hotspring-masa",
+          "name": "まさ",
+          "spawnNodeId": "hotspring-5-5",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/hotspring/masa.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "hotel",
+      "name": "桜木ホテル",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0xdaa520",
+      "spawnNodeId": "hotel-door",
+      "grid": {
+        "prefix": "hotel",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [
+        {
+          "nodeId": "hotel-4-2",
+          "label": "ロビー",
+          "type": "spawn"
+        },
+        {
+          "nodeId": "hotel-2-9",
+          "label": "客室"
+        },
+        {
+          "nodeId": "hotel-7-9",
+          "label": "レストラン"
+        }
+      ],
+      "entrances": [
+        {
+          "id": "hotel-door",
+          "row": 4,
+          "col": -1,
+          "connectedNodeIds": [
+            "hotel-4-0",
+            "hotel-5-0"
+          ],
+          "leadsTo": {
+            "mapId": "park",
+            "nodeId": "hotel-entrance"
+          },
+          "label": "外へ"
+        }
+      ],
+      "obstacles": [
+        {
+          "row": 0,
+          "col": -1,
+          "tileWidth": 2,
+          "tileHeight": 2,
+          "label": "フロント"
+        },
+        {
+          "row": -2,
+          "col": 5,
+          "tileWidth": 6,
+          "tileHeight": 5,
+          "label": "客室",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "left",
+            "start": 2,
+            "end": 4
+          },
+          "facility": {
+            "tags": [
+              "hotel",
+              "bedroom"
+            ],
+            "cost": 5000,
+            "quality": 80
+          }
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "tileWidth": 6,
+          "tileHeight": 4,
+          "label": "レストラン",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "left",
+            "start": 1,
+            "end": 3
+          },
+          "facility": {
+            "tags": [
+              "hotel",
+              "restaurant"
+            ],
+            "cost": 1500,
+            "quality": 75
+          }
+        },
+        {
+          "row": 5,
+          "col": -2,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "label": "バスルーム",
+          "type": "zone",
+          "wallSides": [
+            "top",
+            "left",
+            "bottom",
+            "right"
+          ],
+          "door": {
+            "side": "top",
+            "start": 1,
+            "end": 3
+          },
+          "facility": {
+            "tags": [
+              "hotel",
+              "bathroom"
+            ]
+          }
+        }
+      ],
+      "npcs": [
+        {
+          "id": "hotel-kaori",
+          "name": "かおり",
+          "spawnNodeId": "hotel-0-7",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/hotel/kaori.png",
+            "frameWidth": 96,
+            "frameHeight": 96,
+            "cols": 3,
+            "rows": 4,
+            "rowMapping": {
+              "down": 0,
+              "left": 1,
+              "right": 2,
+              "up": 3
+            }
+          }
+        },
+        {
+          "id": "hotel-shin",
+          "name": "しん",
+          "spawnNodeId": "hotel-5-7",
+          "sprite": {
+            "sheetUrl": "/assets/sprites/npcs/hotel/shin.png",
             "frameWidth": 96,
             "frameHeight": 96,
             "cols": 3,

@@ -171,6 +171,7 @@ export function buildMapFromConfig(config: MapConfigJson): GameMap {
       type: obs.type ?? 'building',
       wallSides: obs.wallSides,
       door: obs.door,
+      facility: obs.facility,
       // Preserve tile coordinates for wall collision calculations
       tileRow: obs.row,
       tileCol: obs.col,

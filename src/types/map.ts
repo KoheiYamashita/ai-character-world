@@ -18,6 +18,25 @@ export interface PathNode {
 export type ObstacleType = 'building' | 'zone'
 export type WallSide = 'top' | 'bottom' | 'left' | 'right'
 
+// Facility types for action locations
+export type FacilityTag =
+  | 'bathroom'
+  | 'kitchen'
+  | 'bedroom'
+  | 'toilet'
+  | 'restaurant'
+  | 'workspace'
+  | 'hotspring'
+  | 'hotel'
+  | 'public'
+
+export interface FacilityInfo {
+  tags: FacilityTag[]
+  owner?: string      // 所有者ID
+  cost?: number       // 利用料金
+  quality?: number    // 品質（0-100）
+}
+
 export interface DoorConfig {
   side: WallSide
   // 壁終端位置を指定（0-indexed、壁の最初のノード=0）
@@ -38,6 +57,7 @@ export interface ObstacleConfigJson {
   type?: ObstacleType // デフォルト: 'building'
   wallSides?: WallSide[] // zone用: 壁のある辺
   door?: DoorConfig // zone用: 扉の位置範囲
+  facility?: FacilityInfo // 施設情報
 }
 
 export interface Obstacle {
@@ -50,6 +70,7 @@ export interface Obstacle {
   type: ObstacleType
   wallSides?: WallSide[]
   door?: DoorConfig
+  facility?: FacilityInfo // 施設情報
   // タイルベースの座標情報（壁衝突計算用）
   tileRow: number
   tileCol: number

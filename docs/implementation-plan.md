@@ -33,16 +33,16 @@
 
 ---
 
-### Step 3: 施設システム（型・ローダー・データ）
+### ✅ Step 3: 施設システム（型・ローダー・データ）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 3-1 | `src/types/map.ts` に `FacilityTag`, `FacilityInfo` 型追加 | ビルド通過 |
-| 3-2 | `src/types/map.ts` の `Obstacle` に `facility?: FacilityInfo` 追加 | ビルド通過 |
-| 3-3 | `public/data/maps.json` の obstacles に facility 追加（自宅: bedroom, kitchen等） | JSONバリデーション通過 |
-| 3-4 | `src/lib/mapLoader.ts` で facility のパース追加 | クライアント側読み込み成功 |
-| 3-5 | `src/server/simulation/dataLoader.ts` で facility のパース追加 | サーバー側読み込み成功 |
-| 3-6 | Zone と PathNode の関連付けデータ構築（Zone内ノードの特定） | Zone判定可能 |
+| ✅ 3-1 | `src/types/map.ts` に `FacilityTag`, `FacilityInfo` 型追加 | ビルド通過 |
+| ✅ 3-2 | `src/types/map.ts` の `Obstacle` に `facility?: FacilityInfo` 追加 | ビルド通過 |
+| ✅ 3-3 | `public/data/maps.json` の obstacles に facility 追加（自宅: bedroom, kitchen等） | JSONバリデーション通過 |
+| ✅ 3-4 | `src/lib/mapLoader.ts` で facility のパース追加 | クライアント側読み込み成功 |
+| ✅ 3-5 | `src/server/simulation/dataLoader.ts` で facility のパース追加 | サーバー側読み込み成功 |
+| ✅ 3-6 | Zone と PathNode の関連付けデータ構築（Zone内ノードの特定） | Zone判定可能 |
 
 ---
 
