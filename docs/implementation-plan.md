@@ -46,25 +46,25 @@
 
 ---
 
-### Step 4: アクション定義
+### ✅ Step 4: アクション定義
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 4-1 | `src/types/action.ts` 新規作成: `ActionDefinition`, `ActionState` 型 | ビルド通過 |
-| 4-2 | `src/server/simulation/actions/definitions.ts` に ACTIONS 定数（eat, sleep, toilet, bathe, rest） | ビルド通過 |
-| 4-3 | `SimCharacter` に `currentAction?: ActionState` 追加 | ビルド通過 |
+| ✅ 4-1 | `src/types/action.ts` 新規作成: `ActionDefinition`, `ActionState` 型 | ビルド通過 |
+| ✅ 4-2 | `src/server/simulation/actions/definitions.ts` に ACTIONS 定数（eat, sleep, toilet, bathe, rest） | ビルド通過 |
+| ✅ 4-3 | `SimCharacter` に `currentAction?: ActionState` 追加 | ビルド通過 |
 
 ---
 
-### Step 5: アクション実行ロジック（CharacterSimulator置換）
+### ✅ Step 5: アクション実行ロジック（CharacterSimulator置換）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 5-1 | `src/server/simulation/actions/ActionExecutor.ts` 新規作成 | ビルド通過 |
-| 5-2 | アクション開始・終了管理ロジック実装 | アクション状態遷移 |
-| 5-3 | アクション所要時間の待機（現実時間ベース） | 待機後に完了 |
-| 5-4 | `CharacterSimulator` のランダム移動ロジックを無効化/削除 | ランダム移動停止 |
-| 5-5 | `ActionExecutor` を `SimulationEngine` に統合 | エンジンからアクション実行 |
+| ✅ 5-1 | `src/server/simulation/actions/ActionExecutor.ts` 新規作成 | ビルド通過 |
+| ✅ 5-2 | アクション開始・終了管理ロジック実装 | アクション状態遷移 |
+| ✅ 5-3 | アクション所要時間の待機（現実時間ベース） | 待機後に完了 |
+| ✅ 5-4 | `CharacterSimulator` のランダム移動ロジックを無効化/削除 | ランダム移動停止 |
+| ✅ 5-5 | `ActionExecutor` を `SimulationEngine` に統合 | エンジンからアクション実行 |
 
 ---
 

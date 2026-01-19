@@ -7,6 +7,7 @@ import type {
 import { DEFAULT_SIMULATION_CONFIG, createSimCharacter } from './types'
 import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
+import { ActionExecutor } from './actions/ActionExecutor'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -15,6 +16,7 @@ const DEFAULT_TIMEZONE = 'Asia/Tokyo'
 export class SimulationEngine {
   private worldState: WorldStateManager
   private characterSimulator: CharacterSimulator
+  private actionExecutor: ActionExecutor
   private config: SimulationConfig
   private subscribers: Set<StateChangeCallback> = new Set()
   private tickInterval: ReturnType<typeof setInterval> | null = null
@@ -31,6 +33,7 @@ export class SimulationEngine {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
+    this.actionExecutor = new ActionExecutor(this.worldState)
   }
 
   // Initialize with world data
@@ -143,7 +146,10 @@ export class SimulationEngine {
       }
     }
 
-    // Update character simulations
+    // Update action execution (checks for completion)
+    this.actionExecutor.tick(now)
+
+    // Update character simulations (movement, transitions)
     this.characterSimulator.tick(deltaTime, now)
 
     // Increment tick counter
@@ -301,6 +307,16 @@ export class SimulationEngine {
   // Set server start time (for restoration from persistence)
   setServerStartTime(time: number): void {
     this.serverStartTime = time
+  }
+
+  // Get action executor (for external action control)
+  getActionExecutor(): ActionExecutor {
+    return this.actionExecutor
+  }
+
+  // Get character simulator (for external navigation control)
+  getCharacterSimulator(): CharacterSimulator {
+    return this.characterSimulator
   }
 }
 

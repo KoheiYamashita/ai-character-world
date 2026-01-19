@@ -5,11 +5,6 @@ import { findPathAvoidingNodes } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance } from '@/lib/movement'
 import { planCrossMapRoute, hasMoreSegments } from '@/lib/crossMapNavigation'
 
-interface IdleState {
-  characterId: string
-  nextMoveTime: number
-}
-
 // Track conversation destinations (which NPC the character is heading to)
 interface ConversationDestination {
   npcId: string
@@ -19,7 +14,6 @@ interface ConversationDestination {
 export class CharacterSimulator {
   private worldState: WorldStateManager
   private config: SimulationConfig
-  private idleStates: Map<string, IdleState> = new Map()
   private transitionStates: Map<string, TransitionSimState> = new Map()
   private conversationDestinations: Map<string, ConversationDestination> = new Map()
 
@@ -33,6 +27,11 @@ export class CharacterSimulator {
     const characters = this.worldState.getAllCharacters()
 
     for (const character of characters) {
+      // Skip if executing action (ActionExecutor handles this)
+      if (character.currentAction) {
+        continue
+      }
+
       // Handle transition animation
       if (this.transitionStates.has(character.id)) {
         this.updateTransition(character.id, deltaTime)
@@ -47,12 +46,9 @@ export class CharacterSimulator {
         continue // Skip movement while in conversation
       }
 
-      // Handle movement
+      // Handle movement (idle state handled by BehaviorDecider in future)
       if (character.navigation.isMoving) {
         this.updateMovement(character, deltaTime)
-      } else {
-        // Check if it's time to start a new move
-        this.checkIdleAndMove(character, currentTime)
       }
     }
   }
@@ -119,11 +115,9 @@ export class CharacterSimulator {
       return
     }
 
-    // Normal navigation: check for entrance
+    // Check for entrance (otherwise idle - BehaviorDecider handles next action)
     if (finalNode?.type === 'entrance' && finalNode.leadsTo) {
       this.startMapTransition(character.id, finalNode)
-    } else {
-      this.scheduleNextMove(character.id)
     }
   }
 
@@ -144,7 +138,6 @@ export class CharacterSimulator {
 
     // No more segments - reached final destination
     this.worldState.completeCrossMapNavigation(character.id)
-    this.scheduleNextMove(character.id)
   }
 
   private handleContinueToNextNode(character: SimCharacter, nextIndex: number, newPosition: Position): void {
@@ -166,112 +159,45 @@ export class CharacterSimulator {
     this.worldState.updateCharacterDirection(character.id, getDirection(newPosition, nextPosition))
   }
 
-  private checkIdleAndMove(character: SimCharacter, currentTime: number): void {
-    // Skip if cross-map navigating (waiting for transition)
-    if (this.worldState.isCrossMapNavigating(character.id)) {
-      return
-    }
+  // ===== Public methods for external navigation control =====
 
-    // Skip if in transition
-    if (this.transitionStates.has(character.id)) {
-      return
-    }
+  /**
+   * 外部から経路移動を指示（Step 6連携用）
+   * @returns 移動開始成功時true
+   */
+  public navigateToNode(characterId: string, targetNodeId: string): boolean {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return false
 
-    const idleState = this.idleStates.get(character.id)
+    const map = this.worldState.getMap(character.currentMapId)
+    if (!map) return false
 
-    if (!idleState) {
-      // Schedule initial move
-      this.scheduleNextMove(character.id)
-      return
-    }
+    // 既に移動中ならスキップ
+    if (character.navigation.isMoving) return false
 
-    if (currentTime >= idleState.nextMoveTime) {
-      this.moveToRandomNode(character)
-    }
-  }
+    // 同じノードならスキップ
+    if (character.currentNodeId === targetNodeId) return true
 
-  private scheduleNextMove(characterId: string): void {
-    const idleTime =
-      this.config.idleTimeMin +
-      Math.random() * (this.config.idleTimeMax - this.config.idleTimeMin)
-
-    this.idleStates.set(characterId, {
-      characterId,
-      nextMoveTime: Date.now() + idleTime,
-    })
-  }
-
-  private moveToRandomNode(character: SimCharacter): void {
-    const maps = this.worldState.getMaps()
-    const map = maps[character.currentMapId]
-    if (!map) return
-
-    const random = Math.random()
-
-    // 30% chance of conversation (if NPCs available on current map)
-    if (random < this.config.conversationProbability) {
-      if (this.tryStartConversationMove(character)) {
-        return
-      }
-    }
-
-    // Remaining probability split between cross-map and same-map movement
-    const adjustedRandom = (random - this.config.conversationProbability) / (1 - this.config.conversationProbability)
-    const shouldCrossMap = adjustedRandom < this.config.crossMapProbability
-    const allMapIds = Object.keys(maps)
-
-    if (shouldCrossMap && allMapIds.length > 1) {
-      // Select a random different map
-      const otherMapIds = allMapIds.filter((id) => id !== character.currentMapId)
-      const randomMapId = otherMapIds[Math.floor(Math.random() * otherMapIds.length)]
-      const randomMap = maps[randomMapId]
-
-      if (randomMap && randomMap.nodes.length > 0) {
-        // Select a random non-entrance node in the target map
-        const targetNodes = randomMap.nodes.filter((n) => n.type !== 'entrance')
-        const randomNode =
-          targetNodes.length > 0
-            ? targetNodes[Math.floor(Math.random() * targetNodes.length)]
-            : randomMap.nodes[Math.floor(Math.random() * randomMap.nodes.length)]
-
-        this.initiateCrossMapNavigation(character, randomMapId, randomNode.id)
-        return
-      }
-    }
-
-    // Same-map movement
-    this.moveToRandomNodeInMap(character, map)
-  }
-
-  private moveToRandomNodeInMap(character: SimCharacter, map: GameMap): void {
     const npcBlockedNodes = this.worldState.getNPCBlockedNodes(character.currentMapId)
+    const path = findPathAvoidingNodes(map, character.currentNodeId, targetNodeId, npcBlockedNodes)
 
-    const shouldGoToEntrance = Math.random() < this.config.entranceProbability
-    const otherNodes = map.nodes.filter((n) =>
-      n.id !== character.currentNodeId && !npcBlockedNodes.has(n.id)
-    )
-    const nonEntranceNodes = otherNodes.filter((n) => n.type !== 'entrance')
-
-    const availableNodes =
-      shouldGoToEntrance || nonEntranceNodes.length === 0 ? otherNodes : nonEntranceNodes
-
-    if (availableNodes.length === 0) {
-      this.scheduleNextMove(character.id)
-      return
-    }
-
-    const randomNode = availableNodes[Math.floor(Math.random() * availableNodes.length)]
-    const path = findPathAvoidingNodes(map, character.currentNodeId, randomNode.id, npcBlockedNodes)
-
-    if (path.length <= 1) {
-      this.scheduleNextMove(character.id)
-      return
-    }
+    if (path.length <= 1) return false
 
     this.startNavigationOnPath(character, path, map)
+    return true
   }
 
-  private initiateCrossMapNavigation(character: SimCharacter, targetMapId: string, targetNodeId: string): void {
+  /**
+   * クロスマップ移動を開始（Step 6連携用）
+   * @returns 移動開始成功時true
+   */
+  public navigateToMap(characterId: string, targetMapId: string, targetNodeId: string): boolean {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return false
+
+    // 既に移動中ならスキップ
+    if (character.navigation.isMoving) return false
+
     const maps = this.worldState.getMaps()
 
     // Build blocked nodes map for all maps
@@ -293,16 +219,16 @@ export class CharacterSimulator {
     )
 
     if (!route || route.segments.length === 0) {
-      this.scheduleNextMove(character.id)
-      return
+      return false
     }
 
     // Start cross-map navigation
-    this.worldState.startCrossMapNavigation(character.id, targetMapId, targetNodeId, route)
+    this.worldState.startCrossMapNavigation(characterId, targetMapId, targetNodeId, route)
 
     // Start the first segment
     const firstSegment = route.segments[0]
     this.startCrossMapSegment(character, firstSegment)
+    return true
   }
 
   private startCrossMapSegment(character: SimCharacter, segment: RouteSegment): void {
@@ -321,7 +247,6 @@ export class CharacterSimulator {
         }
       } else {
         this.worldState.completeCrossMapNavigation(character.id)
-        this.scheduleNextMove(character.id)
       }
       return
     }
@@ -338,9 +263,6 @@ export class CharacterSimulator {
 
     this.worldState.startNavigation(character.id, path, currentPosition, targetPosition)
     this.worldState.updateCharacterDirection(character.id, getDirection(currentPosition, targetPosition))
-
-    // Clear idle state when starting movement
-    this.idleStates.delete(character.id)
   }
 
   // Map transition handling
@@ -408,108 +330,12 @@ export class CharacterSimulator {
               this.startCrossMapSegment(character, currentSegment)
             }
           }
-        } else {
-          this.scheduleNextMove(characterId)
         }
       }
     }
   }
 
   // Conversation methods
-
-  // Try to start a conversation move to an available NPC
-  private tryStartConversationMove(character: SimCharacter): boolean {
-    const npcsOnMap = this.worldState.getNPCsOnMap(character.currentMapId)
-
-    // Filter out NPCs already in conversation
-    const availableNPCs = npcsOnMap.filter((npc) => !npc.isInConversation)
-    if (availableNPCs.length === 0) {
-      return false
-    }
-
-    // Select a random available NPC
-    const targetNPC = availableNPCs[Math.floor(Math.random() * availableNPCs.length)]
-    const map = this.worldState.getMap(character.currentMapId)
-    if (!map) return false
-
-    // Find adjacent nodes to the NPC (cardinal directions only - no diagonals)
-    const adjacentNodeIds = this.getCardinalAdjacentNodes(targetNPC.currentNodeId, map)
-    const npcBlockedNodes = this.worldState.getNPCBlockedNodes(character.currentMapId)
-
-    // Filter to available (unblocked) adjacent nodes
-    const availableAdjacent = adjacentNodeIds.filter((id) => !npcBlockedNodes.has(id))
-    if (availableAdjacent.length === 0) {
-      return false
-    }
-
-    // Check if character is already at an adjacent node - start conversation immediately
-    if (availableAdjacent.includes(character.currentNodeId)) {
-      this.startConversation(character.id, targetNPC.id)
-      return true
-    }
-
-    // Select closest adjacent node to character
-    const characterNode = map.nodes.find((n) => n.id === character.currentNodeId)
-    if (!characterNode) return false
-
-    let closestNode: PathNode | null = null
-    let closestDistance = Infinity
-
-    for (const nodeId of availableAdjacent) {
-      const node = map.nodes.find((n) => n.id === nodeId)
-      if (!node) continue
-
-      const distance = getDistance(characterNode, node)
-      if (distance < closestDistance) {
-        closestDistance = distance
-        closestNode = node
-      }
-    }
-
-    if (!closestNode) return false
-
-    // Find path to the closest adjacent node
-    const path = findPathAvoidingNodes(map, character.currentNodeId, closestNode.id, npcBlockedNodes)
-    if (path.length <= 1) {
-      // Path too short (shouldn't happen if closestNode is different from current)
-      return false
-    }
-
-    // Store conversation destination
-    this.conversationDestinations.set(character.id, {
-      npcId: targetNPC.id,
-      targetNodeId: closestNode.id,
-    })
-
-    // Start navigation to the adjacent node
-    this.startNavigationOnPath(character, path, map)
-    return true
-  }
-
-  // Get adjacent (connected) nodes to a given node - cardinal directions only (no diagonals)
-  private getCardinalAdjacentNodes(nodeId: string, map: GameMap): string[] {
-    const node = map.nodes.find((n) => n.id === nodeId)
-    if (!node) return []
-
-    // Parse nodeId to get row/col (format: prefix-row-col)
-    const parts = nodeId.split('-')
-    if (parts.length < 3) return node.connectedTo // Fallback for non-grid nodes
-
-    const prefix = parts.slice(0, -2).join('-')
-    const row = parseInt(parts[parts.length - 2], 10)
-    const col = parseInt(parts[parts.length - 1], 10)
-
-    // Cardinal direction node IDs
-    const cardinalIds = [
-      `${prefix}-${row - 1}-${col}`, // up
-      `${prefix}-${row + 1}-${col}`, // down
-      `${prefix}-${row}-${col - 1}`, // left
-      `${prefix}-${row}-${col + 1}`, // right
-    ]
-
-    // Filter connected nodes to only include cardinal directions
-    return node.connectedTo.filter((connectedId) => cardinalIds.includes(connectedId))
-  }
 
   // Start a conversation between character and NPC
   private startConversation(characterId: string, npcId: string): void {
@@ -555,9 +381,6 @@ export class CharacterSimulator {
     this.worldState.updateCharacter(characterId, {
       conversation: null,
     })
-
-    // Schedule next move
-    this.scheduleNextMove(characterId)
   }
 
   // Get direction from one position to another
