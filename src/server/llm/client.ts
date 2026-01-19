@@ -99,11 +99,13 @@ export async function llmGenerateText(
   prompt: string,
   options?: { system?: string }
 ): Promise<string> {
-  if (!model) {
-    throw new Error('LLM client not initialized')
-  }
-
   const errorHandler = getLLMErrorHandler()
+
+  if (!model) {
+    const error = new Error('LLM client not initialized')
+    await errorHandler.handleError(error, { operation: 'generateText', reason: 'not_initialized' })
+    throw error
+  }
 
   try {
     const result = await generateText({
@@ -128,11 +130,13 @@ export async function llmGenerateObject<T>(
   schema: z.Schema<T>,
   options?: { system?: string }
 ): Promise<T> {
-  if (!model) {
-    throw new Error('LLM client not initialized')
-  }
-
   const errorHandler = getLLMErrorHandler()
+
+  if (!model) {
+    const error = new Error('LLM client not initialized')
+    await errorHandler.handleError(error, { operation: 'generateObject', reason: 'not_initialized' })
+    throw error
+  }
 
   try {
     const result = await generateObject({

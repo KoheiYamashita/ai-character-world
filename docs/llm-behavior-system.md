@@ -50,14 +50,15 @@ LLMが状況に応じて調整
 
 ```typescript
 interface ScheduleEntry {
-  time: string           // "09:00"
+  time: string           // "09:00" (HH:MM形式)
   activity: string       // "仕事", "昼食", "自由時間"
   location?: string      // 場所（任意）
   note?: string          // 備考
 }
 
 interface DailySchedule {
-  date: string           // 世界内日付
+  characterId: string    // キャラクターID
+  day: number            // ワールド日数 (WorldTime.day)
   entries: ScheduleEntry[]
 }
 ```
@@ -66,7 +67,8 @@ interface DailySchedule {
 
 ```json
 {
-  "date": "2024-01-15",
+  "characterId": "kanon",
+  "day": 1,
   "entries": [
     { "time": "07:00", "activity": "起床" },
     { "time": "07:30", "activity": "朝食" },

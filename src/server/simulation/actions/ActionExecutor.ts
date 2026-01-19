@@ -5,14 +5,23 @@ import type { WorldStateManager } from '../WorldState'
 import { ACTIONS, type ActionId } from './definitions'
 import { findZoneFacilityForNode, findBuildingFacilityNearNode } from '@/lib/facilityUtils'
 
+/** Callback type for action completion events */
+export type ActionCompleteCallback = (characterId: string, actionId: ActionId) => void
+
 /**
  * アクションの実行管理（開始・進行・完了）
  */
 export class ActionExecutor {
   private worldState: WorldStateManager
+  private onActionComplete?: ActionCompleteCallback
 
   constructor(worldState: WorldStateManager) {
     this.worldState = worldState
+  }
+
+  /** Set callback for action completion events */
+  setOnActionComplete(callback: ActionCompleteCallback): void {
+    this.onActionComplete = callback
   }
 
   /** 毎tick呼び出し - アクション完了チェック */
@@ -170,6 +179,11 @@ export class ActionExecutor {
       currentAction: null,
       displayEmoji: undefined,
     })
+
+    // Notify callback (for behavior decision trigger)
+    if (this.onActionComplete) {
+      this.onActionComplete(characterId, actionId)
+    }
   }
 
   /**

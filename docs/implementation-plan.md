@@ -140,14 +140,14 @@
 
 ---
 
-### Step 12: 行動決定インターフェース＋スタブ
+### ✅ Step 12: 行動決定インターフェース＋スタブ
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 12-1 | `src/server/behavior/BehaviorDecider.ts` インターフェース定義 | ビルド通過 |
-| 12-2 | `BehaviorDecision`, `BehaviorContext` 型定義 | ビルド通過 |
-| 12-3 | `StubBehaviorDecider` 実装（スケジュール参照＋ステータスルール） | ルールベースで行動決定 |
-| 12-4 | `SimulationEngine` に BehaviorDecider 統合 | スタブで自律行動 |
+| ✅ 12-1 | `src/server/behavior/BehaviorDecider.ts` インターフェース定義 | ビルド通過 |
+| ✅ 12-2 | `BehaviorDecision`, `BehaviorContext` 型定義 | ビルド通過 |
+| ✅ 12-3 | `StubBehaviorDecider` 実装（スケジュール参照＋ステータスルール） | ルールベースで行動決定 |
+| ✅ 12-4 | `SimulationEngine` に BehaviorDecider 統合 | スタブで自律行動 |
 
 ---
 

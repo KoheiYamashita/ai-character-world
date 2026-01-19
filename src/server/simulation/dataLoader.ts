@@ -11,6 +11,7 @@ import type {
   Obstacle,
   PathNode,
   NPC,
+  ScheduleEntry,
 } from '@/types'
 import type { TileToPixelConfig, NodeLabel, EntranceConfig } from '@/data/maps/grid'
 import { tileToPixelObstacle, tileToPixelEntrance } from '@/data/maps/grid'
@@ -400,6 +401,24 @@ export async function loadNPCsServer(config?: WorldConfig): Promise<NPC[]> {
   return npcs
 }
 
+// Load default schedules from characters.json
+export async function loadDefaultSchedulesServer(config?: WorldConfig): Promise<Map<string, ScheduleEntry[]>> {
+  const cfg = config ?? (await loadWorldConfigServer())
+  const charactersPath = path.join(getPublicPath(), cfg.paths.charactersJson.replace(/^\//, ''))
+  const content = await fs.readFile(charactersPath, 'utf-8')
+  const charactersData: CharactersData = JSON.parse(content)
+
+  const schedules = new Map<string, ScheduleEntry[]>()
+
+  for (const charConfig of charactersData.characters) {
+    if (charConfig.defaultSchedule && charConfig.defaultSchedule.length > 0) {
+      schedules.set(charConfig.id, charConfig.defaultSchedule)
+    }
+  }
+
+  return schedules
+}
+
 // Load all game data needed for simulation
 export interface WorldData {
   config: WorldConfig
@@ -407,6 +426,7 @@ export interface WorldData {
   characters: Character[]
   npcs: NPC[]
   npcBlockedNodes: Map<string, Set<string>>
+  defaultSchedules: Map<string, ScheduleEntry[]>
 }
 
 export async function loadWorldDataServer(): Promise<WorldData> {
@@ -415,6 +435,7 @@ export async function loadWorldDataServer(): Promise<WorldData> {
   const characters = await loadCharactersServer(config)
   const npcs = await loadNPCsServer(config)
   const npcBlockedNodes = await loadNPCBlockedNodesServer(config)
+  const defaultSchedules = await loadDefaultSchedulesServer(config)
 
-  return { config, maps, characters, npcs, npcBlockedNodes }
+  return { config, maps, characters, npcs, npcBlockedNodes, defaultSchedules }
 }

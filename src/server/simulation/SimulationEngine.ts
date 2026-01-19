@@ -1,4 +1,5 @@
-import type { GameMap, Character, WorldTime, NPC, TimeConfig } from '@/types'
+import type { GameMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry } from '@/types'
+import type { BehaviorContext } from '@/types/behavior'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -8,8 +9,9 @@ import { DEFAULT_SIMULATION_CONFIG, createSimCharacter } from './types'
 import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
 import { ActionExecutor } from './actions/ActionExecutor'
-import { SimpleActionTrigger } from './actions/SimpleActionTrigger'
 import type { StateStore } from '../persistence/StateStore'
+import type { BehaviorDecider } from '../behavior/BehaviorDecider'
+import { StubBehaviorDecider } from '../behavior/StubBehaviorDecider'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -22,7 +24,7 @@ export class SimulationEngine {
   private worldState: WorldStateManager
   private characterSimulator: CharacterSimulator
   private actionExecutor: ActionExecutor
-  private simpleActionTrigger: SimpleActionTrigger
+  private behaviorDecider: BehaviorDecider
   private config: SimulationConfig
   private subscribers: Set<StateChangeCallback> = new Set()
   private tickInterval: ReturnType<typeof setInterval> | null = null
@@ -36,14 +38,29 @@ export class SimulationEngine {
   private cachedTimezone: string | null = null
   private stateStore: StateStore | null = null
   private lastSaveTime: number = 0
+  private defaultSchedules: Map<string, ScheduleEntry[]> = new Map()
+  // Schedule cache: key = `${characterId}-${day}`, loaded from DB
+  private scheduleCache: Map<string, ScheduleEntry[]> = new Map()
+  // Track characters with pending behavior decisions (prevents duplicate LLM calls)
+  private pendingDecisions: Set<string> = new Set()
+  // Track last day for day-change detection (schedule cache refresh)
+  private lastDay: number = 1
+  // Status interrupt threshold (design: 10%)
+  private static readonly INTERRUPT_THRESHOLD = 10
 
   constructor(config: Partial<SimulationConfig> = {}, stateStore?: StateStore) {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
-    this.simpleActionTrigger = new SimpleActionTrigger(this.worldState, this.actionExecutor)
+    this.behaviorDecider = new StubBehaviorDecider()
     this.stateStore = stateStore ?? null
+
+    // Set action completion callback for behavior decision trigger
+    this.actionExecutor.setOnActionComplete((characterId, actionId) => {
+      console.log(`[SimulationEngine] Action complete callback: ${characterId} finished ${actionId}`)
+      this.onActionComplete(characterId)
+    })
   }
 
   // Initialize with world data
@@ -53,13 +70,19 @@ export class SimulationEngine {
     initialMapId?: string,
     npcBlockedNodes?: Map<string, Set<string>>,
     npcs?: NPC[],
-    timeConfig?: TimeConfig
+    timeConfig?: TimeConfig,
+    defaultSchedules?: Map<string, ScheduleEntry[]>
   ): Promise<void> {
     this.worldState.initialize(maps, initialMapId)
     this.serverStartTime = Date.now()
 
     // Setup NPCs and time configuration
     this.setupNPCsAndTimeConfig(npcBlockedNodes, npcs, timeConfig)
+
+    // Store default schedules
+    if (defaultSchedules) {
+      this.defaultSchedules = defaultSchedules
+    }
 
     // Add characters to world state
     for (const char of characters) {
@@ -173,9 +196,13 @@ export class SimulationEngine {
   initializeNPCsAndConfig(
     npcBlockedNodes?: Map<string, Set<string>>,
     npcs?: NPC[],
-    timeConfig?: TimeConfig
+    timeConfig?: TimeConfig,
+    defaultSchedules?: Map<string, ScheduleEntry[]>
   ): void {
     this.setupNPCsAndTimeConfig(npcBlockedNodes, npcs, timeConfig)
+    if (defaultSchedules) {
+      this.defaultSchedules = defaultSchedules
+    }
     this.initialized = true
   }
 
@@ -225,6 +252,18 @@ export class SimulationEngine {
       return
     }
 
+    // Check for day change and refresh schedule cache
+    const currentDay = realTime.day
+    if (currentDay !== this.lastDay) {
+      console.log(`[SimulationEngine] Day changed: ${this.lastDay} -> ${currentDay}`)
+      this.lastDay = currentDay
+      this.clearScheduleCache()
+      // Async reload schedule cache (non-blocking)
+      this.loadScheduleCache().catch(err => {
+        console.error('[SimulationEngine] Error reloading schedule cache:', err)
+      })
+    }
+
     // Check for status decay with elapsed time scaling
     if (this.timeConfig) {
       const elapsed = now - this.lastDecayTime
@@ -236,10 +275,8 @@ export class SimulationEngine {
     }
 
     // Update action execution (checks for completion)
+    // Note: Action completion triggers behavior decision via callback (design-compliant)
     this.actionExecutor.tick(now)
-
-    // Check and trigger automatic actions based on status thresholds (Step 6-5)
-    this.simpleActionTrigger.tick()
 
     // Update character simulations (movement, transitions)
     this.characterSimulator.tick(deltaTime, now)
@@ -309,24 +346,202 @@ export class SimulationEngine {
 
   // Apply status decay scaled by elapsed minutes
   // All stats: 100 = good, 0 = bad. All decrease over time.
+  // Also checks for status interrupts (when stat drops below threshold)
   private applyStatusDecay(elapsedMinutes: number): void {
     if (!this.timeConfig) return
 
     const { decayRates } = this.timeConfig
     const characters = this.worldState.getAllCharacters()
+    const threshold = SimulationEngine.INTERRUPT_THRESHOLD
 
     for (const char of characters) {
+      // Calculate new values
+      const newHunger = Math.max(0, char.hunger - decayRates.hungerPerMinute * elapsedMinutes)
+      const newBladder = Math.max(0, char.bladder - decayRates.bladderPerMinute * elapsedMinutes)
+      const newEnergy = Math.max(0, char.energy - decayRates.energyPerMinute * elapsedMinutes)
+      const newHygiene = Math.max(0, char.hygiene - decayRates.hygienePerMinute * elapsedMinutes)
+      const newMood = Math.max(0, char.mood - decayRates.moodPerMinute * elapsedMinutes)
+
+      // Update character stats
       this.worldState.updateCharacter(char.id, {
-        // All stats decrease over time (100=good → 0=bad)
-        hunger: Math.max(0, char.hunger - decayRates.hungerPerMinute * elapsedMinutes),
-        bladder: Math.max(0, char.bladder - decayRates.bladderPerMinute * elapsedMinutes),
-        energy: Math.max(0, char.energy - decayRates.energyPerMinute * elapsedMinutes),
-        hygiene: Math.max(0, char.hygiene - decayRates.hygienePerMinute * elapsedMinutes),
-        mood: Math.max(0, char.mood - decayRates.moodPerMinute * elapsedMinutes),
+        hunger: newHunger,
+        bladder: newBladder,
+        energy: newEnergy,
+        hygiene: newHygiene,
+        mood: newMood,
       })
+
+      // Check for status interrupts (when stat crosses below threshold)
+      // Priority order: bladder > hunger > energy > hygiene (mood doesn't trigger interrupt)
+      if (char.bladder >= threshold && newBladder < threshold) {
+        this.triggerStatusInterrupt(char.id, 'bladder')
+      } else if (char.hunger >= threshold && newHunger < threshold) {
+        this.triggerStatusInterrupt(char.id, 'hunger')
+      } else if (char.energy >= threshold && newEnergy < threshold) {
+        this.triggerStatusInterrupt(char.id, 'energy')
+      } else if (char.hygiene >= threshold && newHygiene < threshold) {
+        this.triggerStatusInterrupt(char.id, 'hygiene')
+      }
     }
 
     console.log(`[SimulationEngine] Status decay applied (${elapsedMinutes.toFixed(2)} min elapsed)`)
+  }
+
+  // Callback when action completes (triggers next behavior decision)
+  private onActionComplete(characterId: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return
+
+    // Skip if decision is already pending
+    if (this.pendingDecisions.has(characterId)) return
+
+    // Skip if not idle (might have started another action or conversation)
+    if (character.currentAction) return
+    if (character.conversation?.isActive) return
+    if (character.navigation.isMoving) return
+
+    const currentTime = this.worldState.getTime()
+    this.makeBehaviorDecision(character, currentTime)
+  }
+
+  // Trigger initial behavior decisions for all idle characters (called on engine start)
+  triggerInitialBehaviorDecisions(): void {
+    const characters = this.worldState.getAllCharacters()
+    const currentTime = this.worldState.getTime()
+
+    console.log('[SimulationEngine] Triggering initial behavior decisions for all idle characters')
+
+    for (const character of characters) {
+      // Skip if already executing action
+      if (character.currentAction) continue
+
+      // Skip if in conversation
+      if (character.conversation?.isActive) continue
+
+      // Skip if moving
+      if (character.navigation.isMoving) continue
+
+      // Skip if decision is already pending
+      if (this.pendingDecisions.has(character.id)) continue
+
+      this.makeBehaviorDecision(character, currentTime)
+    }
+  }
+
+  // Trigger status interrupt for a character (called when status drops below threshold)
+  private triggerStatusInterrupt(characterId: string, statusType: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return
+
+    // Skip if decision is already pending
+    if (this.pendingDecisions.has(characterId)) return
+
+    // Skip if already executing action (don't interrupt current action)
+    if (character.currentAction) return
+
+    console.log(`[SimulationEngine] Status interrupt: ${character.name} ${statusType} < ${SimulationEngine.INTERRUPT_THRESHOLD}%`)
+
+    const currentTime = this.worldState.getTime()
+    this.makeBehaviorDecision(character, currentTime)
+  }
+
+  // Make behavior decision for a single character
+  private makeBehaviorDecision(character: SimCharacter, currentTime: WorldTime): void {
+    // Mark as pending to prevent duplicate calls
+    this.pendingDecisions.add(character.id)
+
+    // Build context
+    const context: BehaviorContext = {
+      character,
+      currentTime,
+      currentFacility: this.actionExecutor.getCurrentFacility(character.id),
+      schedule: this.getScheduleForCharacter(character.id),
+      availableActions: this.actionExecutor.getAvailableActions(character.id),
+      nearbyNPCs: this.worldState.getNPCsOnMap(character.currentMapId),
+    }
+
+    // Make async decision
+    this.behaviorDecider.decide(context).then((decision) => {
+      // Re-check that character is still idle (state may have changed)
+      const currentChar = this.worldState.getCharacter(character.id)
+      if (!currentChar) return
+      if (currentChar.currentAction) return
+      if (currentChar.conversation?.isActive) return
+      if (currentChar.navigation.isMoving) return
+
+      // Apply decision
+      switch (decision.type) {
+        case 'action':
+          if (decision.actionId) {
+            const success = this.actionExecutor.startAction(character.id, decision.actionId)
+            if (success) {
+              console.log(`[SimulationEngine] ${character.name} started action: ${decision.actionId} (${decision.reason})`)
+            }
+          }
+          break
+
+        case 'move':
+          // TODO: Implement navigation to targetNodeId/targetMapId (future enhancement)
+          console.log(`[SimulationEngine] ${character.name} wants to move to ${decision.targetNodeId} (${decision.reason}) - not yet implemented`)
+          break
+
+        case 'idle':
+          // Do nothing
+          break
+      }
+    }).catch((error) => {
+      console.error(`[SimulationEngine] Error making behavior decision for ${character.name}:`, error)
+    }).finally(() => {
+      // Clear pending flag when decision completes (success or failure)
+      this.pendingDecisions.delete(character.id)
+    })
+  }
+
+  // Get schedule for a character (DB cache priority, fallback to default)
+  private getScheduleForCharacter(characterId: string): ScheduleEntry[] | null {
+    const currentDay = this.worldState.getTime().day
+    const cacheKey = `${characterId}-${currentDay}`
+
+    // Try DB cache first
+    const cachedSchedule = this.scheduleCache.get(cacheKey)
+    if (cachedSchedule) {
+      return cachedSchedule
+    }
+
+    // Fallback to default schedules from characters.json
+    return this.defaultSchedules.get(characterId) ?? null
+  }
+
+  // Load schedules from DB into cache for all characters on current day
+  async loadScheduleCache(): Promise<void> {
+    if (!this.stateStore) return
+
+    const currentDay = this.worldState.getTime().day
+    const characters = this.worldState.getAllCharacters()
+
+    for (const char of characters) {
+      try {
+        const schedule = await this.stateStore.loadSchedule(char.id, currentDay)
+        if (schedule) {
+          const cacheKey = `${char.id}-${currentDay}`
+          this.scheduleCache.set(cacheKey, schedule.entries)
+          console.log(`[SimulationEngine] Loaded schedule for ${char.name} (day ${currentDay}) from DB`)
+        }
+      } catch (error) {
+        console.error(`[SimulationEngine] Error loading schedule for ${char.id}:`, error)
+      }
+    }
+  }
+
+  // Clear schedule cache (called when day changes)
+  clearScheduleCache(): void {
+    this.scheduleCache.clear()
+  }
+
+  // Initialize lastDay from current time (called after engine start)
+  initializeLastDay(): void {
+    this.lastDay = this.worldState.getTime().day
+    console.log(`[SimulationEngine] Initialized lastDay: ${this.lastDay}`)
   }
 
   // Subscribe to state changes
@@ -516,7 +731,7 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
 
       // Load world data (maps, characters, config)
       const loadWorldData = await getWorldDataLoader()
-      const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldData()
+      const { maps, characters, config, npcBlockedNodes, npcs, defaultSchedules } = await loadWorldData()
 
       // Initialize LLM client (reads from environment variables)
       const initializeLLMClient = await getInitializeLLMClient()
@@ -544,10 +759,10 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         }
 
         // Set NPC blocked nodes (not persisted, loaded fresh)
-        engine.initializeNPCsAndConfig(npcBlockedNodes, npcs, config.time)
+        engine.initializeNPCsAndConfig(npcBlockedNodes, npcs, config.time, defaultSchedules)
       } else {
         // Fresh initialization
-        await engine.initialize(maps, characters, config.initialState.mapId, npcBlockedNodes, npcs, config.time)
+        await engine.initialize(maps, characters, config.initialState.mapId, npcBlockedNodes, npcs, config.time, defaultSchedules)
 
         // Save server start time on fresh start
         await stateStore.saveServerStartTime(engine.getServerStartTime())
@@ -556,6 +771,16 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
 
       engine.start()
       console.log(`${logPrefix} Simulation engine started`)
+
+      // Load schedule cache from DB
+      await engine.loadScheduleCache()
+
+      // Initialize lastDay for day-change detection
+      engine.initializeLastDay()
+
+      // Trigger initial behavior decisions for all idle characters
+      engine.triggerInitialBehaviorDecisions()
+
       return engine
     } finally {
       initializingPromise = null
