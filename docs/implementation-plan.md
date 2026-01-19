@@ -93,15 +93,15 @@
 
 ---
 
-### Step 8: SQLite永続化（StateStore統合）
+### ✅ Step 8: SQLite永続化（StateStore統合）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 8-1 | `better-sqlite3` インストール | パッケージ追加 |
-| 8-2 | `src/server/persistence/SqliteStore.ts` 新規作成（StateStore実装） | ビルド通過 |
-| 8-3 | `character_states` テーブル（全ステータス保存） | テーブル作成 |
-| 8-4 | `SimulationEngine` で StateStore を使用 | 状態保存 |
-| 8-5 | サーバー再起動時に状態復元 | 状態が永続化される |
+| ✅ 8-1 | `better-sqlite3` インストール | パッケージ追加 |
+| ✅ 8-2 | `src/server/persistence/SqliteStore.ts` 新規作成（StateStore実装） | ビルド通過 |
+| ✅ 8-3 | `character_states` テーブル（全ステータス保存） | テーブル作成 |
+| ✅ 8-4 | `SimulationEngine` で StateStore を使用 | 状態保存 |
+| ✅ 8-5 | サーバー再起動時に状態復元 | 状態が永続化される |
 
 ---
 

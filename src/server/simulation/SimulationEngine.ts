@@ -9,10 +9,14 @@ import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
 import { ActionExecutor } from './actions/ActionExecutor'
 import { SimpleActionTrigger } from './actions/SimpleActionTrigger'
+import type { StateStore } from '../persistence/StateStore'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
 const DEFAULT_TIMEZONE = 'Asia/Tokyo'
+
+// Persistence save interval (30 seconds)
+const SAVE_INTERVAL_MS = 30000
 
 export class SimulationEngine {
   private worldState: WorldStateManager
@@ -30,13 +34,16 @@ export class SimulationEngine {
   private serverStartTime: number = Date.now()
   private cachedFormatter: Intl.DateTimeFormat | null = null
   private cachedTimezone: string | null = null
+  private stateStore: StateStore | null = null
+  private lastSaveTime: number = 0
 
-  constructor(config: Partial<SimulationConfig> = {}) {
+  constructor(config: Partial<SimulationConfig> = {}, stateStore?: StateStore) {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
     this.simpleActionTrigger = new SimpleActionTrigger(this.worldState, this.actionExecutor)
+    this.stateStore = stateStore ?? null
   }
 
   // Initialize with world data
@@ -49,30 +56,10 @@ export class SimulationEngine {
     timeConfig?: TimeConfig
   ): Promise<void> {
     this.worldState.initialize(maps, initialMapId)
-    this.timeConfig = timeConfig ?? null
     this.serverStartTime = Date.now()
 
-    // Initialize formatter cache
-    this.updateFormatterCache()
-
-    // Sync with real time on initialization
-    const realTime = this.getCurrentRealTime()
-    this.worldState.setTime(realTime)
-    this.lastDecayTime = Date.now()
-
-    // Set NPC blocked nodes for pathfinding
-    if (npcBlockedNodes) {
-      for (const [mapId, nodeIds] of npcBlockedNodes) {
-        this.worldState.setNPCBlockedNodes(mapId, nodeIds)
-      }
-      console.log(`[SimulationEngine] Loaded NPC blocked nodes for ${npcBlockedNodes.size} maps`)
-    }
-
-    // Add NPCs to world state
-    if (npcs && npcs.length > 0) {
-      this.worldState.initializeNPCs(npcs)
-      console.log(`[SimulationEngine] Loaded ${npcs.length} NPCs`)
-    }
+    // Setup NPCs and time configuration
+    this.setupNPCsAndTimeConfig(npcBlockedNodes, npcs, timeConfig)
 
     // Add characters to world state
     for (const char of characters) {
@@ -122,6 +109,105 @@ export class SimulationEngine {
     console.log('[SimulationEngine] Stopped')
   }
 
+  // Save current state to persistent storage
+  async saveState(): Promise<void> {
+    if (!this.stateStore) return
+
+    const state = this.worldState.getSerializedState()
+    await this.stateStore.saveState(state)
+    console.log('[SimulationEngine] State saved to persistent storage')
+  }
+
+  // Shutdown the engine and save state
+  async shutdown(): Promise<void> {
+    console.log('[SimulationEngine] Shutting down...')
+    this.stop()
+
+    if (this.stateStore) {
+      await this.saveState()
+      await this.stateStore.close()
+    }
+
+    console.log('[SimulationEngine] Shutdown complete')
+  }
+
+  // Restore characters from persistent storage
+  async restoreFromStore(maps: Record<string, GameMap>): Promise<boolean> {
+    if (!this.stateStore) return false
+
+    const hasData = await this.stateStore.hasData()
+    if (!hasData) {
+      console.log('[SimulationEngine] No persisted data found')
+      return false
+    }
+
+    const state = await this.stateStore.loadState()
+    if (!state) {
+      console.log('[SimulationEngine] Failed to load persisted state')
+      return false
+    }
+
+    // Initialize world state with maps
+    this.worldState.initialize(maps, state.currentMapId)
+
+    // Restore characters
+    for (const [, char] of Object.entries(state.characters)) {
+      this.worldState.addCharacter(char)
+    }
+
+    console.log(`[SimulationEngine] Restored ${Object.keys(state.characters).length} characters from persistent storage`)
+    return true
+  }
+
+  // Set state store (for late binding)
+  setStateStore(store: StateStore): void {
+    this.stateStore = store
+  }
+
+  // Get state store
+  getStateStore(): StateStore | null {
+    return this.stateStore
+  }
+
+  // Initialize NPCs and config (for use after restore)
+  initializeNPCsAndConfig(
+    npcBlockedNodes?: Map<string, Set<string>>,
+    npcs?: NPC[],
+    timeConfig?: TimeConfig
+  ): void {
+    this.setupNPCsAndTimeConfig(npcBlockedNodes, npcs, timeConfig)
+    this.initialized = true
+  }
+
+  // Shared setup for NPC blocked nodes, NPCs, and time configuration
+  private setupNPCsAndTimeConfig(
+    npcBlockedNodes?: Map<string, Set<string>>,
+    npcs?: NPC[],
+    timeConfig?: TimeConfig
+  ): void {
+    this.timeConfig = timeConfig ?? null
+
+    // Initialize formatter cache and sync time
+    this.updateFormatterCache()
+    const realTime = this.getCurrentRealTime()
+    this.worldState.setTime(realTime)
+    this.lastDecayTime = Date.now()
+
+    // Set NPC blocked nodes for pathfinding
+    if (npcBlockedNodes) {
+      for (const [mapId, nodeIds] of npcBlockedNodes) {
+        this.worldState.setNPCBlockedNodes(mapId, nodeIds)
+      }
+      console.log(`[SimulationEngine] Loaded NPC blocked nodes for ${npcBlockedNodes.size} maps`)
+    }
+
+    // Add NPCs to world state
+    if (npcs && npcs.length > 0) {
+      this.worldState.initializeNPCs(npcs)
+      console.log(`[SimulationEngine] Loaded ${npcs.length} NPCs`)
+    }
+  }
+
   // Main tick function
   private tick(): void {
     const now = Date.now()
@@ -160,6 +246,14 @@ export class SimulationEngine {
 
     // Increment tick counter
     this.worldState.incrementTick()
+
+    // Periodic state persistence (every 30 seconds)
+    if (this.stateStore && now - this.lastSaveTime >= SAVE_INTERVAL_MS) {
+      this.saveState().catch(err => {
+        console.error('[SimulationEngine] Error saving state:', err)
+      })
+      this.lastSaveTime = now
+    }
 
     // Notify subscribers
     this.notifySubscribers()
@@ -347,15 +441,26 @@ export function resetSimulationEngine(): void {
   }
 }
 
-// Lazy import to avoid circular dependencies
-let loadWorldDataServerFn: typeof import('./dataLoader').loadWorldDataServer | null = null
+// Lazy imports to avoid circular dependencies
+const lazyImports = {
+  loadWorldDataServer: null as typeof import('./dataLoader').loadWorldDataServer | null,
+  SqliteStore: null as typeof import('../persistence/SqliteStore').SqliteStore | null,
+}
 
 async function getWorldDataLoader(): Promise<typeof import('./dataLoader').loadWorldDataServer> {
-  if (!loadWorldDataServerFn) {
-    const { loadWorldDataServer } = await import('./dataLoader')
-    loadWorldDataServerFn = loadWorldDataServer
+  if (!lazyImports.loadWorldDataServer) {
+    const module = await import('./dataLoader')
+    lazyImports.loadWorldDataServer = module.loadWorldDataServer
   }
-  return loadWorldDataServerFn
+  return lazyImports.loadWorldDataServer
+}
+
+async function getSqliteStore(): Promise<typeof import('../persistence/SqliteStore').SqliteStore> {
+  if (!lazyImports.SqliteStore) {
+    const module = await import('../persistence/SqliteStore')
+    lazyImports.SqliteStore = module.SqliteStore
+  }
+  return lazyImports.SqliteStore
 }
 
 // Shared promise to prevent parallel initialization race condition
@@ -365,6 +470,7 @@ let initializingPromise: Promise<SimulationEngine> | null = null
  * Ensures the simulation engine is initialized and running.
  * Safe to call multiple times - will only initialize once.
  * Uses a shared promise to prevent race conditions from parallel requests.
+ * Restores state from SQLite if available.
  */
 export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): Promise<SimulationEngine> {
   const engine = getSimulationEngine()
@@ -383,9 +489,39 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
   initializingPromise = (async () => {
     try {
       console.log(`${logPrefix} Initializing simulation engine...`)
+
+      // Load world data (maps, characters, config)
       const loadWorldData = await getWorldDataLoader()
       const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldData()
-      await engine.initialize(maps, characters, config.initialState.mapId, npcBlockedNodes, npcs, config.time)
+
+      // Create SQLite store for persistence
+      const SqliteStore = await getSqliteStore()
+      const stateStore = new SqliteStore('data/state.db')
+      engine.setStateStore(stateStore)
+
+      // Try to restore from persistent storage
+      const restored = await engine.restoreFromStore(maps)
+
+      if (restored) {
+        console.log(`${logPrefix} Restored state from persistent storage`)
+
+        // Restore server start time if available
+        const savedStartTime = await stateStore.loadServerStartTime()
+        if (savedStartTime) {
+          engine.setServerStartTime(savedStartTime)
+        }
+
+        // Set NPC blocked nodes (not persisted, loaded fresh)
+        engine.initializeNPCsAndConfig(npcBlockedNodes, npcs, config.time)
+      } else {
+        // Fresh initialization
+        await engine.initialize(maps, characters, config.initialState.mapId, npcBlockedNodes, npcs, config.time)
+
+        // Save server start time on fresh start
+        await stateStore.saveServerStartTime(engine.getServerStartTime())
+        console.log(`${logPrefix} Initialized with fresh state`)
+      }
+
       engine.start()
       console.log(`${logPrefix} Simulation engine started`)
       return engine
