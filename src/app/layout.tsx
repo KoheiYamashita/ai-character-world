@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'AI Agent World',
+  title: 'AI Character World',
   description: 'AI Character Simulator - 2D map with pathfinding',
 }
 

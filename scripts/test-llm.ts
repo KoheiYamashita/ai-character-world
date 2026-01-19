@@ -18,7 +18,7 @@ async function main() {
 
   // Call LLM
   console.log('Calling LLM...')
-  const result = await llmGenerateText('Say "Hello, AI Agent World!" in one line.')
+  const result = await llmGenerateText('Say "Hello, AI Character World!" in one line.')
   console.log('Response:', result)
 }
 
