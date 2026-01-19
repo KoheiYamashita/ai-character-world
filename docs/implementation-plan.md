@@ -107,14 +107,14 @@
 
 ## Phase 2: LLM基盤
 
-### Step 9: AI SDK統合
+### ✅ Step 9: AI SDK統合
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 9-1 | `@ai-sdk/openai` インストール | パッケージ追加 |
-| 9-2 | `src/types/config.ts` に `LLMConfig` 追加 | ビルド通過 |
-| 9-3 | `public/data/world-config.json` に LLM設定追加 | 設定読み込み |
-| 9-4 | `src/server/llm/client.ts` 新規作成 | LLM呼び出し成功 |
+| ✅ 9-1 | AI SDKパッケージインストール（ai, @ai-sdk/openai, @ai-sdk/anthropic, @ai-sdk/google） | パッケージ追加 |
+| ✅ 9-4 | `src/server/llm/client.ts` 新規作成 | ビルド通過 |
+
+※ 9-2, 9-3は環境変数のみで制御する設計に変更のため削除
 
 ---
 

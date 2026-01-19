@@ -445,6 +445,7 @@ export function resetSimulationEngine(): void {
 const lazyImports = {
   loadWorldDataServer: null as typeof import('./dataLoader').loadWorldDataServer | null,
   SqliteStore: null as typeof import('../persistence/SqliteStore').SqliteStore | null,
+  initializeLLMClient: null as typeof import('../llm').initializeLLMClient | null,
 }
 
 async function getWorldDataLoader(): Promise<typeof import('./dataLoader').loadWorldDataServer> {
@@ -461,6 +462,14 @@ async function getSqliteStore(): Promise<typeof import('../persistence/SqliteSto
     lazyImports.SqliteStore = module.SqliteStore
   }
   return lazyImports.SqliteStore
+}
+
+async function getInitializeLLMClient(): Promise<typeof import('../llm').initializeLLMClient> {
+  if (!lazyImports.initializeLLMClient) {
+    const module = await import('../llm')
+    lazyImports.initializeLLMClient = module.initializeLLMClient
+  }
+  return lazyImports.initializeLLMClient
 }
 
 // Shared promise to prevent parallel initialization race condition
@@ -493,6 +502,10 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       // Load world data (maps, characters, config)
       const loadWorldData = await getWorldDataLoader()
       const { maps, characters, config, npcBlockedNodes, npcs } = await loadWorldData()
+
+      // Initialize LLM client (reads from environment variables)
+      const initializeLLMClient = await getInitializeLLMClient()
+      initializeLLMClient()
 
       // Create SQLite store for persistence
       const SqliteStore = await getSqliteStore()
