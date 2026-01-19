@@ -1,4 +1,5 @@
 import type { Employment } from './job'
+import type { ScheduleEntry } from './schedule'
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
@@ -29,6 +30,7 @@ export interface CharacterConfig {
     bladder: number
   }
   employment?: Employment
+  defaultSchedule?: ScheduleEntry[]
 }
 
 export interface CharactersData {

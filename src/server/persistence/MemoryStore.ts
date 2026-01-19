@@ -1,6 +1,6 @@
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime } from '@/types'
+import type { WorldTime, DailySchedule } from '@/types'
 
 /**
  * In-memory implementation of StateStore.
@@ -12,6 +12,7 @@ export class MemoryStore implements StateStore {
   private characters: Map<string, SimCharacter> = new Map()
   private time: WorldTime | null = null
   private currentMapId: string | null = null
+  private schedules: Map<string, DailySchedule> = new Map() // key: `${characterId}:${day}`
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -85,6 +86,48 @@ export class MemoryStore implements StateStore {
     return this.currentMapId
   }
 
+  // Schedule CRUD methods
+
+  private scheduleKey(characterId: string, day: number): string {
+    return `${characterId}:${day}`
+  }
+
+  async saveSchedule(schedule: DailySchedule): Promise<void> {
+    const key = this.scheduleKey(schedule.characterId, schedule.day)
+    this.schedules.set(key, JSON.parse(JSON.stringify(schedule)))
+  }
+
+  async loadSchedule(characterId: string, day: number): Promise<DailySchedule | null> {
+    const key = this.scheduleKey(characterId, day)
+    const schedule = this.schedules.get(key)
+    if (!schedule) return null
+    return JSON.parse(JSON.stringify(schedule))
+  }
+
+  async loadSchedulesForCharacter(characterId: string): Promise<DailySchedule[]> {
+    const result: DailySchedule[] = []
+    for (const [key, schedule] of this.schedules) {
+      if (key.startsWith(`${characterId}:`)) {
+        result.push(JSON.parse(JSON.stringify(schedule)))
+      }
+    }
+    return result.sort((a, b) => a.day - b.day)
+  }
+
+  async deleteSchedule(characterId: string, day: number): Promise<void> {
+    const key = this.scheduleKey(characterId, day)
+    this.schedules.delete(key)
+  }
+
+  async deleteAllSchedulesForCharacter(characterId: string): Promise<void> {
+    const prefix = `${characterId}:`
+    for (const key of this.schedules.keys()) {
+      if (key.startsWith(prefix)) {
+        this.schedules.delete(key)
+      }
+    }
+  }
+
   async hasData(): Promise<boolean> {
     return this.state !== null || this.characters.size > 0
   }
@@ -94,6 +137,7 @@ export class MemoryStore implements StateStore {
     this.characters.clear()
     this.time = null
     this.currentMapId = null
+    this.schedules.clear()
   }
 
   async close(): Promise<void> {

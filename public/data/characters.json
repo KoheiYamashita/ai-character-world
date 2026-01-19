@@ -28,7 +28,19 @@
         "jobId": "freelance-writer",
         "workplaceLabel": "書斎",
         "mapId": "home"
-      }
+      },
+      "defaultSchedule": [
+        { "time": "07:00", "activity": "起床" },
+        { "time": "07:30", "activity": "朝食", "location": "kitchen" },
+        { "time": "08:00", "activity": "身支度" },
+        { "time": "09:00", "activity": "仕事", "location": "書斎" },
+        { "time": "12:00", "activity": "昼食" },
+        { "time": "13:00", "activity": "仕事", "location": "書斎" },
+        { "time": "18:00", "activity": "自由時間" },
+        { "time": "19:00", "activity": "夕食" },
+        { "time": "20:00", "activity": "自由時間" },
+        { "time": "23:00", "activity": "就寝", "location": "bedroom" }
+      ]
     }
   ]
 }

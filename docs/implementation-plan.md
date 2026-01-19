@@ -129,14 +129,14 @@
 
 ---
 
-### Step 11: スケジュール基本実装
+### ✅ Step 11: スケジュール基本実装
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 11-1 | `src/types/schedule.ts` に `ScheduleEntry`, `DailySchedule` 型定義 | ビルド通過 |
-| 11-2 | `schedules` テーブル作成（SQLite） | テーブル作成 |
-| 11-3 | `public/data/characters.json` に初期スケジュール追加 | JSON読み込み |
-| 11-4 | スケジュール CRUD 実装 | 保存・取得成功 |
+| ✅ 11-1 | `src/types/schedule.ts` に `ScheduleEntry`, `DailySchedule` 型定義 | ビルド通過 |
+| ✅ 11-2 | `schedules` テーブル作成（SQLite） | テーブル作成 |
+| ✅ 11-3 | `public/data/characters.json` に初期スケジュール追加 | JSON読み込み |
+| ✅ 11-4 | スケジュール CRUD 実装 | 保存・取得成功 |
 
 ---
 

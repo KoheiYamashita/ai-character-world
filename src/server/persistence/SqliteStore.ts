@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, Direction, SpriteConfig, Employment } from '@/types'
+import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry } from '@/types'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -36,6 +36,12 @@ interface WorldTimeRow {
   minute: number
   day: number
   updated_at: number
+}
+
+interface ScheduleRow {
+  character_id: string
+  day: number
+  entries: string
 }
 
 /**
@@ -95,6 +101,20 @@ export class SqliteStore implements StateStore {
         current_map_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+
+      -- Schedules
+      CREATE TABLE IF NOT EXISTS schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        entries TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(character_id, day)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_schedules_character_day
+        ON schedules(character_id, day);
     `)
   }
 
@@ -337,6 +357,63 @@ export class SqliteStore implements StateStore {
     return stmt.get() as { server_start_time: number; current_map_id: string } | undefined
   }
 
+  // Schedule CRUD methods
+
+  async saveSchedule(schedule: DailySchedule): Promise<void> {
+    const now = Date.now()
+    const stmt = this.db.prepare(`
+      INSERT INTO schedules (character_id, day, entries, created_at, updated_at)
+      VALUES (@character_id, @day, @entries, @created_at, @updated_at)
+      ON CONFLICT(character_id, day) DO UPDATE SET
+        entries = @entries,
+        updated_at = @updated_at
+    `)
+
+    stmt.run({
+      character_id: schedule.characterId,
+      day: schedule.day,
+      entries: JSON.stringify(schedule.entries),
+      created_at: now,
+      updated_at: now,
+    })
+  }
+
+  async loadSchedule(characterId: string, day: number): Promise<DailySchedule | null> {
+    const stmt = this.db.prepare('SELECT * FROM schedules WHERE character_id = ? AND day = ?')
+    const row = stmt.get(characterId, day) as ScheduleRow | undefined
+
+    if (!row) {
+      return null
+    }
+
+    return this.rowToSchedule(row)
+  }
+
+  async loadSchedulesForCharacter(characterId: string): Promise<DailySchedule[]> {
+    const stmt = this.db.prepare('SELECT * FROM schedules WHERE character_id = ? ORDER BY day')
+    const rows = stmt.all(characterId) as ScheduleRow[]
+
+    return rows.map(row => this.rowToSchedule(row))
+  }
+
+  private rowToSchedule(row: ScheduleRow): DailySchedule {
+    return {
+      characterId: row.character_id,
+      day: row.day,
+      entries: JSON.parse(row.entries) as ScheduleEntry[],
+    }
+  }
+
+  async deleteSchedule(characterId: string, day: number): Promise<void> {
+    const stmt = this.db.prepare('DELETE FROM schedules WHERE character_id = ? AND day = ?')
+    stmt.run(characterId, day)
+  }
+
+  async deleteAllSchedulesForCharacter(characterId: string): Promise<void> {
+    const stmt = this.db.prepare('DELETE FROM schedules WHERE character_id = ?')
+    stmt.run(characterId)
+  }
+
   async hasData(): Promise<boolean> {
     const stmt = this.db.prepare('SELECT COUNT(*) as count FROM character_states')
     const result = stmt.get() as { count: number }
@@ -348,6 +425,7 @@ export class SqliteStore implements StateStore {
       DELETE FROM character_states;
       DELETE FROM world_time;
       DELETE FROM server_state;
+      DELETE FROM schedules;
     `)
   }
 

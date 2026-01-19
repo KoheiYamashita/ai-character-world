@@ -1,5 +1,5 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime } from '@/types'
+import type { WorldTime, DailySchedule } from '@/types'
 
 /**
  * Abstract interface for state persistence.
@@ -57,6 +57,31 @@ export interface StateStore {
    * Load current map ID
    */
   loadCurrentMapId(): Promise<string | null>
+
+  /**
+   * Save a schedule for a character on a specific day
+   */
+  saveSchedule(schedule: DailySchedule): Promise<void>
+
+  /**
+   * Load a schedule for a character on a specific day
+   */
+  loadSchedule(characterId: string, day: number): Promise<DailySchedule | null>
+
+  /**
+   * Load all schedules for a character
+   */
+  loadSchedulesForCharacter(characterId: string): Promise<DailySchedule[]>
+
+  /**
+   * Delete a schedule for a character on a specific day
+   */
+  deleteSchedule(characterId: string, day: number): Promise<void>
+
+  /**
+   * Delete all schedules for a character
+   */
+  deleteAllSchedulesForCharacter(characterId: string): Promise<void>
 
   /**
    * Check if store has been initialized with data
