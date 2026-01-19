@@ -38,7 +38,7 @@ export function StatusPanel(): React.ReactNode {
     <div className="w-80 space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Character</CardTitle>
+          <CardTitle className="text-lg">キャラクター</CardTitle>
         </CardHeader>
         <CardContent>
           {activeCharacter ? (
@@ -55,52 +55,52 @@ export function StatusPanel(): React.ReactNode {
                 </div>
               </div>
 
-              <StatBar label="Hunger" value={activeCharacter.hunger} />
-              <StatBar label="Energy" value={activeCharacter.energy} />
-              <StatBar label="Hygiene" value={activeCharacter.hygiene} />
-              <StatBar label="Mood" value={activeCharacter.mood} />
-              <StatBar label="Bladder" value={activeCharacter.bladder} />
+              <StatBar label="満腹度" value={activeCharacter.hunger} />
+              <StatBar label="体力" value={activeCharacter.energy} />
+              <StatBar label="清潔度" value={activeCharacter.hygiene} />
+              <StatBar label="気分" value={activeCharacter.mood} />
+              <StatBar label="トイレ" value={activeCharacter.bladder} />
 
               <div className="flex justify-between items-center">
-                <span className="text-sm">Money</span>
+                <span className="text-sm">所持金</span>
                 <span className="font-semibold text-green-600">
-                  ${activeCharacter.money}
+                  ¥{activeCharacter.money}
                 </span>
               </div>
             </div>
           ) : (
-            <p className="text-muted-foreground">No character selected</p>
+            <p className="text-muted-foreground">キャラクター未選択</p>
           )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Time</CardTitle>
+          <CardTitle className="text-lg">時刻</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-center">
             <p className="text-3xl font-mono font-bold">
               {formatTime(time.hour, time.minute)}
             </p>
-            <p className="text-sm text-muted-foreground">Day {time.day}</p>
+            <p className="text-sm text-muted-foreground">{time.day}日目</p>
           </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Location</CardTitle>
+          <CardTitle className="text-lg">場所</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
             <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Map</span>
+              <span className="text-sm text-muted-foreground">マップ</span>
               <span className="font-medium">{currentMap?.name ?? currentMapId}</span>
             </div>
             {activeCharacter && (
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Node</span>
+                <span className="text-sm text-muted-foreground">ノード</span>
                 <span className="font-medium text-xs">
                   {activeCharacter.currentNodeId}
                 </span>
@@ -112,14 +112,14 @@ export function StatusPanel(): React.ReactNode {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Legend</CardTitle>
+          <CardTitle className="text-lg">凡例</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-sm text-muted-foreground space-y-1">
-            <p>Character moves automatically</p>
-            <p>Red nodes = entrances (map transition)</p>
-            <p>Green nodes = spawn points</p>
-            <p>Blue nodes = waypoints</p>
+            <p>キャラクターは自動で行動します</p>
+            <p>赤ノード = 入口（マップ遷移）</p>
+            <p>緑ノード = スポーン地点</p>
+            <p>青ノード = 通路</p>
           </div>
         </CardContent>
       </Card>

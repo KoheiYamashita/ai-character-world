@@ -361,6 +361,7 @@ export class CharacterSimulator {
 
     this.worldState.updateCharacter(characterId, {
       conversation: conversationState,
+      displayEmoji: '💬',  // Show conversation emoji
     })
   }
 
@@ -377,9 +378,10 @@ export class CharacterSimulator {
       this.worldState.setNPCConversationState(npcId, false)
     }
 
-    // Clear character conversation state
+    // Clear character conversation state and emoji
     this.worldState.updateCharacter(characterId, {
       conversation: null,
+      displayEmoji: undefined,  // Clear conversation emoji
     })
   }
 

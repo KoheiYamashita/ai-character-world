@@ -8,6 +8,7 @@ import { DEFAULT_SIMULATION_CONFIG, createSimCharacter } from './types'
 import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
 import { ActionExecutor } from './actions/ActionExecutor'
+import { SimpleActionTrigger } from './actions/SimpleActionTrigger'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -17,6 +18,7 @@ export class SimulationEngine {
   private worldState: WorldStateManager
   private characterSimulator: CharacterSimulator
   private actionExecutor: ActionExecutor
+  private simpleActionTrigger: SimpleActionTrigger
   private config: SimulationConfig
   private subscribers: Set<StateChangeCallback> = new Set()
   private tickInterval: ReturnType<typeof setInterval> | null = null
@@ -34,6 +36,7 @@ export class SimulationEngine {
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
+    this.simpleActionTrigger = new SimpleActionTrigger(this.worldState, this.actionExecutor)
   }
 
   // Initialize with world data
@@ -149,6 +152,9 @@ export class SimulationEngine {
     // Update action execution (checks for completion)
     this.actionExecutor.tick(now)
 
+    // Check and trigger automatic actions based on status thresholds (Step 6-5)
+    this.simpleActionTrigger.tick()
+
     // Update character simulations (movement, transitions)
     this.characterSimulator.tick(deltaTime, now)
 
@@ -208,6 +214,7 @@ export class SimulationEngine {
   }
 
   // Apply status decay scaled by elapsed minutes
+  // All stats: 100 = good, 0 = bad. All decrease over time.
   private applyStatusDecay(elapsedMinutes: number): void {
     if (!this.timeConfig) return
 
@@ -216,10 +223,9 @@ export class SimulationEngine {
 
     for (const char of characters) {
       this.worldState.updateCharacter(char.id, {
-        // Needs increase over time (0=satisfied, 100=urgent)
-        hunger: Math.min(100, char.hunger + decayRates.hungerPerMinute * elapsedMinutes),
-        bladder: Math.min(100, char.bladder + decayRates.bladderPerMinute * elapsedMinutes),
-        // Resources decrease over time (100=full, 0=depleted)
+        // All stats decrease over time (100=good → 0=bad)
+        hunger: Math.max(0, char.hunger - decayRates.hungerPerMinute * elapsedMinutes),
+        bladder: Math.max(0, char.bladder - decayRates.bladderPerMinute * elapsedMinutes),
         energy: Math.max(0, char.energy - decayRates.energyPerMinute * elapsedMinutes),
         hygiene: Math.max(0, char.hygiene - decayRates.hygienePerMinute * elapsedMinutes),
         mood: Math.max(0, char.mood - decayRates.moodPerMinute * elapsedMinutes),

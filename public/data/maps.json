@@ -177,7 +177,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0x8b7355",
-      "spawnNodeId": "home-door",
+      "spawnNodeId": "home-1-3",
       "grid": {
         "prefix": "home",
         "cols": 12,
@@ -202,10 +202,10 @@
         {
           "id": "home-door",
           "row": 9,
-          "col": 5,
+          "col": 6,
           "connectedNodeIds": [
-            "home-8-5",
-            "home-8-6"
+            "home-8-6",
+            "home-8-7"
           ],
           "leadsTo": {
             "mapId": "town",

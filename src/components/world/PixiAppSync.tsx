@@ -10,7 +10,7 @@ import { loadWorldConfig, parseColor } from '@/lib/worldConfigLoader'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
 import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections, createNPCSprite } from '@/lib/pixiRenderers'
 import { useSimulationSync } from '@/hooks'
-import type { Direction, WorldConfig, PathNode, NPC } from '@/types'
+import type { Direction, WorldConfig, PathNode } from '@/types'
 
 export default function PixiAppSync(): React.ReactNode {
   // Store selectors
@@ -39,8 +39,8 @@ export default function PixiAppSync(): React.ReactNode {
   const npcContainerRef = useRef<Container | null>(null)
   const npcDirectionsRef = useRef<Map<string, Direction>>(new Map())  // Track NPC directions for change detection
 
-  // Conversation icon refs
-  const conversationIconsRef = useRef<Map<string, Text>>(new Map())  // Track 💬 icons by entity ID
+  // Head icon refs (for displayEmoji - actions, conversations, etc.)
+  const headIconsRef = useRef<Map<string, Text>>(new Map())  // Track emoji icons by entity ID
 
   // State refs
   const initializingRef = useRef(false)
@@ -345,37 +345,56 @@ export default function PixiAppSync(): React.ReactNode {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, currentMapId, activeCharacter?.id, spritesheetLoaded, localMapsLoaded, npcsLoaded])
 
-  // Create conversation icon (💬)
-  function createConversationIcon(x: number, y: number, entityId: string): Text {
-    const style = new TextStyle({
-      fontSize: 24,
-    })
-    const icon = new Text({ text: '💬', style })
-    icon.anchor.set(0.5, 1)
-    icon.x = x
-    icon.y = y - 50  // Above sprite head
-    icon.label = `conversation-icon-${entityId}`
-    return icon
+  // Head icon Y offset above sprite
+  const HEAD_ICON_Y_OFFSET = 50
+
+  // Remove and destroy a head icon
+  function destroyHeadIcon(icon: Text): void {
+    if (icon.parent) {
+      icon.parent.removeChild(icon)
+    }
+    icon.destroy()
   }
 
-  // Remove conversation icon
-  function removeConversationIcon(entityId: string): void {
-    const icon = conversationIconsRef.current.get(entityId)
-    if (icon) {
-      if (icon.parent) {
-        icon.parent.removeChild(icon)
+  // Update or create head icon (emoji displayed above sprite head)
+  function updateHeadIcon(entityId: string, x: number, y: number, emoji: string | undefined): void {
+    const existingIcon = headIconsRef.current.get(entityId)
+
+    if (!emoji) {
+      // Remove icon if no emoji to display
+      if (existingIcon) {
+        destroyHeadIcon(existingIcon)
+        headIconsRef.current.delete(entityId)
       }
-      icon.destroy()
-      conversationIconsRef.current.delete(entityId)
+      return
+    }
+
+    if (existingIcon) {
+      // Update existing icon position and text
+      existingIcon.x = x
+      existingIcon.y = y - HEAD_ICON_Y_OFFSET
+      if (existingIcon.text !== emoji) {
+        existingIcon.text = emoji
+      }
+    } else if (appRef.current) {
+      // Create new icon
+      const style = new TextStyle({ fontSize: 24 })
+      const icon = new Text({ text: emoji, style })
+      icon.anchor.set(0.5, 1)
+      icon.x = x
+      icon.y = y - HEAD_ICON_Y_OFFSET
+      icon.label = `head-icon-${entityId}`
+      headIconsRef.current.set(entityId, icon)
+      appRef.current.stage.addChild(icon)
     }
   }
 
-  // Clear all conversation icons
-  const clearAllConversationIcons = useCallback((): void => {
-    for (const [entityId] of conversationIconsRef.current) {
-      removeConversationIcon(entityId)
+  // Clear all head icons
+  const clearAllHeadIcons = useCallback((): void => {
+    for (const icon of headIconsRef.current.values()) {
+      destroyHeadIcon(icon)
     }
-    conversationIconsRef.current.clear()
+    headIconsRef.current.clear()
   }, [])
 
   // Clear path line (safe removal with parent check)
@@ -485,46 +504,31 @@ export default function PixiAppSync(): React.ReactNode {
       }
     }
 
-    // Update conversation icons
-    function updateConversationIcons(charX: number, charY: number): void {
+    // Update head icons (displayEmoji from server state)
+    function updateHeadIcons(charX: number, charY: number): void {
       const serverChar = serverCharactersRef.current[characterId]
-      const conversation = serverChar?.conversation
       const characterIconId = `char-${characterId}`
 
+      // Update character's head icon based on displayEmoji
+      updateHeadIcon(characterIconId, charX, charY, serverChar?.displayEmoji)
+
+      // Update NPC head icons (for conversation partner)
+      const conversation = serverChar?.conversation
       if (conversation?.isActive) {
         const npcId = conversation.npcId
         const npcSprite = npcSpritesRef.current.get(npcId)
         const npcIconId = `npc-${npcId}`
 
-        // Create/update character conversation icon
-        if (!conversationIconsRef.current.has(characterIconId)) {
-          const icon = createConversationIcon(charX, charY, characterIconId)
-          conversationIconsRef.current.set(characterIconId, icon)
-          app.stage.addChild(icon)
-        } else {
-          const icon = conversationIconsRef.current.get(characterIconId)!
-          icon.x = charX
-          icon.y = charY - 50
-        }
-
-        // Create/update NPC conversation icon
         if (npcSprite) {
-          if (!conversationIconsRef.current.has(npcIconId)) {
-            const icon = createConversationIcon(npcSprite.x, npcSprite.y, npcIconId)
-            conversationIconsRef.current.set(npcIconId, icon)
-            app.stage.addChild(icon)
-          } else {
-            const icon = conversationIconsRef.current.get(npcIconId)!
-            icon.x = npcSprite.x
-            icon.y = npcSprite.y - 50
-          }
+          // Show 💬 for NPC in conversation
+          updateHeadIcon(npcIconId, npcSprite.x, npcSprite.y, '💬')
         }
       } else {
-        // Remove conversation icons if conversation ended
-        removeConversationIcon(characterIconId)
-        for (const iconId of conversationIconsRef.current.keys()) {
+        // Remove NPC conversation icons if no conversation
+        for (const [iconId, icon] of headIconsRef.current) {
           if (iconId.startsWith('npc-')) {
-            removeConversationIcon(iconId)
+            destroyHeadIcon(icon)
+            headIconsRef.current.delete(iconId)
           }
         }
       }
@@ -563,8 +567,8 @@ export default function PixiAppSync(): React.ReactNode {
       // Update NPC directions
       updateNPCDirections()
 
-      // Update conversation icons
-      updateConversationIcons(x, y)
+      // Update head icons (displayEmoji from server state)
+      updateHeadIcons(x, y)
     }
 
     app.ticker.add(ticker)
@@ -572,9 +576,9 @@ export default function PixiAppSync(): React.ReactNode {
     return () => {
       appRef.current?.ticker.remove(ticker)
       clearPathLine()
-      clearAllConversationIcons()
+      clearAllHeadIcons()
     }
-  }, [isReady, activeCharacter?.id, localMapsLoaded, clearPathLine, drawPathLine, clearAllConversationIcons])
+  }, [isReady, activeCharacter?.id, localMapsLoaded, clearPathLine, drawPathLine, clearAllHeadIcons])
 
   // Connection status overlay
   const renderConnectionStatus = () => {

@@ -155,6 +155,16 @@ export const ACTIONS: Record<string, ActionDefinition> = {
     },
     emoji: '💼',
   },
+
+  // 思考中（LLM行動決定用 - Step 12-13で使用）
+  // duration: 0 なので手動で completeAction() を呼ぶ必要がある
+  thinking: {
+    type: 'thinking',
+    duration: 0,
+    requirements: {},
+    effects: {},
+    emoji: '🤔',
+  },
 }
 
 // アクションIDの型

@@ -40,6 +40,8 @@ export interface SimCharacter {
   conversation: ConversationState | null
   // Current action being performed
   currentAction: ActionState | null
+  // Emoji to display above character's head (set by action/conversation)
+  displayEmoji?: string
 }
 
 export interface SimNavigationState {
