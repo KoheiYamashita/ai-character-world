@@ -6,6 +6,7 @@ import type {
   CrossMapRoute,
   SpriteConfig,
   NPC,
+  ActionState,
 } from '@/types'
 
 // Conversation state for character-NPC dialogue
@@ -37,6 +38,8 @@ export interface SimCharacter {
   crossMapNavigation: SimCrossMapNavState | null
   // Conversation state
   conversation: ConversationState | null
+  // Current action being performed
+  currentAction: ActionState | null
 }
 
 export interface SimNavigationState {
@@ -149,6 +152,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     },
     crossMapNavigation: null,
     conversation: null,
+    currentAction: null,
   }
 }
 
