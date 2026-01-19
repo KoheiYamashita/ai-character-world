@@ -3,6 +3,7 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { generateText, generateObject, type LanguageModel } from 'ai'
 import type { z } from 'zod'
+import { getLLMErrorHandler } from './errorHandler'
 
 // Internal state
 let model: LanguageModel | null = null
@@ -102,13 +103,21 @@ export async function llmGenerateText(
     throw new Error('LLM client not initialized')
   }
 
-  const result = await generateText({
-    model,
-    prompt,
-    system: options?.system,
-  })
+  const errorHandler = getLLMErrorHandler()
 
-  return result.text
+  try {
+    const result = await generateText({
+      model,
+      prompt,
+      system: options?.system,
+    })
+
+    errorHandler.resetFailureCount()
+    return result.text
+  } catch (error) {
+    await errorHandler.handleError(error, { operation: 'generateText', prompt: prompt.substring(0, 100) })
+    throw error
+  }
 }
 
 /**
@@ -123,14 +132,22 @@ export async function llmGenerateObject<T>(
     throw new Error('LLM client not initialized')
   }
 
-  const result = await generateObject({
-    model,
-    prompt,
-    schema,
-    system: options?.system,
-  })
+  const errorHandler = getLLMErrorHandler()
 
-  return result.object
+  try {
+    const result = await generateObject({
+      model,
+      prompt,
+      schema,
+      system: options?.system,
+    })
+
+    errorHandler.resetFailureCount()
+    return result.object
+  } catch (error) {
+    await errorHandler.handleError(error, { operation: 'generateObject', prompt: prompt.substring(0, 100) })
+    throw error
+  }
 }
 
 /**

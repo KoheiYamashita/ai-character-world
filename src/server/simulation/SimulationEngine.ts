@@ -439,6 +439,12 @@ export function resetSimulationEngine(): void {
     globalEngine.stop()
     globalEngine = null
   }
+  // Reset error handler to clear consecutive failure count
+  import('../llm').then(({ resetLLMErrorHandler }) => {
+    resetLLMErrorHandler()
+  }).catch(() => {
+    // Ignore import errors during reset
+  })
 }
 
 // Lazy imports to avoid circular dependencies
@@ -446,6 +452,7 @@ const lazyImports = {
   loadWorldDataServer: null as typeof import('./dataLoader').loadWorldDataServer | null,
   SqliteStore: null as typeof import('../persistence/SqliteStore').SqliteStore | null,
   initializeLLMClient: null as typeof import('../llm').initializeLLMClient | null,
+  initializeLLMErrorHandler: null as typeof import('../llm').initializeLLMErrorHandler | null,
 }
 
 async function getWorldDataLoader(): Promise<typeof import('./dataLoader').loadWorldDataServer> {
@@ -470,6 +477,14 @@ async function getInitializeLLMClient(): Promise<typeof import('../llm').initial
     lazyImports.initializeLLMClient = module.initializeLLMClient
   }
   return lazyImports.initializeLLMClient
+}
+
+async function getInitializeLLMErrorHandler(): Promise<typeof import('../llm').initializeLLMErrorHandler> {
+  if (!lazyImports.initializeLLMErrorHandler) {
+    const module = await import('../llm')
+    lazyImports.initializeLLMErrorHandler = module.initializeLLMErrorHandler
+  }
+  return lazyImports.initializeLLMErrorHandler
 }
 
 // Shared promise to prevent parallel initialization race condition
@@ -506,6 +521,10 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       // Initialize LLM client (reads from environment variables)
       const initializeLLMClient = await getInitializeLLMClient()
       initializeLLMClient()
+
+      // Initialize LLM error handler with config
+      const initializeLLMErrorHandler = await getInitializeLLMErrorHandler()
+      initializeLLMErrorHandler(config.error)
 
       // Create SQLite store for persistence
       const SqliteStore = await getSqliteStore()

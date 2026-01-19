@@ -107,6 +107,15 @@ export interface PathsConfig {
   charactersJson: string
 }
 
+export interface ErrorConfig {
+  /** シミュレーションを一時停止するか（デフォルト: true） */
+  pauseOnCriticalError?: boolean
+  /** 停止までの連続失敗回数（デフォルト: 3） */
+  maxConsecutiveFailures?: number
+  /** Webhookタイムアウト（デフォルト: 10000ms） */
+  webhookTimeoutMs?: number
+}
+
 export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
@@ -118,4 +127,5 @@ export interface WorldConfig {
   initialState: InitialStateConfig
   paths: PathsConfig
   time: TimeConfig
+  error?: ErrorConfig
 }
