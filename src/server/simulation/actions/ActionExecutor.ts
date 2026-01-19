@@ -1,5 +1,5 @@
 import type { ActionState } from '@/types/action'
-import type { FacilityInfo } from '@/types'
+import type { FacilityInfo, JobInfo } from '@/types'
 import type { SimCharacter } from '../types'
 import type { WorldStateManager } from '../WorldState'
 import { ACTIONS, type ActionId } from './definitions'
@@ -142,8 +142,21 @@ export class ActionExecutor {
       }
     }
 
-    // お金の効果を適用（固定額のみ、hourlyWageはStep 7で実装）
-    if (typeof actionDef.effects.money === 'number') {
+    // お金の効果を適用
+    if (actionDef.effects.money === 'hourlyWage') {
+      // 時給計算
+      const facility = this.getCurrentFacility(characterId)
+      if (facility?.job) {
+        const durationMs = character.currentAction!.targetEndTime - character.currentAction!.startTime
+        const hoursWorked = durationMs / (60 * 60 * 1000)
+        const earnings = Math.floor(facility.job.hourlyWage * hoursWorked)
+        const newMoney = character.money + earnings
+        this.worldState.updateCharacter(characterId, {
+          money: newMoney,
+        })
+        console.log(`[ActionExecutor] ${character.name} earned ${earnings} yen (${hoursWorked.toFixed(2)} hours at ${facility.job.hourlyWage}/hour)`)
+      }
+    } else if (typeof actionDef.effects.money === 'number') {
       const newMoney = character.money + actionDef.effects.money
       this.worldState.updateCharacter(characterId, {
         money: Math.max(0, newMoney),
@@ -301,7 +314,14 @@ export class ActionExecutor {
     }
 
     // TODO: Check nearNpc requirement (Step 12-13)
-    // TODO: Check employment requirement (Step 7)
+
+    // Check employment requirement
+    if (requirements.employment) {
+      const employmentCheck = this.checkEmploymentRequirements(character, facility)
+      if (!employmentCheck.canExecute) {
+        return employmentCheck
+      }
+    }
 
     return { canExecute: true }
   }
@@ -320,5 +340,55 @@ export class ActionExecutor {
     }
 
     return availableActions
+  }
+
+  /**
+   * Check if character meets employment requirements for work action.
+   */
+  private checkEmploymentRequirements(
+    character: SimCharacter,
+    facility: FacilityInfo | null
+  ): { canExecute: boolean; reason?: string } {
+    if (!character.employment) {
+      return { canExecute: false, reason: 'No employment (work requires employment)' }
+    }
+
+    if (!facility?.job) {
+      return { canExecute: false, reason: 'Current facility has no job' }
+    }
+
+    if (facility.job.jobId !== character.employment.jobId) {
+      return {
+        canExecute: false,
+        reason: `Job mismatch: facility has ${facility.job.jobId}, character has ${character.employment.jobId}`,
+      }
+    }
+
+    if (!this.isWithinWorkHours(facility.job)) {
+      const { start, end } = facility.job.workHours
+      const currentHour = this.worldState.getCurrentHour()
+      return {
+        canExecute: false,
+        reason: `Outside work hours: ${start}:00-${end}:00 (current: ${currentHour}:00)`,
+      }
+    }
+
+    return { canExecute: true }
+  }
+
+  /**
+   * Check if current time is within job's work hours.
+   * Handles overnight shifts (e.g., 22:00-06:00).
+   */
+  private isWithinWorkHours(job: JobInfo): boolean {
+    const currentHour = this.worldState.getCurrentHour()
+    const { start, end } = job.workHours
+
+    if (start <= end) {
+      // Normal hours (e.g., 9-17)
+      return currentHour >= start && currentHour < end
+    }
+    // Overnight shift (e.g., 22-6)
+    return currentHour >= start || currentHour < end
   }
 }

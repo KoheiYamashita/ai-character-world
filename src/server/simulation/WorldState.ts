@@ -305,6 +305,10 @@ export class WorldStateManager {
     return this.state.time
   }
 
+  getCurrentHour(): number {
+    return this.state.time.hour
+  }
+
   setTime(time: WorldTime): void {
     this.state.time = { ...time }
   }

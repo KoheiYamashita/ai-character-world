@@ -1,4 +1,5 @@
 import type { NPCConfigJson } from './npc'
+import type { JobInfo } from './job'
 
 export type NodeType = 'waypoint' | 'entrance' | 'spawn'
 
@@ -35,6 +36,7 @@ export interface FacilityInfo {
   owner?: string      // 所有者ID
   cost?: number       // 利用料金
   quality?: number    // 品質（0-100）
+  job?: JobInfo       // 仕事情報（workspace施設用）
 }
 
 export interface DoorConfig {

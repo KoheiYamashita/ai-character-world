@@ -7,6 +7,7 @@ import type {
   SpriteConfig,
   NPC,
   ActionState,
+  Employment,
 } from '@/types'
 
 // Conversation state for character-NPC dialogue
@@ -32,6 +33,8 @@ export interface SimCharacter {
   currentNodeId: string
   position: Position
   direction: Direction
+  // Employment info (workplace reference)
+  employment?: Employment
   // Navigation state embedded for server-side simulation
   navigation: SimNavigationState
   // Cross-map navigation state
@@ -144,6 +147,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     currentNodeId: char.currentNodeId,
     position: { ...char.position },
     direction: char.direction,
+    employment: char.employment ? { ...char.employment } : undefined,
     navigation: {
       isMoving: false,
       path: [],

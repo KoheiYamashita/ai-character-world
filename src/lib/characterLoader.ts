@@ -40,5 +40,6 @@ export function createCharacterFromConfig(
     currentNodeId: nodeId,
     position,
     direction: 'down',
+    employment: config.employment,
   }
 }

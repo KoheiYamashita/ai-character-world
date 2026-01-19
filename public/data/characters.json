@@ -23,6 +23,11 @@
         "hygiene": 80,
         "mood": 80,
         "bladder": 80
+      },
+      "employment": {
+        "jobId": "freelance-writer",
+        "workplaceLabel": "書斎",
+        "mapId": "home"
       }
     }
   ]

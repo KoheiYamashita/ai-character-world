@@ -1,3 +1,5 @@
+import type { Employment } from './job'
+
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
 export interface SpriteConfig {
@@ -26,6 +28,7 @@ export interface CharacterConfig {
     mood: number
     bladder: number
   }
+  employment?: Employment
 }
 
 export interface CharactersData {
@@ -51,4 +54,5 @@ export interface Character {
   currentNodeId: string
   position: Position
   direction: Direction
+  employment?: Employment
 }

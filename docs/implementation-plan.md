@@ -80,16 +80,16 @@
 
 ---
 
-### Step 7: 仕事システム
+### ✅ Step 7: 仕事システム
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 7-1 | `src/types/job.ts` 新規作成: `JobInfo`, `Employment` 型 | ビルド通過 |
-| 7-2 | `src/types/character.ts` に `employment?: Employment` 追加 | ビルド通過 |
-| 7-3 | `public/data/maps.json` に workspace 施設（レストラン等）追加 | JSON読み込み成功 |
-| 7-4 | `public/data/characters.json` に employment 追加 | JSON読み込み成功 |
-| 7-5 | `dataLoader.ts`, `characterLoader.ts` で employment ロード | ローダー更新 |
-| 7-6 | `work` アクション実装（営業時間チェック、時給計算） | 仕事で money 増加 |
+| ✅ 7-1 | `src/types/job.ts` 新規作成: `JobInfo`, `Employment` 型 | ビルド通過 |
+| ✅ 7-2 | `src/types/character.ts` に `employment?: Employment` 追加 | ビルド通過 |
+| ✅ 7-3 | `public/data/maps.json` に workspace 施設の job プロパティ追加 | JSON読み込み成功 |
+| ✅ 7-4 | `public/data/characters.json` に employment 追加 | JSON読み込み成功 |
+| ✅ 7-5 | `dataLoader.ts`, `characterLoader.ts` で employment ロード | ローダー更新 |
+| ✅ 7-6 | `work` アクション実装（営業時間チェック、時給計算） | 仕事で money 増加 |
 
 ---
 

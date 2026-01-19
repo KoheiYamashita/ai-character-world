@@ -327,6 +327,7 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
       ? { x: spawnNode.x, y: spawnNode.y }
       : { x: 0, y: 0 },
     direction: 'down' as const,
+    employment: charConfig.employment,
   }))
 
   return characters

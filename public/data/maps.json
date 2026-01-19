@@ -314,7 +314,13 @@
             "tags": [
               "workspace"
             ],
-            "owner": "kanon"
+            "owner": "kanon",
+            "job": {
+              "jobId": "freelance-writer",
+              "title": "フリーライター",
+              "hourlyWage": 1500,
+              "workHours": { "start": 0, "end": 24 }
+            }
           }
         },
         {
