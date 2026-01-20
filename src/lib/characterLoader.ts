@@ -31,7 +31,7 @@ export function createCharacterFromConfig(
     name: config.name,
     sprite: config.sprite,
     money: config.defaultStats.money,
-    hunger: config.defaultStats.hunger,
+    satiety: config.defaultStats.satiety,
     energy: config.defaultStats.energy,
     hygiene: config.defaultStats.hygiene,
     mood: config.defaultStats.mood,

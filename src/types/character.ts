@@ -23,7 +23,7 @@ export interface CharacterConfig {
   sprite: SpriteConfig
   defaultStats: {
     money: number
-    hunger: number
+    satiety: number
     energy: number
     hygiene: number
     mood: number
@@ -31,6 +31,10 @@ export interface CharacterConfig {
   }
   employment?: Employment
   defaultSchedule?: ScheduleEntry[]
+  // LLM行動決定用のプロファイル情報
+  personality?: string        // 性格
+  tendencies?: string[]       // 行動傾向
+  customPrompt?: string       // 自由入力欄
 }
 
 export interface CharactersData {
@@ -47,7 +51,7 @@ export interface Character {
   name: string
   sprite: SpriteConfig
   money: number
-  hunger: number
+  satiety: number
   energy: number
   hygiene: number
   mood: number
@@ -57,4 +61,8 @@ export interface Character {
   position: Position
   direction: Direction
   employment?: Employment
+  // LLM行動決定用のプロファイル情報
+  personality?: string
+  tendencies?: string[]
+  customPrompt?: string
 }

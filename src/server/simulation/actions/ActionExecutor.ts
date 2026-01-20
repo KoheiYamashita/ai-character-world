@@ -1,5 +1,5 @@
-import type { ActionState } from '@/types/action'
-import type { FacilityInfo, JobInfo } from '@/types'
+import type { ActionState, EffectPerMinute } from '@/types/action'
+import type { FacilityInfo, JobInfo, ActionConfig } from '@/types'
 import type { SimCharacter } from '../types'
 import type { WorldStateManager } from '../WorldState'
 import { ACTIONS, type ActionId } from './definitions'
@@ -8,20 +8,54 @@ import { findZoneFacilityForNode, findBuildingFacilityNearNode } from '@/lib/fac
 /** Callback type for action completion events */
 export type ActionCompleteCallback = (characterId: string, actionId: ActionId) => void
 
+/** Callback type for recording action history */
+export type ActionHistoryCallback = (entry: {
+  characterId: string
+  actionId: ActionId
+  facilityId?: string
+  targetNpcId?: string
+  durationMinutes?: number
+}) => void
+
 /**
  * アクションの実行管理（開始・進行・完了）
+ *
+ * アクションの時間と効果は world-config.json の actions セクションから読み込む。
+ * LLMが可変時間アクションの実行時間を指定できる（durationMinutes）。
  */
 export class ActionExecutor {
   private worldState: WorldStateManager
   private onActionComplete?: ActionCompleteCallback
+  private onRecordHistory?: ActionHistoryCallback
+  private actionConfigs: Record<string, ActionConfig> = {}
 
   constructor(worldState: WorldStateManager) {
     this.worldState = worldState
   }
 
+  /**
+   * アクション設定を設定（world-config.json の actions セクション）
+   */
+  setActionConfigs(configs: Record<string, ActionConfig>): void {
+    this.actionConfigs = configs
+    console.log(`[ActionExecutor] Loaded action configs for: ${Object.keys(configs).join(', ')}`)
+  }
+
+  /**
+   * アクションタイプの設定を取得
+   */
+  getActionConfig(actionType: string): ActionConfig | undefined {
+    return this.actionConfigs[actionType]
+  }
+
   /** Set callback for action completion events */
   setOnActionComplete(callback: ActionCompleteCallback): void {
     this.onActionComplete = callback
+  }
+
+  /** Set callback for recording action history */
+  setOnRecordHistory(callback: ActionHistoryCallback): void {
+    this.onRecordHistory = callback
   }
 
   /** 毎tick呼び出し - アクション完了チェック */
@@ -35,8 +69,21 @@ export class ActionExecutor {
     }
   }
 
-  /** アクション開始。成功時true、失敗時false */
-  startAction(characterId: string, actionId: ActionId, facilityId?: string): boolean {
+  /**
+   * アクション開始。成功時true、失敗時false
+   * @param characterId キャラクターID
+   * @param actionId アクションID
+   * @param facilityId 施設ID（オプション）
+   * @param targetNpcId 対象NPC ID（talkアクション用）
+   * @param durationMinutes 実行時間（分）- 可変時間アクションの場合にLLMが指定
+   */
+  startAction(
+    characterId: string,
+    actionId: ActionId,
+    facilityId?: string,
+    targetNpcId?: string,
+    durationMinutes?: number
+  ): boolean {
     // 前提条件チェック (6-2)
     const checkResult = this.canExecuteAction(characterId, actionId)
     if (!checkResult.canExecute) {
@@ -46,6 +93,7 @@ export class ActionExecutor {
 
     const character = this.worldState.getCharacter(characterId)!
     const actionDef = ACTIONS[actionId]!
+    const actionConfig = this.actionConfigs[actionDef.type]
 
     // コストの支払い
     const facility = this.getCurrentFacility(characterId)
@@ -61,13 +109,18 @@ export class ActionExecutor {
       console.log(`[ActionExecutor] ${character.name} paid ${actionDef.requirements.cost} for ${actionId}`)
     }
 
+    // 時間計算
+    const { durationMs, actualDurationMinutes } = this.calculateDuration(actionConfig, durationMinutes)
+
     // ActionState作成
     const now = Date.now()
     const actionState: ActionState = {
       actionId,
       startTime: now,
-      targetEndTime: now + actionDef.duration,
+      targetEndTime: now + durationMs,
       facilityId: facilityId ?? facility?.owner,
+      targetNpcId,  // talk アクション用
+      durationMinutes: actualDurationMinutes,  // 選択された時間を記録
     }
 
     // キャラクター状態更新（displayEmoji設定含む）
@@ -76,8 +129,54 @@ export class ActionExecutor {
       displayEmoji: actionDef.emoji,  // 頭上絵文字を設定 (6-4)
     })
 
-    console.log(`[ActionExecutor] ${character.name} started action: ${actionId} (duration: ${actionDef.duration / 1000}s, emoji: ${actionDef.emoji ?? 'none'})`)
+    const durationStr = actualDurationMinutes !== undefined
+      ? `${actualDurationMinutes}min`
+      : `${durationMs / 1000}s`
+    console.log(`[ActionExecutor] ${character.name} started action: ${actionId} (duration: ${durationStr}, emoji: ${actionDef.emoji ?? 'none'})`)
     return true
+  }
+
+  /**
+   * アクションの実行時間を計算
+   * @returns durationMs（ミリ秒）と actualDurationMinutes（分、可変時間の場合のみ）
+   */
+  private calculateDuration(
+    actionConfig: ActionConfig | undefined,
+    requestedDurationMinutes?: number
+  ): { durationMs: number; actualDurationMinutes?: number } {
+    // 設定がない場合は0（thinking等の即時完了アクション）
+    if (!actionConfig) {
+      return { durationMs: 0 }
+    }
+
+    // 固定時間アクション
+    if (actionConfig.fixed) {
+      const durationMs = (actionConfig.duration ?? 0) * 60 * 1000
+      return { durationMs }
+    }
+
+    // 可変時間アクション
+    if (actionConfig.durationRange) {
+      const { min, max, default: defaultDuration } = actionConfig.durationRange
+
+      if (requestedDurationMinutes !== undefined) {
+        // LLMが指定した時間を範囲内にクランプ
+        const clamped = Math.max(min, Math.min(max, requestedDurationMinutes))
+        return {
+          durationMs: clamped * 60 * 1000,
+          actualDurationMinutes: clamped,
+        }
+      } else {
+        // 指定がない場合はデフォルト時間を使用
+        return {
+          durationMs: defaultDuration * 60 * 1000,
+          actualDurationMinutes: defaultDuration,
+        }
+      }
+    }
+
+    // フォールバック
+    return { durationMs: 0 }
   }
 
   /** アクションキャンセル */
@@ -100,9 +199,32 @@ export class ActionExecutor {
     return character?.currentAction != null
   }
 
+  /**
+   * アクションを強制完了（thinking等、duration: 0 のアクション用）
+   * 効果は適用されず、状態のみクリアする。
+   */
+  forceCompleteAction(characterId: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character?.currentAction) return
+
+    const actionId = character.currentAction.actionId
+    console.log(`[ActionExecutor] ${character.name} force-completed action: ${actionId}`)
+
+    // 状態クリアのみ（効果は適用しない）
+    this.worldState.updateCharacter(characterId, {
+      currentAction: null,
+      displayEmoji: undefined,
+    })
+
+    // Note: forceComplete ではコールバックを呼ばない（thinking 完了後に別の判断をするため）
+  }
+
   private updateAction(character: SimCharacter, currentTime: number): void {
     const action = character.currentAction
     if (!action) return
+
+    // thinking アクションは手動完了のみ（duration: 0 だが自動完了しない）
+    if (action.actionId === 'thinking') return
 
     // 終了時刻に達したら完了
     if (currentTime >= action.targetEndTime) {
@@ -115,6 +237,7 @@ export class ActionExecutor {
     if (!character?.currentAction) return
 
     const actionId = character.currentAction.actionId
+    const durationMinutes = character.currentAction.durationMinutes
     const actionDef = ACTIONS[actionId]
     if (!actionDef) {
       // 定義がない場合はクリアのみ（displayEmojiもクリア）
@@ -125,30 +248,39 @@ export class ActionExecutor {
       return
     }
 
-    // ステータス効果を適用（ログ強化 6-3）
-    if (actionDef.effects.stats) {
-      // 適用前ステータスをログ
-      console.log(`[ActionExecutor] ${character.name} before ${actionId}:`, {
-        hunger: character.hunger,
-        energy: character.energy,
-        hygiene: character.hygiene,
-        mood: character.mood,
-        bladder: character.bladder,
-      })
+    // world-config.json からアクション設定を取得
+    const actionConfig = this.actionConfigs[actionDef.type]
 
-      this.applyStatEffects(characterId, actionDef.effects.stats)
+    // 適用前ステータスをログ
+    console.log(`[ActionExecutor] ${character.name} before ${actionId}:`, {
+      satiety: character.satiety,
+      energy: character.energy,
+      hygiene: character.hygiene,
+      mood: character.mood,
+      bladder: character.bladder,
+    })
 
-      // 適用後ステータスをログ
-      const updatedChar = this.worldState.getCharacter(characterId)
-      if (updatedChar) {
-        console.log(`[ActionExecutor] ${character.name} after ${actionId}:`, {
-          hunger: updatedChar.hunger,
-          energy: updatedChar.energy,
-          hygiene: updatedChar.hygiene,
-          mood: updatedChar.mood,
-          bladder: updatedChar.bladder,
-        })
+    // ステータス効果を適用
+    if (actionConfig) {
+      if (actionConfig.perMinute && durationMinutes !== undefined) {
+        // 可変時間アクション: perMinute × durationMinutes
+        this.applyPerMinuteEffects(characterId, actionConfig.perMinute, durationMinutes)
+      } else if (actionConfig.fixed && actionConfig.effects) {
+        // 固定時間アクション: 固定の効果を適用
+        this.applyStatEffects(characterId, actionConfig.effects)
       }
+    }
+
+    // 適用後ステータスをログ
+    const updatedChar = this.worldState.getCharacter(characterId)
+    if (updatedChar) {
+      console.log(`[ActionExecutor] ${character.name} after ${actionId}:`, {
+        satiety: updatedChar.satiety,
+        energy: updatedChar.energy,
+        hygiene: updatedChar.hygiene,
+        mood: updatedChar.mood,
+        bladder: updatedChar.bladder,
+      })
     }
 
     // お金の効果を適用
@@ -172,7 +304,19 @@ export class ActionExecutor {
       })
     }
 
-    console.log(`[ActionExecutor] ${character.name} completed action: ${actionId}`)
+    const durationStr = durationMinutes !== undefined ? `(${durationMinutes}min)` : ''
+    console.log(`[ActionExecutor] ${character.name} completed action: ${actionId} ${durationStr}`)
+
+    // Record action history (before clearing action state)
+    if (this.onRecordHistory) {
+      this.onRecordHistory({
+        characterId,
+        actionId,
+        facilityId: character.currentAction.facilityId,
+        targetNpcId: character.currentAction.targetNpcId,
+        durationMinutes,
+      })
+    }
 
     // アクション状態クリア + displayEmojiクリア (6-4)
     this.worldState.updateCharacter(characterId, {
@@ -187,39 +331,64 @@ export class ActionExecutor {
   }
 
   /**
-   * ステータス効果の適用
+   * ステータス効果の適用（共通処理）
    * All stats: 100 = good, 0 = bad
    * Actions restore stats by adding positive values.
+   * @param multiplier - 効果の倍率（perMinute の場合は durationMinutes）
    */
-  private applyStatEffects(
+  private applyStatEffectsInternal(
     characterId: string,
-    stats: Partial<Record<'hunger' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>
+    stats: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>,
+    multiplier: number = 1,
+    logLabel?: string
   ): void {
     const character = this.worldState.getCharacter(characterId)
     if (!character) return
 
+    const statKeys = ['satiety', 'energy', 'hygiene', 'mood', 'bladder'] as const
     const updates: Partial<SimCharacter> = {}
 
-    // All stats use addition (positive values restore towards 100)
-    if (stats.hunger !== undefined) {
-      updates.hunger = this.clamp(character.hunger + stats.hunger, 0, 100)
-    }
-    if (stats.bladder !== undefined) {
-      updates.bladder = this.clamp(character.bladder + stats.bladder, 0, 100)
-    }
-    if (stats.energy !== undefined) {
-      updates.energy = this.clamp(character.energy + stats.energy, 0, 100)
-    }
-    if (stats.hygiene !== undefined) {
-      updates.hygiene = this.clamp(character.hygiene + stats.hygiene, 0, 100)
-    }
-    if (stats.mood !== undefined) {
-      updates.mood = this.clamp(character.mood + stats.mood, 0, 100)
+    for (const key of statKeys) {
+      const value = stats[key]
+      if (value !== undefined) {
+        const effect = value * multiplier
+        updates[key] = this.clamp(character[key] + effect, 0, 100)
+      }
     }
 
     if (Object.keys(updates).length > 0) {
       this.worldState.updateCharacter(characterId, updates)
+      if (logLabel) {
+        console.log(`[ActionExecutor] Applied ${logLabel}:`, updates)
+      }
     }
+  }
+
+  /**
+   * ステータス効果の適用（固定値）
+   */
+  private applyStatEffects(
+    characterId: string,
+    stats: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>
+  ): void {
+    this.applyStatEffectsInternal(characterId, stats)
+  }
+
+  /**
+   * 分あたりの効果を適用（可変時間アクション用）
+   * 効果量 = perMinute × durationMinutes
+   */
+  private applyPerMinuteEffects(
+    characterId: string,
+    perMinute: EffectPerMinute,
+    durationMinutes: number
+  ): void {
+    this.applyStatEffectsInternal(
+      characterId,
+      perMinute,
+      durationMinutes,
+      `perMinute effects (${durationMinutes}min)`
+    )
   }
 
   private clamp(value: number, min: number, max: number): number {
@@ -275,10 +444,14 @@ export class ActionExecutor {
   /**
    * Check if a character can execute a specific action.
    * Returns { canExecute: true } or { canExecute: false, reason: string }
+   *
+   * @param options.ignoreCurrentAction - trueの場合、currentActionチェックをスキップ。
+   *   thinking中にgetAvailableActionsで利用可能アクションを取得するために使用。
    */
   canExecuteAction(
     characterId: string,
-    actionId: ActionId
+    actionId: ActionId,
+    options?: { ignoreCurrentAction?: boolean }
   ): { canExecute: boolean; reason?: string } {
     const character = this.worldState.getCharacter(characterId)
     if (!character) {
@@ -286,7 +459,8 @@ export class ActionExecutor {
     }
 
     // Cannot start a new action while already executing one
-    if (character.currentAction) {
+    // (ignoreCurrentAction: true の場合、thinking中の可用性チェック用にスキップ)
+    if (character.currentAction && !options?.ignoreCurrentAction) {
       return { canExecute: false, reason: `Already executing action: ${character.currentAction.actionId}` }
     }
 
@@ -296,23 +470,41 @@ export class ActionExecutor {
     }
 
     const requirements = actionDef.requirements
-    const facility = this.getCurrentFacility(characterId)
 
-    // Check facility tags
+    // Check facility tags at MAP level (not position level)
+    // Character can execute action if there's a facility with required tags anywhere on the map
     if (requirements.facilityTags && requirements.facilityTags.length > 0) {
-      if (!facility) {
-        return { canExecute: false, reason: `Requires facility with tags: ${requirements.facilityTags.join(', ')}` }
+      const map = this.worldState.getMap(character.currentMapId)
+      if (!map) {
+        return { canExecute: false, reason: 'Map not found' }
       }
-      const hasAllTags = requirements.facilityTags.every(tag => facility.tags.includes(tag))
-      if (!hasAllTags) {
-        return { canExecute: false, reason: `Facility missing required tags: ${requirements.facilityTags.filter(t => !facility.tags.includes(t)).join(', ')}` }
+
+      // Check if map has a facility with all required tags
+      const hasFacility = map.obstacles.some(obs => {
+        if (!obs.facility) return false
+        return requirements.facilityTags!.every(tag => obs.facility!.tags.includes(tag))
+      })
+
+      if (!hasFacility) {
+        return { canExecute: false, reason: `Map has no facility with tags: ${requirements.facilityTags.join(', ')}` }
       }
     }
 
-    // Check ownership
-    if (requirements.ownership === 'self' && facility) {
-      if (facility.owner && facility.owner !== characterId) {
-        return { canExecute: false, reason: `Facility owned by ${facility.owner}, not ${characterId}` }
+    // Check ownership (for actions like eat_home that require self-owned facility)
+    // Note: ownership check still uses current facility since it's about WHERE to execute
+    const facility = this.getCurrentFacility(characterId)
+    if (requirements.ownership === 'self') {
+      // For ownership check, we need to verify the map has a self-owned facility
+      const map = this.worldState.getMap(character.currentMapId)
+      if (map && requirements.facilityTags) {
+        const hasSelfOwnedFacility = map.obstacles.some(obs => {
+          if (!obs.facility) return false
+          const hasAllTags = requirements.facilityTags!.every(tag => obs.facility!.tags.includes(tag))
+          return hasAllTags && obs.facility.owner === characterId
+        })
+        if (!hasSelfOwnedFacility) {
+          return { canExecute: false, reason: `No self-owned facility with tags: ${requirements.facilityTags.join(', ')}` }
+        }
       }
     }
 
@@ -327,8 +519,6 @@ export class ActionExecutor {
       }
     }
 
-    // TODO: Check nearNpc requirement (Step 12-13)
-
     // Check employment requirement
     if (requirements.employment) {
       const employmentCheck = this.checkEmploymentRequirements(character, facility)
@@ -342,12 +532,23 @@ export class ActionExecutor {
 
   /**
    * Get all actions that a character can currently execute.
+   * thinkingアクションは選択肢に含めない（システム内部用のため）。
+   * thinking中は ignoreCurrentAction を使用して他のアクションを取得可能にする。
    */
   getAvailableActions(characterId: string): ActionId[] {
+    const character = this.worldState.getCharacter(characterId)
+    const isThinking = character?.currentAction?.actionId === 'thinking'
+
     const availableActions: ActionId[] = []
 
     for (const actionId of Object.keys(ACTIONS) as ActionId[]) {
-      const result = this.canExecuteAction(characterId, actionId)
+      // thinkingは選択肢に含めない（LLMが選ぶものではない）
+      if (actionId === 'thinking') continue
+
+      // thinking中はcurrentActionチェックをスキップして可用性を判定
+      const result = this.canExecuteAction(characterId, actionId, {
+        ignoreCurrentAction: isThinking,
+      })
       if (result.canExecute) {
         availableActions.push(actionId)
       }

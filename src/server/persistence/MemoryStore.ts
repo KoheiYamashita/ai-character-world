@@ -1,6 +1,7 @@
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule } from '@/types'
+import type { ActionHistoryEntry } from '@/types/behavior'
 
 /**
  * In-memory implementation of StateStore.
@@ -13,6 +14,7 @@ export class MemoryStore implements StateStore {
   private time: WorldTime | null = null
   private currentMapId: string | null = null
   private schedules: Map<string, DailySchedule> = new Map() // key: `${characterId}:${day}`
+  private actionHistory: Map<string, ActionHistoryEntry[]> = new Map() // key: `${characterId}:${day}`
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -86,19 +88,20 @@ export class MemoryStore implements StateStore {
     return this.currentMapId
   }
 
-  // Schedule CRUD methods
-
-  private scheduleKey(characterId: string, day: number): string {
+  // Common key generator for character-day based data
+  private characterDayKey(characterId: string, day: number): string {
     return `${characterId}:${day}`
   }
 
+  // Schedule CRUD methods
+
   async saveSchedule(schedule: DailySchedule): Promise<void> {
-    const key = this.scheduleKey(schedule.characterId, schedule.day)
+    const key = this.characterDayKey(schedule.characterId, schedule.day)
     this.schedules.set(key, JSON.parse(JSON.stringify(schedule)))
   }
 
   async loadSchedule(characterId: string, day: number): Promise<DailySchedule | null> {
-    const key = this.scheduleKey(characterId, day)
+    const key = this.characterDayKey(characterId, day)
     const schedule = this.schedules.get(key)
     if (!schedule) return null
     return JSON.parse(JSON.stringify(schedule))
@@ -115,7 +118,7 @@ export class MemoryStore implements StateStore {
   }
 
   async deleteSchedule(characterId: string, day: number): Promise<void> {
-    const key = this.scheduleKey(characterId, day)
+    const key = this.characterDayKey(characterId, day)
     this.schedules.delete(key)
   }
 
@@ -128,6 +131,36 @@ export class MemoryStore implements StateStore {
     }
   }
 
+  // Action history methods
+
+  async addActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+  }): Promise<void> {
+    const key = this.characterDayKey(entry.characterId, entry.day)
+    const existing = this.actionHistory.get(key) ?? []
+    existing.push({
+      time: entry.time,
+      actionId: entry.actionId,
+      target: entry.target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+    })
+    this.actionHistory.set(key, existing)
+  }
+
+  async loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]> {
+    const key = this.characterDayKey(characterId, day)
+    const history = this.actionHistory.get(key)
+    if (!history) return []
+    return JSON.parse(JSON.stringify(history))
+  }
+
   async hasData(): Promise<boolean> {
     return this.state !== null || this.characters.size > 0
   }
@@ -138,6 +171,7 @@ export class MemoryStore implements StateStore {
     this.time = null
     this.currentMapId = null
     this.schedules.clear()
+    this.actionHistory.clear()
   }
 
   async close(): Promise<void> {

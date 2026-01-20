@@ -55,7 +55,7 @@ export function StatusPanel(): React.ReactNode {
                 </div>
               </div>
 
-              <StatBar label="満腹度" value={activeCharacter.hunger} />
+              <StatBar label="満腹度" value={activeCharacter.satiety} />
               <StatBar label="体力" value={activeCharacter.energy} />
               <StatBar label="清潔度" value={activeCharacter.hygiene} />
               <StatBar label="気分" value={activeCharacter.mood} />

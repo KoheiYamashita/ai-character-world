@@ -16,10 +16,16 @@ export class CharacterSimulator {
   private config: SimulationConfig
   private transitionStates: Map<string, TransitionSimState> = new Map()
   private conversationDestinations: Map<string, ConversationDestination> = new Map()
+  private onNavigationComplete: ((characterId: string) => void) | null = null
 
   constructor(worldState: WorldStateManager, config: SimulationConfig) {
     this.worldState = worldState
     this.config = config
+  }
+
+  // Set callback for navigation complete (triggers next behavior decision)
+  setOnNavigationComplete(callback: (characterId: string) => void): void {
+    this.onNavigationComplete = callback
   }
 
   // Update all characters for one tick
@@ -115,9 +121,15 @@ export class CharacterSimulator {
       return
     }
 
-    // Check for entrance (otherwise idle - BehaviorDecider handles next action)
+    // Check for entrance (triggers map transition)
     if (finalNode?.type === 'entrance' && finalNode.leadsTo) {
       this.startMapTransition(character.id, finalNode)
+      return
+    }
+
+    // Navigation complete - trigger next behavior decision
+    if (this.onNavigationComplete) {
+      this.onNavigationComplete(character.id)
     }
   }
 

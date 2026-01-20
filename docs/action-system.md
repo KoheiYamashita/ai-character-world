@@ -9,7 +9,7 @@
 
 各ステータスは「行動のトリガー」として機能し、予期しない移動や出会いを生み出す:
 
-- hunger → 食事に行く → 外食先で出会い
+- satiety → 食事に行く → 外食先で出会い
 - energy → 休憩・睡眠 → 場所での体験
 - bladder → 行動中断 → 予期しない移動・出会い
 - hygiene → 入浴 → 大浴場・温泉での出会い
@@ -22,7 +22,7 @@
 
 | ステータス | 説明 | 範囲 | 記憶形成への役割 |
 |-----------|------|------|-----------------|
-| hunger | 空腹度 | 0-100 | 食事行動 → 外食で出会い |
+| satiety | 満腹度 | 0-100 | 食事行動 → 外食で出会い |
 | energy | 体力/疲労 | 0-100 | 睡眠・休憩 → 場所での体験 |
 | hygiene | 衛生 | 0-100 | 入浴行動 → 大浴場・温泉で出会い |
 | mood | 気分 | 0-100 | 行動選択・会話品質に影響 |
@@ -35,20 +35,20 @@
 
 | アクション | 必要施設 | 料金 | 効果 | 記憶形成 |
 |-----------|---------|------|------|---------|
-| eat | kitchen (自宅) | 食材費 | hunger ↓ | 日常の記録 |
-| eat | restaurant | 施設料金 | hunger ↓ | 場所・出会いの体験 |
+| eat | kitchen (自宅) | 食材費 | satiety ↑ | 日常の記録 |
+| eat | restaurant | 施設料金 | satiety ↑ | 場所・出会いの体験 |
 | sleep | bedroom (自宅) | 0 | energy 全回復 | 日の区切り |
 | sleep | bedroom + hotel | 施設料金 | energy 全回復 | 場所の記憶 |
-| toilet | toilet | 0 | bladder ↓ | 行動中断による偶発的体験 |
+| toilet | toilet | 0 | bladder ↑ | 行動中断による偶発的体験 |
 
 ### 生活維持 (Daily Life)
 
 | アクション | 必要施設 | 料金 | 効果 | 記憶形成 |
 |-----------|---------|------|------|---------|
-| work | workspace | - | money ↑, hunger ↑, energy ↓ | 仕事場での体験 |
-| bathe | bathroom (自宅) | 0 | hygiene ↓ | 日常の記録 |
-| bathe | bathroom + hotel | 施設料金 | hygiene ↓ | 場所の記憶 |
-| bathe | hotspring | 施設料金 | hygiene ↓, mood ↑ | 出会い・体験 |
+| work | workspace | - | money ↑, satiety ↓, energy ↓ | 仕事場での体験 |
+| bathe | bathroom (自宅) | 0 | hygiene ↑ | 日常の記録 |
+| bathe | bathroom + hotel | 施設料金 | hygiene ↑ | 場所の記憶 |
+| bathe | hotspring | 施設料金 | hygiene ↑, mood ↑ | 出会い・体験 |
 
 ### 社会活動 (Social)
 
@@ -295,7 +295,7 @@ interface SimCharacter {
 1. workspace タグのある場所で work アクション実行
 2. 営業時間内なら働ける
 3. 時間経過 → 時給 × 時間 = 給料を money に加算
-4. hunger ↑, energy ↓
+4. satiety ↓, energy ↓
 
 ### フルタイム/フリーランス
 
@@ -332,60 +332,105 @@ interface ActionDefinition {
 }
 ```
 
-### 登録例
+### アクション設定の外部化
+
+アクションの時間と効果は `world-config.json` の `actions` セクションで管理。
+`definitions.ts` では requirements と emoji のみを定義する。
+
+```json
+// world-config.json
+{
+  "actions": {
+    "sleep": {
+      "durationRange": { "min": 30, "max": 480, "default": 480 },
+      "perMinute": { "energy": 0.208, "mood": 0.042 }
+    },
+    "eat": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "satiety": 1.67, "mood": 0.33 }
+    },
+    "talk": {
+      "fixed": true,
+      "duration": 5,
+      "effects": { "mood": 20 }
+    },
+    "thinking": {
+      "fixed": true,
+      "duration": 0,
+      "effects": {}
+    }
+  }
+}
+```
+
+### 可変時間アクション
+
+LLMが `durationMinutes` を指定可能。効果は `perMinute × durationMinutes` で計算。
+
+| アクション | 時間範囲 | 効果（/分） |
+|-----------|---------|-----------|
+| eat | 15-60分 | satiety+1.67, mood+0.33 |
+| sleep | 30-480分 | energy+0.208, mood+0.042 |
+| bathe | 15-60分 | hygiene+3.33, mood+0.5 |
+| rest | 10-60分 | energy+0.5, mood+0.17 |
+| work | 30-480分 | energy-0.33, mood-0.08 |
+| toilet | 3-15分 | bladder+20 |
+
+### 固定時間アクション
+
+`fixed: true` で定義。時間と効果は固定。
+
+| アクション | 時間 | 効果 |
+|-----------|-----|------|
+| talk | 5分 | mood+20 |
+| thinking | 0分 | なし（LLM決定中表示用） |
+
+### 登録例（definitions.ts）
 
 ```typescript
 const ACTIONS: Record<string, ActionDefinition> = {
   eat_home: {
     type: "eat",
-    duration: 30 * 60 * 1000,  // 30分
+    // duration と effects.stats は world-config.json から取得
     requirements: {
       facilityTags: ["kitchen"],
       ownership: "self",
       cost: 300,  // 食材費
     },
-    effects: {
-      stats: { hunger: -30 },
-    },
+    effects: {},
+    emoji: "🍳",
   },
 
   eat_restaurant: {
     type: "eat",
-    duration: 45 * 60 * 1000,  // 45分
     requirements: {
       facilityTags: ["restaurant"],
       cost: "facility",
     },
     effects: {
-      stats: { hunger: -35 },
       qualityBonus: true,
     },
-  },
-
-  bathe_hotspring: {
-    type: "bathe",
-    duration: 60 * 60 * 1000,  // 1時間
-    requirements: {
-      facilityTags: ["hotspring"],
-      cost: "facility",
-    },
-    effects: {
-      stats: { hygiene: -50, mood: +20 },
-      qualityBonus: true,
-    },
+    emoji: "🍽️",
   },
 
   work: {
     type: "work",
-    duration: 60 * 60 * 1000,  // 1時間単位
     requirements: {
       facilityTags: ["workspace"],
       employment: true,
     },
     effects: {
-      stats: { hunger: +10, energy: -15 },
       money: "hourlyWage",
     },
+    emoji: "💼",
+  },
+
+  thinking: {
+    type: "thinking",
+    // fixed: true, duration: 0 → 手動完了
+    requirements: {},
+    effects: {},
+    emoji: "🤔",
   },
 }
 ```
@@ -447,7 +492,7 @@ class LLMMiniEpisodeGenerator implements MiniEpisodeGenerator {
         statChanges: z.object({
           mood: z.number().min(-10).max(10).optional(),
           energy: z.number().min(-10).max(10).optional(),
-          hunger: z.number().min(-10).max(10).optional(),
+          satiety: z.number().min(-10).max(10).optional(),
           hygiene: z.number().min(-10).max(10).optional(),
           bladder: z.number().min(-10).max(10).optional(),
         }),

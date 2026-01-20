@@ -1,17 +1,20 @@
-import type { GameMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry } from '@/types'
-import type { BehaviorContext } from '@/types/behavior'
+import type { GameMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig } from '@/types'
+import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry } from '@/types/behavior'
 import type {
   SimulationConfig,
   SerializedWorldState,
   SimCharacter,
+  PendingAction,
 } from './types'
 import { DEFAULT_SIMULATION_CONFIG, createSimCharacter } from './types'
 import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
 import { ActionExecutor } from './actions/ActionExecutor'
+import type { ActionId } from './actions/definitions'
 import type { StateStore } from '../persistence/StateStore'
 import type { BehaviorDecider } from '../behavior/BehaviorDecider'
-import { StubBehaviorDecider } from '../behavior/StubBehaviorDecider'
+import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
+import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -19,6 +22,19 @@ const DEFAULT_TIMEZONE = 'Asia/Tokyo'
 
 // Persistence save interval (30 seconds)
 const SAVE_INTERVAL_MS = 30000
+
+// Tag to actions mapping for facility-based actions
+// Maps facility tags to the abstract actions they enable
+const TAG_TO_ACTIONS: Record<string, string[]> = {
+  bedroom: ['sleep'],
+  kitchen: ['eat'],
+  restaurant: ['eat'],
+  bathroom: ['bathe'],
+  hotspring: ['bathe'],
+  toilet: ['toilet'],
+  workspace: ['work'],
+  public: ['rest'],
+}
 
 export class SimulationEngine {
   private worldState: WorldStateManager
@@ -41,6 +57,8 @@ export class SimulationEngine {
   private defaultSchedules: Map<string, ScheduleEntry[]> = new Map()
   // Schedule cache: key = `${characterId}-${day}`, loaded from DB
   private scheduleCache: Map<string, ScheduleEntry[]> = new Map()
+  // Action history cache: key = `${characterId}-${day}`, loaded from DB
+  private actionHistoryCache: Map<string, ActionHistoryEntry[]> = new Map()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
   private pendingDecisions: Set<string> = new Set()
   // Track last day for day-change detection (schedule cache refresh)
@@ -53,13 +71,24 @@ export class SimulationEngine {
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
-    this.behaviorDecider = new StubBehaviorDecider()
+    this.behaviorDecider = new LLMBehaviorDecider()
     this.stateStore = stateStore ?? null
 
     // Set action completion callback for behavior decision trigger
     this.actionExecutor.setOnActionComplete((characterId, actionId) => {
       console.log(`[SimulationEngine] Action complete callback: ${characterId} finished ${actionId}`)
       this.onActionComplete(characterId)
+    })
+
+    // Set navigation completion callback for behavior decision trigger
+    this.characterSimulator.setOnNavigationComplete((characterId) => {
+      console.log(`[SimulationEngine] Navigation complete callback: ${characterId}`)
+      this.onNavigationComplete(characterId)
+    })
+
+    // Set action history recording callback
+    this.actionExecutor.setOnRecordHistory((entry) => {
+      this.recordActionHistory(entry)
     })
   }
 
@@ -252,12 +281,13 @@ export class SimulationEngine {
       return
     }
 
-    // Check for day change and refresh schedule cache
+    // Check for day change and refresh caches
     const currentDay = realTime.day
     if (currentDay !== this.lastDay) {
       console.log(`[SimulationEngine] Day changed: ${this.lastDay} -> ${currentDay}`)
       this.lastDay = currentDay
       this.clearScheduleCache()
+      this.clearActionHistoryCache()
       // Async reload schedule cache (non-blocking)
       this.loadScheduleCache().catch(err => {
         console.error('[SimulationEngine] Error reloading schedule cache:', err)
@@ -280,6 +310,9 @@ export class SimulationEngine {
 
     // Update character simulations (movement, transitions)
     this.characterSimulator.tick(deltaTime, now)
+
+    // Check for pending actions after movement completes
+    this.checkPendingActions()
 
     // Increment tick counter
     this.worldState.incrementTick()
@@ -356,7 +389,7 @@ export class SimulationEngine {
 
     for (const char of characters) {
       // Calculate new values
-      const newHunger = Math.max(0, char.hunger - decayRates.hungerPerMinute * elapsedMinutes)
+      const newSatiety = Math.max(0, char.satiety - decayRates.satietyPerMinute * elapsedMinutes)
       const newBladder = Math.max(0, char.bladder - decayRates.bladderPerMinute * elapsedMinutes)
       const newEnergy = Math.max(0, char.energy - decayRates.energyPerMinute * elapsedMinutes)
       const newHygiene = Math.max(0, char.hygiene - decayRates.hygienePerMinute * elapsedMinutes)
@@ -364,7 +397,7 @@ export class SimulationEngine {
 
       // Update character stats
       this.worldState.updateCharacter(char.id, {
-        hunger: newHunger,
+        satiety: newSatiety,
         bladder: newBladder,
         energy: newEnergy,
         hygiene: newHygiene,
@@ -372,11 +405,11 @@ export class SimulationEngine {
       })
 
       // Check for status interrupts (when stat crosses below threshold)
-      // Priority order: bladder > hunger > energy > hygiene (mood doesn't trigger interrupt)
+      // Priority order: bladder > satiety > energy > hygiene (mood doesn't trigger interrupt)
       if (char.bladder >= threshold && newBladder < threshold) {
         this.triggerStatusInterrupt(char.id, 'bladder')
-      } else if (char.hunger >= threshold && newHunger < threshold) {
-        this.triggerStatusInterrupt(char.id, 'hunger')
+      } else if (char.satiety >= threshold && newSatiety < threshold) {
+        this.triggerStatusInterrupt(char.id, 'satiety')
       } else if (char.energy >= threshold && newEnergy < threshold) {
         this.triggerStatusInterrupt(char.id, 'energy')
       } else if (char.hygiene >= threshold && newHygiene < threshold) {
@@ -387,18 +420,33 @@ export class SimulationEngine {
     console.log(`[SimulationEngine] Status decay applied (${elapsedMinutes.toFixed(2)} min elapsed)`)
   }
 
+  // Check if character is idle (not executing action, conversation, or movement)
+  private isCharacterIdle(character: SimCharacter): boolean {
+    return !character.currentAction &&
+           !character.conversation?.isActive &&
+           !character.navigation.isMoving
+  }
+
   // Callback when action completes (triggers next behavior decision)
   private onActionComplete(characterId: string): void {
     const character = this.worldState.getCharacter(characterId)
     if (!character) return
-
-    // Skip if decision is already pending
     if (this.pendingDecisions.has(characterId)) return
+    if (!this.isCharacterIdle(character)) return
 
-    // Skip if not idle (might have started another action or conversation)
-    if (character.currentAction) return
-    if (character.conversation?.isActive) return
-    if (character.navigation.isMoving) return
+    const currentTime = this.worldState.getTime()
+    this.makeBehaviorDecision(character, currentTime)
+  }
+
+  // Callback when navigation completes (triggers next behavior decision)
+  private onNavigationComplete(characterId: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return
+    if (this.pendingDecisions.has(characterId)) return
+    if (!this.isCharacterIdle(character)) return
+
+    // Skip if pending action exists (will be handled by checkPendingActions)
+    if (character.pendingAction) return
 
     const currentTime = this.worldState.getTime()
     this.makeBehaviorDecision(character, currentTime)
@@ -412,17 +460,8 @@ export class SimulationEngine {
     console.log('[SimulationEngine] Triggering initial behavior decisions for all idle characters')
 
     for (const character of characters) {
-      // Skip if already executing action
-      if (character.currentAction) continue
-
-      // Skip if in conversation
-      if (character.conversation?.isActive) continue
-
-      // Skip if moving
-      if (character.navigation.isMoving) continue
-
-      // Skip if decision is already pending
       if (this.pendingDecisions.has(character.id)) continue
+      if (!this.isCharacterIdle(character)) continue
 
       this.makeBehaviorDecision(character, currentTime)
     }
@@ -450,6 +489,17 @@ export class SimulationEngine {
     // Mark as pending to prevent duplicate calls
     this.pendingDecisions.add(character.id)
 
+    // Start thinking action to show 🤔 while LLM is processing
+    this.actionExecutor.startAction(character.id, 'thinking')
+
+    // Build facilities and maps from current map
+    const currentMapFacilities = this.buildCurrentMapFacilities(character.currentMapId)
+    const nearbyFacilities = this.buildNearbyFacilities(character.currentMapId)
+    const nearbyMaps = this.buildNearbyMaps(character.currentMapId)
+
+    // Get today's action history
+    const todayActions = this.getActionHistoryForCharacter(character.id)
+
     // Build context
     const context: BehaviorContext = {
       character,
@@ -458,38 +508,85 @@ export class SimulationEngine {
       schedule: this.getScheduleForCharacter(character.id),
       availableActions: this.actionExecutor.getAvailableActions(character.id),
       nearbyNPCs: this.worldState.getNPCsOnMap(character.currentMapId),
+      currentMapFacilities,
+      nearbyFacilities,
+      nearbyMaps,
+      todayActions,
     }
 
     // Make async decision
     this.behaviorDecider.decide(context).then((decision) => {
+      // Complete thinking action (clear 🤔)
+      this.actionExecutor.forceCompleteAction(character.id)
+
       // Re-check that character is still idle (state may have changed)
       const currentChar = this.worldState.getCharacter(character.id)
       if (!currentChar) return
-      if (currentChar.currentAction) return
-      if (currentChar.conversation?.isActive) return
-      if (currentChar.navigation.isMoving) return
+      if (!this.isCharacterIdle(currentChar)) return
 
       // Apply decision
       switch (decision.type) {
         case 'action':
           if (decision.actionId) {
-            const success = this.actionExecutor.startAction(character.id, decision.actionId)
-            if (success) {
-              console.log(`[SimulationEngine] ${character.name} started action: ${decision.actionId} (${decision.reason})`)
-            }
+            this.handleActionDecision(currentChar, decision)
           }
           break
 
-        case 'move':
-          // TODO: Implement navigation to targetNodeId/targetMapId (future enhancement)
-          console.log(`[SimulationEngine] ${character.name} wants to move to ${decision.targetNodeId} (${decision.reason}) - not yet implemented`)
+        case 'move': {
+          // マップ移動またはノード移動
+          let moveSuccess = false
+          if (decision.targetMapId && decision.targetMapId !== currentChar.currentMapId) {
+            // 別マップへの移動
+            const targetMap = this.worldState.getMap(decision.targetMapId)
+            if (targetMap?.spawnNodeId) {
+              moveSuccess = this.characterSimulator.navigateToMap(
+                character.id,
+                decision.targetMapId,
+                targetMap.spawnNodeId
+              )
+              if (moveSuccess) {
+                console.log(`[SimulationEngine] ${currentChar.name} moving to map ${decision.targetMapId} (${decision.reason})`)
+              } else {
+                console.log(`[SimulationEngine] ${currentChar.name} failed to start navigation to map ${decision.targetMapId}`)
+              }
+            } else {
+              console.log(`[SimulationEngine] ${currentChar.name} cannot find map ${decision.targetMapId}`)
+            }
+          } else if (decision.targetNodeId) {
+            // 同一マップ内のノード移動
+            moveSuccess = this.characterSimulator.navigateToNode(character.id, decision.targetNodeId)
+            if (moveSuccess) {
+              console.log(`[SimulationEngine] ${currentChar.name} moving to node ${decision.targetNodeId} (${decision.reason})`)
+            } else {
+              console.log(`[SimulationEngine] ${currentChar.name} failed to start navigation to node ${decision.targetNodeId}`)
+            }
+          } else {
+            console.log(`[SimulationEngine] ${currentChar.name} move decision has no target`)
+          }
+          // If move failed, schedule next decision
+          if (!moveSuccess) {
+            this.scheduleNextDecision(character.id, 1000)
+          }
           break
+        }
 
         case 'idle':
-          // Do nothing
+          // Set idle emoji
+          this.worldState.updateCharacter(character.id, {
+            displayEmoji: '😶',
+          })
+          // Schedule next behavior decision after short idle period
+          this.scheduleNextDecision(character.id, 2000)
           break
       }
+
+      // Apply schedule update if LLM proposed one
+      if (decision.scheduleUpdate) {
+        this.applyScheduleUpdate(character.id, decision.scheduleUpdate)
+      }
     }).catch((error) => {
+      // Complete thinking action on error (clear 🤔)
+      this.actionExecutor.forceCompleteAction(character.id)
       console.error(`[SimulationEngine] Error making behavior decision for ${character.name}:`, error)
     }).finally(() => {
       // Clear pending flag when decision completes (success or failure)
@@ -497,10 +594,287 @@ export class SimulationEngine {
     })
   }
 
+  // Check for pending actions after movement completes
+  private checkPendingActions(): void {
+    const characters = this.worldState.getAllCharacters()
+
+    for (const character of characters) {
+      // Skip if no pending action
+      if (!character.pendingAction) continue
+
+      // Skip if still moving or in transition
+      if (character.navigation.isMoving) continue
+      if (character.crossMapNavigation?.isActive) continue
+
+      // Skip if already executing an action
+      if (character.currentAction) continue
+
+      // Character has arrived - execute pending action
+      const { actionId, facilityId, targetNpcId, reason, durationMinutes } = character.pendingAction
+
+      // Clear pending action first
+      this.worldState.updateCharacter(character.id, { pendingAction: null })
+
+      // Try to execute the action
+      const success = this.actionExecutor.startAction(character.id, actionId, facilityId, targetNpcId, durationMinutes)
+      if (success) {
+        const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
+        if (targetNpcId) {
+          const npc = this.worldState.getNPC(targetNpcId)
+          console.log(`[SimulationEngine] ${character.name} arrived and started action: ${actionId}${durationStr} with ${npc?.name ?? targetNpcId} (${reason})`)
+        } else {
+          console.log(`[SimulationEngine] ${character.name} arrived and started action: ${actionId}${durationStr} at facility: ${facilityId} (${reason})`)
+        }
+      } else {
+        console.log(`[SimulationEngine] ${character.name} arrived but failed to start action: ${actionId}`)
+        // Trigger new behavior decision since action failed
+        const currentTime = this.worldState.getTime()
+        this.makeBehaviorDecision(character, currentTime)
+      }
+    }
+  }
+
+  // Handle action decision: execute immediately or move to facility/NPC first
+  private handleActionDecision(character: SimCharacter, decision: BehaviorDecision): void {
+    const { actionId, targetFacilityId, targetNpcId, reason, durationMinutes } = decision
+    if (!actionId) return
+
+    // Handle talk action with NPC target
+    if (actionId === 'talk' && targetNpcId) {
+      this.handleTalkAction(character, targetNpcId, reason)
+      return
+    }
+
+    // Handle facility-based actions
+    this.handleFacilityAction(character, actionId, targetFacilityId, reason, durationMinutes)
+  }
+
+  // Handle talk action: move to NPC if not adjacent, then start talk
+  private handleTalkAction(character: SimCharacter, targetNpcId: string, reason?: string): void {
+    const npc = this.worldState.getNPC(targetNpcId)
+    if (!npc) {
+      console.log(`[SimulationEngine] ${character.name} target NPC ${targetNpcId} not found`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Check if NPC is on the same map
+    if (npc.mapId !== character.currentMapId) {
+      console.log(`[SimulationEngine] ${character.name} target NPC ${npc.name} is on different map`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    const currentMap = this.worldState.getMap(character.currentMapId)
+    if (!currentMap) {
+      console.log(`[SimulationEngine] ${character.name} cannot find current map`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Check if character is already adjacent to NPC (on a connected node)
+    const npcNode = currentMap.nodes.find(n => n.id === npc.currentNodeId)
+    if (!npcNode) {
+      console.log(`[SimulationEngine] ${character.name} cannot find NPC node ${npc.currentNodeId}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    const isAdjacent = npcNode.connectedTo.includes(character.currentNodeId) ||
+                       character.currentNodeId === npc.currentNodeId
+
+    if (isAdjacent) {
+      // Already adjacent - execute talk immediately
+      const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId)
+      if (success) {
+        console.log(`[SimulationEngine] ${character.name} started talk with ${npc.name} (${reason})`)
+      } else {
+        console.log(`[SimulationEngine] ${character.name} failed to start talk with ${npc.name}`)
+        this.triggerActionDecision(character)
+      }
+      return
+    }
+
+    // Not adjacent - need to navigate to an adjacent node
+    // Find a walkable adjacent node
+    const adjacentNodeId = npcNode.connectedTo.find(nodeId => {
+      const node = currentMap.nodes.find(n => n.id === nodeId)
+      return node && node.type !== 'entrance' // Avoid entrance nodes
+    })
+
+    if (!adjacentNodeId) {
+      console.log(`[SimulationEngine] ${character.name} cannot find adjacent node to NPC ${npc.name}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Set pending action for talk
+    const pendingAction: PendingAction = {
+      actionId: 'talk',
+      targetNpcId,
+      facilityMapId: character.currentMapId,
+      reason,
+    }
+
+    this.worldState.updateCharacter(character.id, { pendingAction })
+
+    // Start navigation to adjacent node
+    const startResult = this.characterSimulator.navigateToNode(character.id, adjacentNodeId)
+    if (startResult) {
+      console.log(`[SimulationEngine] ${character.name} moving to talk with ${npc.name} (${reason})`)
+    } else {
+      this.worldState.updateCharacter(character.id, { pendingAction: null })
+      console.log(`[SimulationEngine] ${character.name} failed to start navigation to NPC ${npc.name}`)
+      this.triggerActionDecision(character)
+    }
+  }
+
+  // Handle facility-based action: move to facility if not inside, then execute
+  private handleFacilityAction(
+    character: SimCharacter,
+    actionId: ActionId,
+    targetFacilityId?: string,
+    reason?: string,
+    durationMinutes?: number
+  ): void {
+    const currentMap = this.worldState.getMap(character.currentMapId)
+
+    // Find facility: check current map first, then nearby maps
+    let facilityMapId = character.currentMapId
+    let obstacle: ReturnType<typeof findObstacleById> | null = null
+
+    if (targetFacilityId && currentMap) {
+      // Check current map first
+      obstacle = findObstacleById(currentMap.obstacles, targetFacilityId)
+      if (obstacle) {
+        facilityMapId = character.currentMapId
+      } else {
+        // Check nearby maps
+        const nearbyFacilities = this.buildNearbyFacilities(character.currentMapId)
+        const targetFacility = nearbyFacilities.find(f => f.id === targetFacilityId)
+        if (targetFacility) {
+          facilityMapId = targetFacility.mapId
+          const facilityMap = this.worldState.getMap(facilityMapId)
+          if (facilityMap) {
+            obstacle = findObstacleById(facilityMap.obstacles, targetFacilityId)
+          }
+        }
+      }
+    }
+
+    // Check if character is currently inside the target facility
+    let isInsideTargetFacility = false
+    if (targetFacilityId && obstacle && facilityMapId === character.currentMapId && currentMap) {
+      const gridPrefix = currentMap.nodes[0]?.id.split('-')[0] || character.currentMapId
+      isInsideTargetFacility = isNodeAtFacility(character.currentNodeId, obstacle, gridPrefix)
+    }
+
+    // Execute immediately if: no specific facility OR already inside target facility
+    if (!targetFacilityId || isInsideTargetFacility) {
+      const success = this.actionExecutor.startAction(character.id, actionId, targetFacilityId, undefined, durationMinutes)
+      if (success) {
+        const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
+        console.log(`[SimulationEngine] ${character.name} started action: ${actionId}${durationStr} (${reason})${targetFacilityId ? ` at facility: ${targetFacilityId}` : ''}`)
+      } else {
+        console.log(`[SimulationEngine] ${character.name} failed to start action: ${actionId}, triggering re-decision`)
+        this.triggerActionDecision(character)
+      }
+      return
+    }
+
+    // Not inside target facility - need to navigate first
+    if (!obstacle) {
+      console.log(`[SimulationEngine] ${character.name} target facility ${targetFacilityId} not found`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    const facilityMap = this.worldState.getMap(facilityMapId)
+    if (!facilityMap) {
+      console.log(`[SimulationEngine] ${character.name} cannot find map ${facilityMapId} for facility ${targetFacilityId}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Extract grid prefix from first node ID (format: {prefix}-{row}-{col})
+    const gridPrefix = facilityMap.nodes[0]?.id.split('-')[0] || facilityMapId
+    const targetNodeId = getFacilityTargetNode(obstacle, facilityMap.nodes, gridPrefix)
+    if (!targetNodeId) {
+      console.log(`[SimulationEngine] ${character.name} cannot find target node for facility ${targetFacilityId}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Set pending action
+    const pendingAction: PendingAction = {
+      actionId,
+      facilityId: targetFacilityId,
+      facilityMapId,
+      reason,
+      durationMinutes,
+    }
+
+    this.worldState.updateCharacter(character.id, { pendingAction })
+
+    // Start navigation
+    if (facilityMapId === character.currentMapId) {
+      // Same map: start local navigation
+      const startResult = this.characterSimulator.navigateToNode(character.id, targetNodeId)
+      if (startResult) {
+        console.log(`[SimulationEngine] ${character.name} moving to facility ${targetFacilityId} (${reason})`)
+      } else {
+        this.worldState.updateCharacter(character.id, { pendingAction: null })
+        console.log(`[SimulationEngine] ${character.name} failed to start navigation to facility ${targetFacilityId}`)
+        this.triggerActionDecision(character)
+      }
+    } else {
+      // Different map: start cross-map navigation
+      const crossMapResult = this.characterSimulator.navigateToMap(
+        character.id,
+        facilityMapId,
+        targetNodeId
+      )
+      if (crossMapResult) {
+        console.log(`[SimulationEngine] ${character.name} moving to facility ${targetFacilityId} on map ${facilityMapId} (${reason})`)
+      } else {
+        this.worldState.updateCharacter(character.id, { pendingAction: null })
+        console.log(`[SimulationEngine] ${character.name} failed to start cross-map navigation to facility ${targetFacilityId}`)
+        this.triggerActionDecision(character)
+      }
+    }
+  }
+
+  // Trigger a new action decision for a character (used after action/navigation failure)
+  private triggerActionDecision(character: SimCharacter): void {
+    // Schedule for next event loop tick to ensure pendingDecisions is cleared.
+    // This is called from within makeBehaviorDecision's .then() block,
+    // where pendingDecisions is still set until .finally() runs.
+    this.scheduleNextDecision(character.id, 0)
+  }
+
+  // Schedule next behavior decision after a delay (used for idle state and re-trigger)
+  private scheduleNextDecision(characterId: string, delayMs: number): void {
+    setTimeout(() => {
+      if (this.pendingDecisions.has(characterId)) return
+
+      const character = this.worldState.getCharacter(characterId)
+      if (!character) return
+      if (!this.isCharacterIdle(character)) return
+
+      const currentTime = this.worldState.getTime()
+      this.makeBehaviorDecision(character, currentTime)
+    }, delayMs)
+  }
+
+  // Generate cache key for character-day based data
+  private characterDayCacheKey(characterId: string, day: number): string {
+    return `${characterId}-${day}`
+  }
+
   // Get schedule for a character (DB cache priority, fallback to default)
   private getScheduleForCharacter(characterId: string): ScheduleEntry[] | null {
     const currentDay = this.worldState.getTime().day
-    const cacheKey = `${characterId}-${currentDay}`
+    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
 
     // Try DB cache first
     const cachedSchedule = this.scheduleCache.get(cacheKey)
@@ -510,6 +884,191 @@ export class SimulationEngine {
 
     // Fallback to default schedules from characters.json
     return this.defaultSchedules.get(characterId) ?? null
+  }
+
+  /**
+   * 現在マップの施設情報を収集（アクション表示用）
+   */
+  private buildCurrentMapFacilities(mapId: string): CurrentMapFacility[] {
+    const map = this.worldState.getMap(mapId)
+    if (!map) return []
+
+    const facilities: CurrentMapFacility[] = []
+
+    for (const obstacle of map.obstacles) {
+      if (!obstacle.facility) continue
+
+      const availableActions = this.getActionsForFacilityTags(obstacle.facility.tags)
+      if (availableActions.length === 0) continue
+
+      facilities.push({
+        id: obstacle.id,
+        label: obstacle.label || obstacle.id,
+        tags: obstacle.facility.tags,
+        cost: obstacle.facility.cost,
+        availableActions,
+      })
+    }
+
+    return facilities
+  }
+
+  /**
+   * BFSで3ホップ以内のマップを探索し、各マップに対してコールバックを呼び出す
+   */
+  private traverseNearbyMaps<T>(
+    currentMapId: string,
+    callback: (map: GameMap, mapId: string, distance: number) => T[]
+  ): T[] {
+    const results: T[] = []
+    const visited = new Set<string>()
+    const queue: { mapId: string; distance: number }[] = [{ mapId: currentMapId, distance: 0 }]
+
+    while (queue.length > 0) {
+      const { mapId, distance } = queue.shift()!
+
+      if (visited.has(mapId)) continue
+      visited.add(mapId)
+
+      const map = this.worldState.getMap(mapId)
+      if (!map) continue
+
+      // Call the callback to collect results for this map
+      results.push(...callback(map, mapId, distance))
+
+      // If within 3 hops, explore connected maps via entrance nodes
+      if (distance < 3) {
+        for (const node of map.nodes) {
+          if (node.type === 'entrance' && node.leadsTo && !visited.has(node.leadsTo.mapId)) {
+            queue.push({ mapId: node.leadsTo.mapId, distance: distance + 1 })
+          }
+        }
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * 他マップの施設を収集（現在マップは除外、distance > 0 のみ）
+   */
+  private buildNearbyFacilities(currentMapId: string): NearbyFacility[] {
+    return this.traverseNearbyMaps(currentMapId, (map, mapId, distance) => {
+      // 現在マップの施設は除外
+      if (distance === 0) return []
+
+      const facilities: NearbyFacility[] = []
+      for (const obstacle of map.obstacles) {
+        if (!obstacle.facility) continue
+
+        // Calculate available actions from facility tags
+        const availableActions = this.getActionsForFacilityTags(obstacle.facility.tags)
+
+        facilities.push({
+          id: obstacle.id,
+          label: obstacle.label || obstacle.id,
+          tags: obstacle.facility.tags,
+          cost: obstacle.facility.cost,
+          quality: obstacle.facility.quality,
+          distance,
+          mapId,
+          availableActions: availableActions.length > 0 ? availableActions : undefined,
+        })
+      }
+      return facilities
+    })
+  }
+
+  /**
+   * 移動可能なマップ情報を収集（現在マップも含む）
+   */
+  private buildNearbyMaps(currentMapId: string): NearbyMap[] {
+    return this.traverseNearbyMaps(currentMapId, (map, mapId, distance) => [{
+      id: mapId,
+      label: map.name || mapId,
+      distance,
+    }])
+  }
+
+  /**
+   * 施設タグから利用可能なアクションを取得
+   */
+  private getActionsForFacilityTags(tags: string[]): string[] {
+    const actions: string[] = []
+    for (const tag of tags) {
+      const tagActions = TAG_TO_ACTIONS[tag]
+      if (tagActions) {
+        for (const action of tagActions) {
+          if (!actions.includes(action)) {
+            actions.push(action)
+          }
+        }
+      }
+    }
+    return actions
+  }
+
+  // Apply schedule update proposed by LLM
+  private applyScheduleUpdate(characterId: string, update: ScheduleUpdate): void {
+    const currentDay = this.worldState.getTime().day
+    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
+
+    // Get current schedule entries
+    let entries = this.scheduleCache.get(cacheKey) ?? this.defaultSchedules.get(characterId) ?? []
+    entries = [...entries] // Clone to avoid mutating original
+
+    const { type, entry } = update
+
+    switch (type) {
+      case 'add':
+        // Add new entry and sort by time
+        entries.push(entry)
+        entries.sort((a, b) => a.time.localeCompare(b.time))
+        console.log(`[SimulationEngine] Schedule add: ${entry.time} ${entry.activity}`)
+        break
+
+      case 'remove':
+        // Remove entry matching time and activity
+        const removeIndex = entries.findIndex(
+          e => e.time === entry.time && e.activity === entry.activity
+        )
+        if (removeIndex >= 0) {
+          entries.splice(removeIndex, 1)
+          console.log(`[SimulationEngine] Schedule remove: ${entry.time} ${entry.activity}`)
+        } else {
+          console.log(`[SimulationEngine] Schedule remove: entry not found (${entry.time} ${entry.activity})`)
+        }
+        break
+
+      case 'modify':
+        // Find entry by time and replace it
+        const modifyIndex = entries.findIndex(e => e.time === entry.time)
+        if (modifyIndex >= 0) {
+          entries[modifyIndex] = entry
+          console.log(`[SimulationEngine] Schedule modify: ${entry.time} -> ${entry.activity}`)
+        } else {
+          // If not found, add as new entry
+          entries.push(entry)
+          entries.sort((a, b) => a.time.localeCompare(b.time))
+          console.log(`[SimulationEngine] Schedule modify (not found, added): ${entry.time} ${entry.activity}`)
+        }
+        break
+    }
+
+    // Update cache
+    this.scheduleCache.set(cacheKey, entries)
+
+    // Persist to DB (async, non-blocking)
+    if (this.stateStore) {
+      const schedule: DailySchedule = {
+        characterId,
+        day: currentDay,
+        entries,
+      }
+      this.stateStore.saveSchedule(schedule).catch(error => {
+        console.error(`[SimulationEngine] Error saving schedule update:`, error)
+      })
+    }
   }
 
   // Load schedules from DB into cache for all characters on current day
@@ -523,7 +1082,7 @@ export class SimulationEngine {
       try {
         const schedule = await this.stateStore.loadSchedule(char.id, currentDay)
         if (schedule) {
-          const cacheKey = `${char.id}-${currentDay}`
+          const cacheKey = this.characterDayCacheKey(char.id, currentDay)
           this.scheduleCache.set(cacheKey, schedule.entries)
           console.log(`[SimulationEngine] Loaded schedule for ${char.name} (day ${currentDay}) from DB`)
         }
@@ -536,6 +1095,88 @@ export class SimulationEngine {
   // Clear schedule cache (called when day changes)
   clearScheduleCache(): void {
     this.scheduleCache.clear()
+  }
+
+  // Clear action history cache (called when day changes)
+  clearActionHistoryCache(): void {
+    this.actionHistoryCache.clear()
+  }
+
+  // Record action history (called from ActionExecutor callback)
+  private recordActionHistory(entry: {
+    characterId: string
+    actionId: ActionId
+    facilityId?: string
+    targetNpcId?: string
+    durationMinutes?: number
+  }): void {
+    const currentTime = this.worldState.getTime()
+    const currentDay = currentTime.day
+    const timeStr = `${String(currentTime.hour).padStart(2, '0')}:${String(currentTime.minute).padStart(2, '0')}`
+
+    // Determine target (facility or NPC)
+    const target = entry.facilityId ?? entry.targetNpcId
+
+    // Get pending action reason if available
+    const character = this.worldState.getCharacter(entry.characterId)
+    const reason = character?.pendingAction?.reason
+
+    // Update cache
+    const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
+    const cached = this.actionHistoryCache.get(cacheKey) ?? []
+    cached.push({
+      time: timeStr,
+      actionId: entry.actionId,
+      target,
+      durationMinutes: entry.durationMinutes,
+      reason,
+    })
+    this.actionHistoryCache.set(cacheKey, cached)
+
+    // Persist to DB (async, non-blocking)
+    if (this.stateStore) {
+      this.stateStore.addActionHistory({
+        characterId: entry.characterId,
+        day: currentDay,
+        time: timeStr,
+        actionId: entry.actionId,
+        target,
+        durationMinutes: entry.durationMinutes,
+        reason,
+      }).catch(error => {
+        console.error(`[SimulationEngine] Error saving action history:`, error)
+      })
+    }
+
+    console.log(`[SimulationEngine] Recorded action history: ${entry.characterId} ${timeStr} ${entry.actionId}${target ? ` → ${target}` : ''}`)
+  }
+
+  // Get action history for a character (cache priority, fallback to empty)
+  private getActionHistoryForCharacter(characterId: string): ActionHistoryEntry[] {
+    const currentDay = this.worldState.getTime().day
+    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
+    return this.actionHistoryCache.get(cacheKey) ?? []
+  }
+
+  // Load action history from DB into cache for all characters on current day
+  async loadActionHistoryCache(): Promise<void> {
+    if (!this.stateStore) return
+
+    const currentDay = this.worldState.getTime().day
+    const characters = this.worldState.getAllCharacters()
+
+    for (const char of characters) {
+      try {
+        const history = await this.stateStore.loadActionHistoryForDay(char.id, currentDay)
+        if (history.length > 0) {
+          const cacheKey = this.characterDayCacheKey(char.id, currentDay)
+          this.actionHistoryCache.set(cacheKey, history)
+          console.log(`[SimulationEngine] Loaded ${history.length} action history entries for ${char.name} (day ${currentDay})`)
+        }
+      } catch (error) {
+        console.error(`[SimulationEngine] Error loading action history for ${char.id}:`, error)
+      }
+    }
   }
 
   // Initialize lastDay from current time (called after engine start)
@@ -633,6 +1274,35 @@ export class SimulationEngine {
   getCharacterSimulator(): CharacterSimulator {
     return this.characterSimulator
   }
+
+  // Supplement character profiles with personality, tendencies, customPrompt from config
+  // Called after restoring from persistence where these fields are not saved
+  supplementCharacterProfiles(characterConfigs: CharacterConfig[]): void {
+    const configMap = new Map(characterConfigs.map(c => [c.id, c]))
+
+    for (const char of this.worldState.getAllCharacters()) {
+      const config = configMap.get(char.id)
+      if (config) {
+        this.worldState.supplementCharacterProfile(char.id, {
+          personality: config.personality,
+          tendencies: config.tendencies,
+          customPrompt: config.customPrompt,
+        })
+      }
+    }
+
+    console.log(`[SimulationEngine] Supplemented character profiles for ${characterConfigs.length} characters`)
+  }
+
+  // Set action configs for ActionExecutor and LLMBehaviorDecider
+  setActionConfigs(configs: Record<string, import('@/types').ActionConfig>): void {
+    this.actionExecutor.setActionConfigs(configs)
+    // Cast to access setActionConfigs on LLMBehaviorDecider
+    if ('setActionConfigs' in this.behaviorDecider) {
+      (this.behaviorDecider as LLMBehaviorDecider).setActionConfigs(configs)
+    }
+    console.log(`[SimulationEngine] Action configs set`)
+  }
 }
 
 // Singleton instance for the server
@@ -672,32 +1342,32 @@ const lazyImports = {
 
 async function getWorldDataLoader(): Promise<typeof import('./dataLoader').loadWorldDataServer> {
   if (!lazyImports.loadWorldDataServer) {
-    const module = await import('./dataLoader')
-    lazyImports.loadWorldDataServer = module.loadWorldDataServer
+    const imported = await import('./dataLoader')
+    lazyImports.loadWorldDataServer = imported.loadWorldDataServer
   }
   return lazyImports.loadWorldDataServer
 }
 
 async function getSqliteStore(): Promise<typeof import('../persistence/SqliteStore').SqliteStore> {
   if (!lazyImports.SqliteStore) {
-    const module = await import('../persistence/SqliteStore')
-    lazyImports.SqliteStore = module.SqliteStore
+    const imported = await import('../persistence/SqliteStore')
+    lazyImports.SqliteStore = imported.SqliteStore
   }
   return lazyImports.SqliteStore
 }
 
 async function getInitializeLLMClient(): Promise<typeof import('../llm').initializeLLMClient> {
   if (!lazyImports.initializeLLMClient) {
-    const module = await import('../llm')
-    lazyImports.initializeLLMClient = module.initializeLLMClient
+    const imported = await import('../llm')
+    lazyImports.initializeLLMClient = imported.initializeLLMClient
   }
   return lazyImports.initializeLLMClient
 }
 
 async function getInitializeLLMErrorHandler(): Promise<typeof import('../llm').initializeLLMErrorHandler> {
   if (!lazyImports.initializeLLMErrorHandler) {
-    const module = await import('../llm')
-    lazyImports.initializeLLMErrorHandler = module.initializeLLMErrorHandler
+    const imported = await import('../llm')
+    lazyImports.initializeLLMErrorHandler = imported.initializeLLMErrorHandler
   }
   return lazyImports.initializeLLMErrorHandler
 }
@@ -731,7 +1401,7 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
 
       // Load world data (maps, characters, config)
       const loadWorldData = await getWorldDataLoader()
-      const { maps, characters, config, npcBlockedNodes, npcs, defaultSchedules } = await loadWorldData()
+      const { maps, characters, config, npcBlockedNodes, npcs, defaultSchedules, characterConfigs } = await loadWorldData()
 
       // Initialize LLM client (reads from environment variables)
       const initializeLLMClient = await getInitializeLLMClient()
@@ -758,6 +1428,10 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
           engine.setServerStartTime(savedStartTime)
         }
 
+        // Supplement character profiles (personality, tendencies, customPrompt)
+        // These fields are not persisted in DB, so we need to load them from config
+        engine.supplementCharacterProfiles(characterConfigs)
+
         // Set NPC blocked nodes (not persisted, loaded fresh)
         engine.initializeNPCsAndConfig(npcBlockedNodes, npcs, config.time, defaultSchedules)
       } else {
@@ -769,11 +1443,19 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         console.log(`${logPrefix} Initialized with fresh state`)
       }
 
+      // Set action configs for ActionExecutor and LLMBehaviorDecider
+      if (config.actions) {
+        engine.setActionConfigs(config.actions)
+      }
+
       engine.start()
       console.log(`${logPrefix} Simulation engine started`)
 
       // Load schedule cache from DB
       await engine.loadScheduleCache()
+
+      // Load action history cache from DB
+      await engine.loadActionHistoryCache()
 
       // Initialize lastDay for day-change detection
       engine.initializeLastDay()

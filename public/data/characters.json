@@ -17,8 +17,8 @@
         }
       },
       "defaultStats": {
-        "money": 100,
-        "hunger": 80,
+        "money": 100000,
+        "satiety": 80,
         "energy": 80,
         "hygiene": 80,
         "mood": 80,
@@ -26,21 +26,33 @@
       },
       "employment": {
         "jobId": "freelance-writer",
-        "workplaceLabel": "書斎",
-        "mapId": "home"
+        "workplaces": [
+          { "workplaceLabel": "書斎", "mapId": "home" },
+          { "workplaceLabel": "作業エリア", "mapId": "office" }
+        ]
       },
       "defaultSchedule": [
         { "time": "07:00", "activity": "起床" },
         { "time": "07:30", "activity": "朝食", "location": "kitchen" },
         { "time": "08:00", "activity": "身支度" },
-        { "time": "09:00", "activity": "仕事", "location": "書斎" },
+        { "time": "09:00", "activity": "仕事" },
         { "time": "12:00", "activity": "昼食" },
-        { "time": "13:00", "activity": "仕事", "location": "書斎" },
-        { "time": "18:00", "activity": "自由時間" },
+        { "time": "13:00", "activity": "仕事" },
+        { "time": "14:30", "activity": "自由時間" },
         { "time": "19:00", "activity": "夕食" },
         { "time": "20:00", "activity": "自由時間" },
         { "time": "23:00", "activity": "就寝", "location": "bedroom" }
-      ]
+      ],
+      "personality": "明るく社交的だが、少し心配性な面もある。好奇心旺盛で新しいことに挑戦するのが好き。",
+      "tendencies": [
+      	"外に出るのが大好きで家以外で過ごすことが多い",
+        "前回の行動と同じマップにいるのはできるだけ避ける",
+        "節約志向で安い店を選ぶ",
+        "朝型で早起きが得意",
+        "人と話すのが好き",
+        "コーヒーが大好き"
+      ],
+      "customPrompt": "3年前に都会から引っ越してきた。\n毎朝コーヒーを飲まないと調子が出ない。\n最近は小説の執筆に集中している。"
     }
   ]
 }

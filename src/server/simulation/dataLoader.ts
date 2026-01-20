@@ -317,7 +317,7 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
     name: charConfig.name,
     sprite: charConfig.sprite,
     money: charConfig.defaultStats.money,
-    hunger: charConfig.defaultStats.hunger,
+    satiety: charConfig.defaultStats.satiety,
     energy: charConfig.defaultStats.energy,
     hygiene: charConfig.defaultStats.hygiene,
     mood: charConfig.defaultStats.mood,
@@ -329,6 +329,10 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
       : { x: 0, y: 0 },
     direction: 'down' as const,
     employment: charConfig.employment,
+    // LLM行動決定用のプロファイル情報
+    personality: charConfig.personality,
+    tendencies: charConfig.tendencies,
+    customPrompt: charConfig.customPrompt,
   }))
 
   return characters
@@ -427,6 +431,17 @@ export interface WorldData {
   npcs: NPC[]
   npcBlockedNodes: Map<string, Set<string>>
   defaultSchedules: Map<string, ScheduleEntry[]>
+  characterConfigs: CharacterConfig[]  // キャラクターのプロファイル情報（再起動後の補填用）
+}
+
+// Load character configs (for profile supplementation after restore)
+export async function loadCharacterConfigsServer(config?: WorldConfig): Promise<CharacterConfig[]> {
+  const cfg = config ?? (await loadWorldConfigServer())
+  const charactersPath = path.join(getPublicPath(), cfg.paths.charactersJson.replace(/^\//, ''))
+  const content = await fs.readFile(charactersPath, 'utf-8')
+  const charactersData: CharactersData = JSON.parse(content)
+
+  return charactersData.characters
 }
 
 export async function loadWorldDataServer(): Promise<WorldData> {
@@ -436,6 +451,7 @@ export async function loadWorldDataServer(): Promise<WorldData> {
   const npcs = await loadNPCsServer(config)
   const npcBlockedNodes = await loadNPCBlockedNodesServer(config)
   const defaultSchedules = await loadDefaultSchedulesServer(config)
+  const characterConfigs = await loadCharacterConfigsServer(config)
 
-  return { config, maps, characters, npcs, npcBlockedNodes, defaultSchedules }
+  return { config, maps, characters, npcs, npcBlockedNodes, defaultSchedules, characterConfigs }
 }

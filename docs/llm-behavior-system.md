@@ -99,7 +99,7 @@ interface DailySchedule {
 アクション種別は強制だが、具体的な内容（場所など）はLLMが決定。
 
 ```
-hunger < 10%
+satiety < 10%
   ↓
 システム: 「食事」アクション強制
   ↓
@@ -112,7 +112,7 @@ LLM: 所持金・距離・好みを加味して選択
 
 | ステータス | 強制アクション |
 |-----------|---------------|
-| hunger < 10% | eat |
+| satiety < 10% | eat |
 | energy < 10% | sleep or rest |
 | bladder < 10% | toilet |
 | hygiene < 10% | bathe |
@@ -228,10 +228,13 @@ ${recentConversations.map(c => `- ${c.npcName}: ${c.summary}`).join('\n') || '�
 【中期記憶】
 ${midTermMemories.map(m => `- ${m.content}`).join('\n') || 'なし'}
 
+【今日の行動】
+${todayActions.map(a => `- ${a.time} ${a.actionId}${a.target ? ` → ${a.target}` : ''}${a.durationMinutes ? ` (${a.durationMinutes}分)` : ''}${a.reason ? ` [${a.reason}]` : ''}`).join('\n') || 'なし'}
+
 【現在の状況】
 - 時刻: ${time}
 - 場所: ${location}
-- ステータス: hunger=${hunger}, energy=${energy}, ...
+- ステータス: satiety=${satiety}, energy=${energy}, ...
 - 所持金: ${money}円
 
 【今日のスケジュール】
@@ -292,15 +295,23 @@ interface MidTermMemory {
 
 ```typescript
 interface BehaviorDecision {
-  action: string              // "eat", "move", "talk", etc.
-  target?: string             // 対象（場所ID, NPC IDなど）
+  action: string              // "eat", "move", "talk", "idle", etc.
+  target?: string             // 対象（施設ID, NPC ID, マップIDなど）
   reason: string              // 理由（ログ用）
+  durationMinutes?: number    // 実行時間（分）- 可変時間アクションの場合
   scheduleUpdate?: {          // スケジュール変更（任意）
     type: "add" | "remove" | "modify"
     entry: ScheduleEntry
   }
 }
 ```
+
+#### durationMinutes について
+
+- `eat`, `sleep`, `toilet`, `bathe`, `rest`, `work` の可変時間アクションで使用
+- 各アクションの `durationRange` 内で指定
+- 次のスケジュールまでの時間を考慮して適切な値を選択
+- `talk`, `move`, `idle`, `thinking` は固定または即時なので `null`
 
 ### 出力例
 
@@ -367,11 +378,11 @@ LLM: 選択 + 会話目的
   }
 ```
 
-## 初期実装
+## 実装
 
-### スタブ実装
+### LLMBehaviorDecider
 
-初期実装ではLLM呼び出しをスタブ化し、ルールベースで動作。
+LLMを使用した行動決定クラス。
 
 ```typescript
 interface BehaviorDecider {
@@ -381,19 +392,81 @@ interface BehaviorDecider {
   ): Promise<BehaviorDecision>
 }
 
-// 初期実装: ルールベース
-class StubBehaviorDecider implements BehaviorDecider {
-  async decide(character, context): Promise<BehaviorDecision> {
-    // スケジュールに従って行動
-    // ステータス低下時は対応するアクション
-    // それ以外はランダム
-  }
-}
-
-// 将来実装: LLM
 class LLMBehaviorDecider implements BehaviorDecider {
   async decide(character, context): Promise<BehaviorDecision> {
-    // LLM呼び出し
+    // 1. thinking アクション開始（🤔表示）
+    // 2. LLMにアクション種別を決定させる（構造化出力）
+    // 3. 詳細選択が必要な場合、2段階目のLLM呼び出し（施設選択等）
+    // 4. thinking 完了
+    // 5. 決定に基づいてアクション実行または移動開始
   }
 }
 ```
+
+### thinking アクション
+
+LLMが行動を決定している間、キャラクターの頭上に🤔を表示。
+
+- duration: 0（手動完了）
+- LLM呼び出し完了時に `forceCompleteAction()` で終了
+- エラー時も必ず終了させる
+
+### 可変時間アクション
+
+LLMがアクションの実行時間を指定できる仕組み。
+
+```typescript
+// world-config.json の actions セクション
+{
+  "sleep": {
+    "durationRange": { "min": 30, "max": 480, "default": 480 },
+    "perMinute": { "energy": 0.208, "mood": 0.042 }
+  },
+  "eat": {
+    "durationRange": { "min": 15, "max": 60, "default": 30 },
+    "perMinute": { "satiety": 1.67, "mood": 0.33 }
+  }
+}
+```
+
+- **durationRange**: 最小〜最大時間（分）
+- **perMinute**: 分あたりの効果
+- **効果計算**: perMinute × durationMinutes
+- LLMがスケジュールを考慮して適切な時間を選択
+
+### PendingAction（移動後アクション）
+
+施設やNPCが現在位置から離れている場合、移動完了後にアクションを実行。
+
+```typescript
+interface PendingAction {
+  actionId: ActionId
+  facilityId?: string       // 施設アクション用
+  targetNpcId?: string      // talk アクション用
+  facilityMapId: string
+  reason?: string
+  durationMinutes?: number  // 可変時間アクション用
+}
+```
+
+フロー:
+```
+LLM決定: eat at restaurant_a（別マップ）
+  ↓
+PendingAction を設定
+  ↓
+restaurant_a があるマップへ移動開始
+  ↓
+移動完了
+  ↓
+PendingAction を実行（eat アクション開始）
+```
+
+### 施設検索ロジック
+
+アクションの実行可否チェックは「マップ全体」で判定。
+
+- 旧: キャラクターが施設内にいるかチェック
+- 新: マップに該当施設があるかチェック → 移動 + アクション実行
+
+これにより、LLMは「マップ内のどの施設でも選択可能」になる。

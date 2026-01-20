@@ -1,3 +1,5 @@
+import type { DurationRange, EffectPerMinute } from './action'
+
 export interface TimingConfig {
   idleTimeMin: number
   idleTimeMax: number
@@ -6,7 +8,7 @@ export interface TimingConfig {
 }
 
 export interface StatusDecayConfig {
-  hungerPerMinute: number
+  satietyPerMinute: number
   energyPerMinute: number
   hygienePerMinute: number
   moodPerMinute: number
@@ -116,6 +118,23 @@ export interface ErrorConfig {
   webhookTimeoutMs?: number
 }
 
+// アクション設定（world-config.json actions セクション）
+export interface ActionConfig {
+  // 可変時間アクション用
+  durationRange?: DurationRange
+  perMinute?: EffectPerMinute
+  // 固定時間アクション用
+  fixed?: boolean
+  duration?: number // 分単位
+  effects?: {
+    satiety?: number
+    energy?: number
+    hygiene?: number
+    mood?: number
+    bladder?: number
+  }
+}
+
 export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
@@ -128,4 +147,5 @@ export interface WorldConfig {
   paths: PathsConfig
   time: TimeConfig
   error?: ErrorConfig
+  actions?: Record<string, ActionConfig>
 }

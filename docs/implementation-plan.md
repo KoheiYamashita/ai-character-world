@@ -153,14 +153,44 @@
 
 ## Phase 3: LLM活用
 
-### Step 13: 行動決定LLM
+### ✅ Step 13: 行動決定LLM
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 13-1 | `LLMBehaviorDecider` 実装 | ビルド通過 |
-| 13-2 | 行動決定プロンプト構築 | プロンプトログ出力 |
-| 13-3 | 構造化出力パース（zod schema） | 行動決定成功 |
-| 13-4 | アクション詳細選択（施設一覧→LLM選択の2段階） | 施設選択も動作 |
+| ✅ 13-1 | `LLMBehaviorDecider` 実装 | ビルド通過 |
+| ✅ 13-2 | 行動決定プロンプト構築 | プロンプトログ出力 |
+| ✅ 13-3 | 構造化出力パース（zod schema） | 行動決定成功 |
+| ✅ 13-4 | アクション詳細選択（施設一覧→LLM選択の2段階） | 施設選択も動作 |
+| ✅ 13-5 | `case 'move':` 実装（マップ移動/ノード移動） | move決定で移動開始 |
+| ✅ 13-6 | フォールバック改善（nearbyFacilitiesから施設検索） | 施設移動+アクション |
+| ✅ 13-7 | ACTION_FACILITY_TAGSマッピング追加 | 施設検索が動作 |
+
+#### Step 13 設計変更点（実装時に追加）
+
+| 変更 | 内容 |
+|------|------|
+| `hunger` → `satiety` | 空腹度から満腹度に変更（0=空腹, 100=満腹）。直感的な理解のため |
+| アクション設定外部化 | `world-config.json` の `actions` セクションで時間・効果を管理 |
+| 可変時間アクション | LLMが `durationMinutes` を指定、`perMinute` × 時間で効果計算 |
+| `PendingAction` | 移動完了後にアクション実行する仕組み |
+| `thinking` アクション | LLM決定中に🤔表示（duration: 0、手動完了） |
+| キャラクタープロファイル | `personality`, `tendencies`, `customPrompt` をキャラクターに追加 |
+| 雇用情報構造変更 | 単一職場 → 複数職場（`workplaces[]`）対応 |
+| 施設検索ロジック | 「現在位置」→「マップ全体」でチェック |
+| `StubBehaviorDecider` 削除 | `LLMBehaviorDecider` に完全置換 |
+
+---
+
+### ✅ Step 13.5: 行動履歴
+
+当日の行動履歴をDBに保存し、LLMの行動決定プロンプトに含める。
+
+| # | タスク | 動作確認 |
+|---|--------|----------|
+| ✅ 13.5-1 | `ActionHistoryEntry` 型定義（`src/types/behavior.ts`） | ビルド通過 |
+| ✅ 13.5-2 | `action_history` テーブル追加（SQLite） | テーブル作成 |
+| ✅ 13.5-3 | アクション完了時に履歴記録（ActionExecutor → SimulationEngine → StateStore） | DB保存確認 |
+| ✅ 13.5-4 | 行動決定プロンプトに「今日の行動」セクション追加 | プロンプトに表示 |
 
 ---
 

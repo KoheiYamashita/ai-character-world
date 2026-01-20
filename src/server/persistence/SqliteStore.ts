@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry } from '@/types'
+import type { ActionHistoryEntry } from '@/types/behavior'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -17,7 +18,7 @@ interface CharacterRow {
   sprite: string // JSON
   employment: string | null // JSON
   money: number
-  hunger: number
+  satiety: number
   energy: number
   hygiene: number
   mood: number
@@ -42,6 +43,18 @@ interface ScheduleRow {
   character_id: string
   day: number
   entries: string
+}
+
+interface ActionHistoryRow {
+  id: number
+  character_id: string
+  day: number
+  time: string
+  action_id: string
+  target: string | null
+  duration_minutes: number | null
+  reason: string | null
+  created_at: number
 }
 
 /**
@@ -72,7 +85,7 @@ export class SqliteStore implements StateStore {
         sprite TEXT NOT NULL,
         employment TEXT,
         money INTEGER NOT NULL,
-        hunger INTEGER NOT NULL,
+        satiety INTEGER NOT NULL,
         energy INTEGER NOT NULL,
         hygiene INTEGER NOT NULL,
         mood INTEGER NOT NULL,
@@ -115,6 +128,22 @@ export class SqliteStore implements StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_schedules_character_day
         ON schedules(character_id, day);
+
+      -- Action history (1 record per action)
+      CREATE TABLE IF NOT EXISTS action_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        time TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        target TEXT,
+        duration_minutes INTEGER,
+        reason TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_action_history_character_day
+        ON action_history(character_id, day);
     `)
   }
 
@@ -190,10 +219,10 @@ export class SqliteStore implements StateStore {
   private saveCharacterSync(id: string, character: SimCharacter): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO character_states (
-        id, name, sprite, employment, money, hunger, energy, hygiene, mood, bladder,
+        id, name, sprite, employment, money, satiety, energy, hygiene, mood, bladder,
         current_map_id, current_node_id, position_x, position_y, direction, updated_at
       ) VALUES (
-        @id, @name, @sprite, @employment, @money, @hunger, @energy, @hygiene, @mood, @bladder,
+        @id, @name, @sprite, @employment, @money, @satiety, @energy, @hygiene, @mood, @bladder,
         @current_map_id, @current_node_id, @position_x, @position_y, @direction, @updated_at
       )
     `)
@@ -204,7 +233,7 @@ export class SqliteStore implements StateStore {
       sprite: JSON.stringify(character.sprite),
       employment: character.employment ? JSON.stringify(character.employment) : null,
       money: character.money,
-      hunger: round2(character.hunger),
+      satiety: round2(character.satiety),
       energy: round2(character.energy),
       hygiene: round2(character.hygiene),
       mood: round2(character.mood),
@@ -247,7 +276,7 @@ export class SqliteStore implements StateStore {
       sprite: JSON.parse(row.sprite) as SpriteConfig,
       employment: row.employment ? (JSON.parse(row.employment) as Employment) : undefined,
       money: row.money,
-      hunger: row.hunger,
+      satiety: row.satiety,
       energy: row.energy,
       hygiene: row.hygiene,
       mood: row.mood,
@@ -268,6 +297,7 @@ export class SqliteStore implements StateStore {
       crossMapNavigation: null,
       conversation: null,
       currentAction: null,
+      pendingAction: null,
     }
   }
 
@@ -414,6 +444,49 @@ export class SqliteStore implements StateStore {
     stmt.run(characterId)
   }
 
+  // Action history CRUD methods
+
+  async addActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+  }): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO action_history (character_id, day, time, action_id, target, duration_minutes, reason, created_at)
+      VALUES (@character_id, @day, @time, @action_id, @target, @duration_minutes, @reason, @created_at)
+    `)
+
+    stmt.run({
+      character_id: entry.characterId,
+      day: entry.day,
+      time: entry.time,
+      action_id: entry.actionId,
+      target: entry.target ?? null,
+      duration_minutes: entry.durationMinutes ?? null,
+      reason: entry.reason ?? null,
+      created_at: Date.now(),
+    })
+  }
+
+  async loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]> {
+    const stmt = this.db.prepare(
+      'SELECT * FROM action_history WHERE character_id = ? AND day = ? ORDER BY time, created_at'
+    )
+    const rows = stmt.all(characterId, day) as ActionHistoryRow[]
+
+    return rows.map(row => ({
+      time: row.time,
+      actionId: row.action_id,
+      target: row.target ?? undefined,
+      durationMinutes: row.duration_minutes ?? undefined,
+      reason: row.reason ?? undefined,
+    }))
+  }
+
   async hasData(): Promise<boolean> {
     const stmt = this.db.prepare('SELECT COUNT(*) as count FROM character_states')
     const result = stmt.get() as { count: number }
@@ -426,6 +499,7 @@ export class SqliteStore implements StateStore {
       DELETE FROM world_time;
       DELETE FROM server_state;
       DELETE FROM schedules;
+      DELETE FROM action_history;
     `)
   }
 

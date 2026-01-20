@@ -9,6 +9,17 @@ import type {
   ActionState,
   Employment,
 } from '@/types'
+import type { ActionId } from './actions/definitions'
+
+// Pending action to execute after arriving at a target location
+export interface PendingAction {
+  actionId: ActionId
+  facilityId?: string       // 施設アクション用
+  targetNpcId?: string      // talk アクション用
+  facilityMapId: string
+  reason?: string
+  durationMinutes?: number  // 可変時間アクション用
+}
 
 // Conversation state for character-NPC dialogue
 export interface ConversationState {
@@ -24,7 +35,7 @@ export interface SimCharacter {
   name: string
   sprite: SpriteConfig
   money: number
-  hunger: number
+  satiety: number
   energy: number
   hygiene: number
   mood: number
@@ -35,6 +46,10 @@ export interface SimCharacter {
   direction: Direction
   // Employment info (workplace reference)
   employment?: Employment
+  // LLM行動決定用のプロファイル情報
+  personality?: string        // 性格
+  tendencies?: string[]       // 行動傾向
+  customPrompt?: string       // 自由入力欄
   // Navigation state embedded for server-side simulation
   navigation: SimNavigationState
   // Cross-map navigation state
@@ -45,6 +60,8 @@ export interface SimCharacter {
   currentAction: ActionState | null
   // Emoji to display above character's head (set by action/conversation)
   displayEmoji?: string
+  // Pending action to execute after movement completes
+  pendingAction: PendingAction | null
 }
 
 export interface SimNavigationState {
@@ -138,7 +155,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     name: char.name,
     sprite: { ...char.sprite },
     money: char.money,
-    hunger: char.hunger,
+    satiety: char.satiety,
     energy: char.energy,
     hygiene: char.hygiene,
     mood: char.mood,
@@ -148,6 +165,9 @@ export function createSimCharacter(char: Character): SimCharacter {
     position: { ...char.position },
     direction: char.direction,
     employment: char.employment ? { ...char.employment } : undefined,
+    personality: char.personality,
+    tendencies: char.tendencies ? [...char.tendencies] : undefined,
+    customPrompt: char.customPrompt,
     navigation: {
       isMoving: false,
       path: [],
@@ -159,6 +179,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     crossMapNavigation: null,
     conversation: null,
     currentAction: null,
+    pendingAction: null,
   }
 }
 

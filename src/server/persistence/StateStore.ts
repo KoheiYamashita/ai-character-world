@@ -1,5 +1,6 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule } from '@/types'
+import type { ActionHistoryEntry } from '@/types/behavior'
 
 /**
  * Abstract interface for state persistence.
@@ -82,6 +83,24 @@ export interface StateStore {
    * Delete all schedules for a character
    */
   deleteAllSchedulesForCharacter(characterId: string): Promise<void>
+
+  /**
+   * Add an action history entry
+   */
+  addActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+  }): Promise<void>
+
+  /**
+   * Load action history for a character on a specific day
+   */
+  loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]>
 
   /**
    * Check if store has been initialized with data

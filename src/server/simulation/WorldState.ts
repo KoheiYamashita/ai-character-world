@@ -144,6 +144,21 @@ export class WorldStateManager {
     }
   }
 
+  // Supplement character profile (personality, tendencies, customPrompt) from config
+  // Used after restoring from persistence where profile fields are not saved
+  supplementCharacterProfile(characterId: string, profile: {
+    personality?: string
+    tendencies?: string[]
+    customPrompt?: string
+  }): void {
+    const char = this.state.characters.get(characterId)
+    if (char) {
+      char.personality = profile.personality
+      char.tendencies = profile.tendencies ? [...profile.tendencies] : undefined
+      char.customPrompt = profile.customPrompt
+    }
+  }
+
   updateCharacterPosition(id: string, position: Position): void {
     const char = this.state.characters.get(id)
     if (char) {

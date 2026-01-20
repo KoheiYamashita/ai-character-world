@@ -9,7 +9,7 @@
     "timezone": "Asia/Tokyo",
     "statusDecayIntervalMs": 60000,
     "decayRates": {
-      "hungerPerMinute": 0.1,
+      "satietyPerMinute": 0.1,
       "energyPerMinute": 0.05,
       "hygienePerMinute": 0.03,
       "moodPerMinute": 0.02,
@@ -101,5 +101,41 @@
   "paths": {
     "mapsJson": "/data/maps.json",
     "charactersJson": "/data/characters.json"
+  },
+  "actions": {
+    "sleep": {
+      "durationRange": { "min": 30, "max": 480, "default": 480 },
+      "perMinute": { "energy": 0.208, "mood": 0.042 }
+    },
+    "eat": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "satiety": 1.67, "mood": 0.33 }
+    },
+    "bathe": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "hygiene": 3.33, "mood": 0.5 }
+    },
+    "rest": {
+      "durationRange": { "min": 10, "max": 60, "default": 30 },
+      "perMinute": { "energy": 0.5, "mood": 0.17 }
+    },
+    "work": {
+      "durationRange": { "min": 30, "max": 480, "default": 60 },
+      "perMinute": { "energy": -0.33, "mood": -0.08 }
+    },
+    "toilet": {
+      "durationRange": { "min": 3, "max": 15, "default": 5 },
+      "perMinute": { "bladder": 20 }
+    },
+    "talk": {
+      "fixed": true,
+      "duration": 5,
+      "effects": { "mood": 20 }
+    },
+    "thinking": {
+      "fixed": true,
+      "duration": 0,
+      "effects": {}
+    }
   }
 }

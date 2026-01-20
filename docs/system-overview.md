@@ -14,16 +14,42 @@
 
 ### アクション所要時間
 
-アクションの所要時間は現実時間で経過する:
+アクションの所要時間は現実時間で経過する。LLMが範囲内で時間を指定可能（可変時間アクション）。
 
-| アクション | 所要時間 | 備考 |
-|-----------|---------|------|
-| eat | 30-45分 | 場所により異なる |
-| sleep | 8時間 | 「寝ている」状態で8時間待機 |
-| bathe | 30-60分 | 温泉は長め |
-| work | 1時間単位 | 連続勤務可能 |
-| toilet | 5分 | 短時間 |
-| rest | 15-30分 | 任意の時間 |
+| アクション | 所要時間範囲 | デフォルト | 効果（/分） |
+|-----------|-------------|-----------|------------|
+| eat | 15-60分 | 30分 | satiety+1.67, mood+0.33 |
+| sleep | 30-480分 | 480分(8h) | energy+0.208, mood+0.042 |
+| bathe | 15-60分 | 30分 | hygiene+3.33, mood+0.5 |
+| work | 30-480分 | 60分 | energy-0.33, mood-0.08 |
+| toilet | 3-15分 | 5分 | bladder+20 |
+| rest | 10-60分 | 30分 | energy+0.5, mood+0.17 |
+| talk | 固定5分 | - | mood+20 |
+| thinking | 0分 | - | なし（LLM決定中表示用） |
+
+### アクション設定の外部化
+
+アクションの時間と効果は `world-config.json` の `actions` セクションで管理。
+
+```json
+{
+  "actions": {
+    "sleep": {
+      "durationRange": { "min": 30, "max": 480, "default": 480 },
+      "perMinute": { "energy": 0.208, "mood": 0.042 }
+    },
+    "talk": {
+      "fixed": true,
+      "duration": 5,
+      "effects": { "mood": 20 }
+    }
+  }
+}
+```
+
+- **可変時間アクション**: `durationRange` + `perMinute` で定義
+- **固定時間アクション**: `fixed: true` + `duration` + `effects` で定義
+- **効果計算**: 可変 = perMinute × durationMinutes、固定 = effects をそのまま適用
 
 ### ステータス減少
 
@@ -122,7 +148,7 @@ async function handleLLMError(error: Error) {
 
 キャラクターをクリックすると以下を表示:
 
-- 全ステータス（hunger, energy, hygiene, mood, bladder, money）
+- 全ステータス（satiety, energy, hygiene, mood, bladder, money）
 - 直近の会話サマリー
 - 中期記憶
 - 現在のスケジュール
