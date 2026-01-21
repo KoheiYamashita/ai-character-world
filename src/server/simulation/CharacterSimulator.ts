@@ -1,4 +1,4 @@
-import type { Position, GameMap, PathNode, RouteSegment, Direction } from '@/types'
+import type { Position, WorldMap, PathNode, RouteSegment, Direction } from '@/types'
 import type { SimCharacter, SimulationConfig, SimCrossMapNavState, ConversationState } from './types'
 import type { WorldStateManager } from './WorldState'
 import { findPathAvoidingNodes } from '@/lib/pathfinding'
@@ -304,7 +304,7 @@ export class CharacterSimulator {
     this.startNavigationOnPath(character, segment.path, map)
   }
 
-  private startNavigationOnPath(character: SimCharacter, path: string[], map: GameMap): void {
+  private startNavigationOnPath(character: SimCharacter, path: string[], map: WorldMap): void {
     const firstTargetNode = map.nodes.find((n) => n.id === path[1])
     if (!firstTargetNode) return
 

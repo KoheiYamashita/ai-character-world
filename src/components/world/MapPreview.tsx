@@ -13,7 +13,7 @@ import {
   renderEntranceConnections,
   createNPCSprite,
 } from '@/lib/pixiRenderers'
-import type { WorldConfig, GameMap, NPC } from '@/types'
+import type { WorldConfig, WorldMap, NPC } from '@/types'
 
 interface MapPreviewProps {
   mapId: string
@@ -26,7 +26,7 @@ export default function MapPreview({ mapId }: MapPreviewProps): React.ReactNode 
   const [isReady, setIsReady] = useState(false)
   const [mapsLoaded, setMapsLoaded] = useState(false)
   const [config, setConfig] = useState<WorldConfig | null>(null)
-  const [currentMap, setCurrentMap] = useState<GameMap | null>(null)
+  const [currentMap, setCurrentMap] = useState<WorldMap | null>(null)
   const [npcs, setNpcs] = useState<NPC[]>([])
 
   // Load world config

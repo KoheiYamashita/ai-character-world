@@ -80,7 +80,7 @@ export interface Obstacle {
   tileHeight: number
 }
 
-export interface GameMap {
+export interface WorldMap {
   id: string
   name: string
   width: number

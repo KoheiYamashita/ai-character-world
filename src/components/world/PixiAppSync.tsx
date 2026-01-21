@@ -116,7 +116,7 @@ export default function PixiAppSync(): React.ReactNode {
     setNpcsLoaded(false)
 
     // Load NPCs for all maps
-    let allMaps: Record<string, import('@/types').GameMap>
+    let allMaps: Record<string, import('@/types').WorldMap>
     try {
       allMaps = getMaps()
     } catch {

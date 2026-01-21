@@ -1,4 +1,4 @@
-import type { GameMap, PathNode } from '@/types'
+import type { WorldMap, PathNode } from '@/types'
 
 function reconstructPath(
   parent: Map<string, string>,
@@ -19,11 +19,11 @@ function reconstructPath(
   return path
 }
 
-export function getNodeById(map: GameMap, nodeId: string): PathNode | undefined {
+export function getNodeById(map: WorldMap, nodeId: string): PathNode | undefined {
   return map.nodes.find((n) => n.id === nodeId)
 }
 
-export function getNodesInPath(map: GameMap, path: string[]): PathNode[] {
+export function getNodesInPath(map: WorldMap, path: string[]): PathNode[] {
   return path
     .map((id) => getNodeById(map, id))
     .filter((n): n is PathNode => n !== undefined)
@@ -35,7 +35,7 @@ export function getNodesInPath(map: GameMap, path: string[]): PathNode[] {
  * If destination is blocked, returns empty array.
  */
 export function findPathAvoidingNodes(
-  map: GameMap,
+  map: WorldMap,
   startId: string,
   endId: string,
   blockedNodes: Set<string>

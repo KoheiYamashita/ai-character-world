@@ -1,4 +1,4 @@
-import type { NPC, NPCConfigJson, Position, GameMap } from '@/types'
+import type { NPC, NPCConfigJson, Position, WorldMap } from '@/types'
 
 export function createNPCFromConfig(
   config: NPCConfigJson,
@@ -19,7 +19,7 @@ export function createNPCFromConfig(
 export function loadNPCsFromMapConfig(
   mapId: string,
   npcConfigs: NPCConfigJson[],
-  map: GameMap
+  map: WorldMap
 ): NPC[] {
   if (!map) {
     console.warn(`Map "${mapId}" not found when loading NPCs`)
@@ -45,23 +45,4 @@ export function loadNPCsFromMapConfig(
   }
 
   return npcs
-}
-
-export function validateNPCConfig(config: NPCConfigJson, mapId: string): string[] {
-  const errors: string[] = []
-
-  if (!config.id) {
-    errors.push(`NPC in map "${mapId}" is missing required field: id`)
-  }
-  if (!config.name) {
-    errors.push(`NPC "${config.id}" in map "${mapId}" is missing required field: name`)
-  }
-  if (!config.sprite) {
-    errors.push(`NPC "${config.id}" in map "${mapId}" is missing required field: sprite`)
-  }
-  if (!config.spawnNodeId) {
-    errors.push(`NPC "${config.id}" in map "${mapId}" is missing required field: spawnNodeId`)
-  }
-
-  return errors
 }

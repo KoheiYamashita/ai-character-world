@@ -40,12 +40,12 @@ export interface StateStore {
   deleteCharacter(id: string): Promise<void>
 
   /**
-   * Save game time
+   * Save world time
    */
   saveTime(time: WorldTime): Promise<void>
 
   /**
-   * Load game time
+   * Load world time
    */
   loadTime(): Promise<WorldTime | null>
 

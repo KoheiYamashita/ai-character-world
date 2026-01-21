@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import type {
-  GameMap,
+  WorldMap,
   Character,
   WorldConfig,
   MapConfigJson,
@@ -225,13 +225,13 @@ function generateGridNodesServer(
 }
 
 // Load and process maps
-export async function loadMapsServer(config?: WorldConfig): Promise<Record<string, GameMap>> {
+export async function loadMapsServer(config?: WorldConfig): Promise<Record<string, WorldMap>> {
   const cfg = config ?? (await loadWorldConfigServer())
   const mapsPath = path.join(getPublicPath(), cfg.paths.mapsJson.replace(/^\//, ''))
   const content = await fs.readFile(mapsPath, 'utf-8')
   const mapsData: MapsDataJson = JSON.parse(content)
 
-  const maps: Record<string, GameMap> = {}
+  const maps: Record<string, WorldMap> = {}
 
   for (const mapConfig of mapsData.maps) {
     maps[mapConfig.id] = buildMapFromConfigServer(mapConfig, cfg)
@@ -241,7 +241,7 @@ export async function loadMapsServer(config?: WorldConfig): Promise<Record<strin
 }
 
 // Build map from config (server-side version)
-function buildMapFromConfigServer(mapConfig: MapConfigJson, config: WorldConfig): GameMap {
+function buildMapFromConfigServer(mapConfig: MapConfigJson, config: WorldConfig): WorldMap {
   const gridDefaults = config.grid
   const cols = mapConfig.grid.cols ?? gridDefaults.defaultCols
   const rows = mapConfig.grid.rows ?? gridDefaults.defaultRows
@@ -423,10 +423,10 @@ export async function loadDefaultSchedulesServer(config?: WorldConfig): Promise<
   return schedules
 }
 
-// Load all game data needed for simulation
+// Load all world data needed for simulation
 export interface WorldData {
   config: WorldConfig
-  maps: Record<string, GameMap>
+  maps: Record<string, WorldMap>
   characters: Character[]
   npcs: NPC[]
   npcBlockedNodes: Map<string, Set<string>>

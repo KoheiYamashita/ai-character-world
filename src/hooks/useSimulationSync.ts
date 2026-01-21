@@ -79,7 +79,7 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
 
   // Sync state from server to Zustand stores
   const syncStateToStores = useCallback((worldState: SerializedWorldState) => {
-    // Update game state
+    // Update world state
     setCurrentMap(worldState.currentMapId)
     setTime(worldState.time)
 

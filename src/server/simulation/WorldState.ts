@@ -1,4 +1,4 @@
-import type { GameMap, WorldTime, Position, Direction, CrossMapRoute, NPC } from '@/types'
+import type { WorldMap, WorldTime, Position, Direction, CrossMapRoute, NPC } from '@/types'
 import type {
   WorldState,
   SimCharacter,
@@ -15,7 +15,7 @@ const INITIAL_MAP_ID = 'home'
 
 export class WorldStateManager {
   private state: WorldState
-  private maps: Record<string, GameMap> = {}
+  private maps: Record<string, WorldMap> = {}
   private npcBlockedNodes: Map<string, Set<string>> = new Map()
 
   constructor() {
@@ -37,18 +37,18 @@ export class WorldStateManager {
   }
 
   // Initialize with maps and characters
-  initialize(maps: Record<string, GameMap>, initialMapId?: string): void {
+  initialize(maps: Record<string, WorldMap>, initialMapId?: string): void {
     this.maps = maps
     if (initialMapId) {
       this.state.currentMapId = initialMapId
     }
   }
 
-  getMaps(): Record<string, GameMap> {
+  getMaps(): Record<string, WorldMap> {
     return this.maps
   }
 
-  getMap(mapId: string): GameMap | undefined {
+  getMap(mapId: string): WorldMap | undefined {
     return this.maps[mapId]
   }
 

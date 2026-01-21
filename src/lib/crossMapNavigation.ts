@@ -1,4 +1,4 @@
-import type { GameMap, PathNode, CrossMapRoute, RouteSegment } from '@/types'
+import type { WorldMap, PathNode, CrossMapRoute, RouteSegment } from '@/types'
 import { findPathAvoidingNodes } from './pathfinding'
 
 interface MapConnection {
@@ -17,7 +17,7 @@ interface MapGraph {
 /**
  * Build a graph of map connections based on entrance definitions
  */
-export function buildMapGraph(maps: Record<string, GameMap>): MapGraph {
+export function buildMapGraph(maps: Record<string, WorldMap>): MapGraph {
   const connections: MapConnection[] = []
   const adjacency = new Map<string, { toMapId: string; fromEntranceId: string; toEntranceId: string }[]>()
 
@@ -116,7 +116,7 @@ export function findMapSequence(
  * @param blockedNodesPerMap - Map of mapId to set of blocked node IDs (e.g., NPC positions)
  */
 export function planCrossMapRoute(
-  maps: Record<string, GameMap>,
+  maps: Record<string, WorldMap>,
   currentMapId: string,
   currentNodeId: string,
   targetMapId: string,
@@ -188,7 +188,7 @@ export function planCrossMapRoute(
  * Get the starting node ID and position for a route segment
  */
 export function getSegmentStartNode(
-  map: GameMap,
+  map: WorldMap,
   segment: RouteSegment
 ): PathNode | undefined {
   if (segment.path.length === 0) return undefined

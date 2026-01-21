@@ -222,11 +222,3 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   conversationDuration: 5000,
 }
 
-// SSE event types
-export type SimulationEvent =
-  | { type: 'state'; data: SerializedWorldState }
-  | { type: 'character_update'; data: { characterId: string; character: SimCharacter } }
-  | { type: 'transition_start'; data: { characterId: string; fromMapId: string; toMapId: string } }
-  | { type: 'transition_end'; data: { characterId: string; mapId: string } }
-
-export type SimulationEventType = SimulationEvent['type']

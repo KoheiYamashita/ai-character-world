@@ -12,14 +12,6 @@ export function lerpPosition(start: Position, end: Position, t: number): Positio
   }
 }
 
-export function easeInOutQuad(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-}
-
-export function easeOutQuad(t: number): number {
-  return 1 - (1 - t) * (1 - t)
-}
-
 export function getDirection(from: Position, to: Position): Direction {
   const dx = to.x - from.x
   const dy = to.y - from.y

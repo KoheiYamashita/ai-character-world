@@ -1,4 +1,4 @@
-import type { GameMap } from '@/types'
+import type { WorldMap } from '@/types'
 import {
   loadMaps as loadMapsFromLoader,
   clearMapCache as clearLoaderCache,
@@ -7,12 +7,12 @@ import {
 } from '@/lib/mapLoader'
 
 // Re-export async loader (mapLoader handles caching)
-export async function loadMaps(): Promise<Record<string, GameMap>> {
+export async function loadMaps(): Promise<Record<string, WorldMap>> {
   return loadMapsFromLoader()
 }
 
 // Synchronous getter for already-loaded maps
-export function getMaps(): Record<string, GameMap> {
+export function getMaps(): Record<string, WorldMap> {
   return getCachedMaps()
 }
 
@@ -24,7 +24,7 @@ export function clearMapsCache(): void {
   clearLoaderCache()
 }
 
-export function getMap(mapId: string): GameMap | undefined {
+export function getMap(mapId: string): WorldMap | undefined {
   return getMaps()[mapId]
 }
 

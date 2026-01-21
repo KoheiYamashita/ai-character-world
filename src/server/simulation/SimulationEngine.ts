@@ -1,4 +1,4 @@
-import type { GameMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig } from '@/types'
+import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig } from '@/types'
 import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry } from '@/types/behavior'
 import type {
   SimulationConfig,
@@ -103,7 +103,7 @@ export class SimulationEngine {
 
   // Initialize with world data
   async initialize(
-    maps: Record<string, GameMap>,
+    maps: Record<string, WorldMap>,
     characters: Character[],
     initialMapId?: string,
     npcBlockedNodes?: Map<string, Set<string>>,
@@ -193,7 +193,7 @@ export class SimulationEngine {
   }
 
   // Restore characters from persistent storage
-  async restoreFromStore(maps: Record<string, GameMap>): Promise<boolean> {
+  async restoreFromStore(maps: Record<string, WorldMap>): Promise<boolean> {
     if (!this.stateStore) return false
 
     const hasData = await this.stateStore.hasData()
@@ -1050,7 +1050,7 @@ export class SimulationEngine {
    */
   private traverseNearbyMaps<T>(
     currentMapId: string,
-    callback: (map: GameMap, mapId: string, distance: number) => T[]
+    callback: (map: WorldMap, mapId: string, distance: number) => T[]
   ): T[] {
     const results: T[] = []
     const visited = new Set<string>()

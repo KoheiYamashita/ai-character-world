@@ -1,4 +1,4 @@
-import type { GameMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson, NPCConfigJson } from '@/types'
+import type { WorldMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJson, NPCConfigJson } from '@/types'
 import type { NodeLabel, TileToPixelConfig } from '@/data/maps/grid'
 import { generateGridNodes, isPointInsideObstacle, tileToPixelObstacle, getGridDefaults } from '@/data/maps/grid'
 import { isConfigLoaded, getConfig, parseColor } from './worldConfigLoader'
@@ -129,7 +129,7 @@ function validateLabelObstacleConflicts(
   }
 }
 
-let cachedMaps: Record<string, GameMap> | null = null
+let cachedMaps: Record<string, WorldMap> | null = null
 
 export async function loadMapConfigs(): Promise<MapConfigJson[]> {
   const mapsPath = isConfigLoaded() ? getConfig().paths.mapsJson : DEFAULT_MAPS_PATH
@@ -141,7 +141,7 @@ export async function loadMapConfigs(): Promise<MapConfigJson[]> {
   return data.maps
 }
 
-export function buildMapFromConfig(config: MapConfigJson): GameMap {
+export function buildMapFromConfig(config: MapConfigJson): WorldMap {
   const defaults = getGridDefaults()
   const cols = config.grid.cols ?? defaults.cols
   const rows = config.grid.rows ?? defaults.rows
@@ -217,7 +217,7 @@ export function buildMapFromConfig(config: MapConfigJson): GameMap {
   }
 }
 
-export async function loadMaps(): Promise<Record<string, GameMap>> {
+export async function loadMaps(): Promise<Record<string, WorldMap>> {
   if (cachedMaps) {
     // Ensure NPC configs are also cached (might be cleared on HMR)
     if (!cachedMapConfigs) {
@@ -228,7 +228,7 @@ export async function loadMaps(): Promise<Record<string, GameMap>> {
 
   const configs = await loadMapConfigs()
   cachedMapConfigs = configs  // Cache configs for NPC loading
-  const mapsRecord: Record<string, GameMap> = {}
+  const mapsRecord: Record<string, WorldMap> = {}
 
   for (const config of configs) {
     mapsRecord[config.id] = buildMapFromConfig(config)
@@ -243,7 +243,7 @@ export function clearMapCache(): void {
   cachedMapConfigs = null
 }
 
-export function getCachedMaps(): Record<string, GameMap> {
+export function getCachedMaps(): Record<string, WorldMap> {
   if (!cachedMaps) {
     console.warn('Maps not loaded yet')
     return {}
