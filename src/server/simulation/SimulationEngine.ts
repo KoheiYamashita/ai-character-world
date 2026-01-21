@@ -65,6 +65,13 @@ export class SimulationEngine {
   private lastDay: number = 1
   // Status interrupt threshold (design: 10%)
   private static readonly INTERRUPT_THRESHOLD = 10
+  // Status type → forced action mapping (Step 14)
+  private static readonly STATUS_INTERRUPT_ACTIONS: Record<string, string> = {
+    bladder: 'toilet',
+    satiety: 'eat',
+    energy: 'sleep',  // Could also be 'rest', but sleep is more effective
+    hygiene: 'bathe',
+  }
 
   constructor(config: Partial<SimulationConfig> = {}, stateStore?: StateStore) {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
@@ -480,116 +487,153 @@ export class SimulationEngine {
 
     console.log(`[SimulationEngine] Status interrupt: ${character.name} ${statusType} < ${SimulationEngine.INTERRUPT_THRESHOLD}%`)
 
-    const currentTime = this.worldState.getTime()
-    this.makeBehaviorDecision(character, currentTime)
+    // Get forced action for this status type
+    const forcedAction = SimulationEngine.STATUS_INTERRUPT_ACTIONS[statusType]
+    if (!forcedAction) {
+      // Fallback to normal behavior decision if no mapping
+      const currentTime = this.worldState.getTime()
+      this.makeBehaviorDecision(character, currentTime)
+      return
+    }
+
+    // Trigger interrupt behavior decision with forced action
+    this.makeInterruptBehaviorDecision(character, forcedAction)
   }
 
-  // Make behavior decision for a single character
-  private makeBehaviorDecision(character: SimCharacter, currentTime: WorldTime): void {
-    // Mark as pending to prevent duplicate calls
-    this.pendingDecisions.add(character.id)
+  /**
+   * Build behavior context for a character
+   * @param character The character to build context for
+   * @param includeTodayActions Whether to include today's action history (for normal decisions)
+   */
+  private buildBehaviorContext(character: SimCharacter, includeTodayActions: boolean = true): BehaviorContext {
+    const currentTime = this.worldState.getTime()
 
-    // Start thinking action to show 🤔 while LLM is processing
-    this.actionExecutor.startAction(character.id, 'thinking')
-
-    // Build facilities and maps from current map
-    const currentMapFacilities = this.buildCurrentMapFacilities(character.currentMapId)
-    const nearbyFacilities = this.buildNearbyFacilities(character.currentMapId)
-    const nearbyMaps = this.buildNearbyMaps(character.currentMapId)
-
-    // Get today's action history
-    const todayActions = this.getActionHistoryForCharacter(character.id)
-
-    // Build context
-    const context: BehaviorContext = {
+    return {
       character,
       currentTime,
       currentFacility: this.actionExecutor.getCurrentFacility(character.id),
       schedule: this.getScheduleForCharacter(character.id),
       availableActions: this.actionExecutor.getAvailableActions(character.id),
       nearbyNPCs: this.worldState.getNPCsOnMap(character.currentMapId),
-      currentMapFacilities,
-      nearbyFacilities,
-      nearbyMaps,
-      todayActions,
+      currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
+      nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
+      nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+      todayActions: includeTodayActions ? this.getActionHistoryForCharacter(character.id) : undefined,
     }
+  }
 
-    // Make async decision
-    this.behaviorDecider.decide(context).then((decision) => {
-      // Complete thinking action (clear 🤔)
-      this.actionExecutor.forceCompleteAction(character.id)
+  /**
+   * Apply a behavior decision (shared logic for normal and interrupt decisions)
+   */
+  private applyBehaviorDecision(
+    character: SimCharacter,
+    decision: BehaviorDecision,
+    logContext: string
+  ): void {
+    switch (decision.type) {
+      case 'action':
+        if (decision.actionId) {
+          this.handleActionDecision(character, decision)
+        }
+        break
 
-      // Re-check that character is still idle (state may have changed)
-      const currentChar = this.worldState.getCharacter(character.id)
-      if (!currentChar) return
-      if (!this.isCharacterIdle(currentChar)) return
-
-      // Apply decision
-      switch (decision.type) {
-        case 'action':
-          if (decision.actionId) {
-            this.handleActionDecision(currentChar, decision)
-          }
-          break
-
-        case 'move': {
-          // マップ移動またはノード移動
-          let moveSuccess = false
-          if (decision.targetMapId && decision.targetMapId !== currentChar.currentMapId) {
-            // 別マップへの移動
-            const targetMap = this.worldState.getMap(decision.targetMapId)
-            if (targetMap?.spawnNodeId) {
-              moveSuccess = this.characterSimulator.navigateToMap(
-                character.id,
-                decision.targetMapId,
-                targetMap.spawnNodeId
-              )
-              if (moveSuccess) {
-                console.log(`[SimulationEngine] ${currentChar.name} moving to map ${decision.targetMapId} (${decision.reason})`)
-              } else {
-                console.log(`[SimulationEngine] ${currentChar.name} failed to start navigation to map ${decision.targetMapId}`)
-              }
-            } else {
-              console.log(`[SimulationEngine] ${currentChar.name} cannot find map ${decision.targetMapId}`)
-            }
-          } else if (decision.targetNodeId) {
-            // 同一マップ内のノード移動
-            moveSuccess = this.characterSimulator.navigateToNode(character.id, decision.targetNodeId)
+      case 'move': {
+        let moveSuccess = false
+        if (decision.targetMapId && decision.targetMapId !== character.currentMapId) {
+          const targetMap = this.worldState.getMap(decision.targetMapId)
+          if (targetMap?.spawnNodeId) {
+            moveSuccess = this.characterSimulator.navigateToMap(
+              character.id,
+              decision.targetMapId,
+              targetMap.spawnNodeId
+            )
             if (moveSuccess) {
-              console.log(`[SimulationEngine] ${currentChar.name} moving to node ${decision.targetNodeId} (${decision.reason})`)
+              console.log(`[SimulationEngine] ${character.name} moving to map ${decision.targetMapId} (${logContext}: ${decision.reason})`)
             } else {
-              console.log(`[SimulationEngine] ${currentChar.name} failed to start navigation to node ${decision.targetNodeId}`)
+              console.log(`[SimulationEngine] ${character.name} failed to start navigation to map ${decision.targetMapId}`)
             }
           } else {
-            console.log(`[SimulationEngine] ${currentChar.name} move decision has no target`)
+            console.log(`[SimulationEngine] ${character.name} cannot find map ${decision.targetMapId}`)
           }
-          // If move failed, schedule next decision
-          if (!moveSuccess) {
-            this.scheduleNextDecision(character.id, 1000)
+        } else if (decision.targetNodeId) {
+          moveSuccess = this.characterSimulator.navigateToNode(character.id, decision.targetNodeId)
+          if (moveSuccess) {
+            console.log(`[SimulationEngine] ${character.name} moving to node ${decision.targetNodeId} (${logContext}: ${decision.reason})`)
+          } else {
+            console.log(`[SimulationEngine] ${character.name} failed to start navigation to node ${decision.targetNodeId}`)
           }
-          break
+        } else {
+          console.log(`[SimulationEngine] ${character.name} move decision has no target`)
         }
-
-        case 'idle':
-          // Set idle emoji
-          this.worldState.updateCharacter(character.id, {
-            displayEmoji: '😶',
-          })
-          // Schedule next behavior decision after short idle period
-          this.scheduleNextDecision(character.id, 2000)
-          break
+        if (!moveSuccess) {
+          this.scheduleNextDecision(character.id, 1000)
+        }
+        break
       }
+
+      case 'idle': {
+        // Different emoji for interrupt vs normal idle
+        const isInterrupt = logContext === 'interrupt'
+        this.worldState.updateCharacter(character.id, {
+          displayEmoji: isInterrupt ? '😰' : '😶',
+        })
+        // Longer retry for interrupt (emergency with no solution)
+        this.scheduleNextDecision(character.id, isInterrupt ? 5000 : 2000)
+        break
+      }
+    }
+  }
+
+  // Make interrupt behavior decision (forced action, LLM selects facility only)
+  private makeInterruptBehaviorDecision(character: SimCharacter, forcedAction: string): void {
+    this.pendingDecisions.add(character.id)
+    this.actionExecutor.startAction(character.id, 'thinking')
+
+    const context = this.buildBehaviorContext(character, false)
+
+    this.behaviorDecider.decideInterruptFacility(forcedAction, context).then((decision) => {
+      this.actionExecutor.forceCompleteAction(character.id)
+
+      const currentChar = this.worldState.getCharacter(character.id)
+      if (!currentChar || !this.isCharacterIdle(currentChar)) return
+
+      console.log(`[SimulationEngine] Interrupt decision for ${character.name}: ${decision.type} (${decision.reason})`)
+      this.applyBehaviorDecision(currentChar, decision, 'interrupt')
+    }).catch((error) => {
+      this.actionExecutor.forceCompleteAction(character.id)
+      console.error(`[SimulationEngine] Error in interrupt decision for ${character.name}:`, error)
+      const currentChar = this.worldState.getCharacter(character.id)
+      if (currentChar && this.isCharacterIdle(currentChar)) {
+        this.makeBehaviorDecision(currentChar, this.worldState.getTime())
+      }
+    }).finally(() => {
+      this.pendingDecisions.delete(character.id)
+    })
+  }
+
+  // Make behavior decision for a single character
+  private makeBehaviorDecision(character: SimCharacter, currentTime: WorldTime): void {
+    this.pendingDecisions.add(character.id)
+    this.actionExecutor.startAction(character.id, 'thinking')
+
+    const context = this.buildBehaviorContext(character, true)
+
+    this.behaviorDecider.decide(context).then((decision) => {
+      this.actionExecutor.forceCompleteAction(character.id)
+
+      const currentChar = this.worldState.getCharacter(character.id)
+      if (!currentChar || !this.isCharacterIdle(currentChar)) return
+
+      this.applyBehaviorDecision(currentChar, decision, 'normal')
 
       // Apply schedule update if LLM proposed one
       if (decision.scheduleUpdate) {
         this.applyScheduleUpdate(character.id, decision.scheduleUpdate)
       }
     }).catch((error) => {
-      // Complete thinking action on error (clear 🤔)
       this.actionExecutor.forceCompleteAction(character.id)
       console.error(`[SimulationEngine] Error making behavior decision for ${character.name}:`, error)
     }).finally(() => {
-      // Clear pending flag when decision completes (success or failure)
       this.pendingDecisions.delete(character.id)
     })
   }

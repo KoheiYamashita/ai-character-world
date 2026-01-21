@@ -207,6 +207,46 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   }
 
   /**
+   * 施設から BehaviorDecision を構築（共通ヘルパー）
+   */
+  private buildFacilityDecision(
+    facility: NearbyFacility,
+    reason: string,
+    includeMapId: boolean = false
+  ): BehaviorDecision {
+    return {
+      type: 'action',
+      actionId: this.getActionIdFromFacility(facility),
+      targetFacilityId: facility.id,
+      targetMapId: includeMapId && facility.distance > 0 ? facility.mapId : undefined,
+      reason,
+    }
+  }
+
+  /**
+   * LLMに施設選択をさせる（共通処理）
+   */
+  private async selectFacilityWithLLM(
+    facilities: NearbyFacility[],
+    prompt: string,
+    systemMessage: string,
+    logContext: string
+  ): Promise<{ facility: NearbyFacility; reason: string }> {
+    console.log(`[LLMBehaviorDecider] ${logContext} prompt:`, prompt)
+
+    const selection = await llmGenerateObject(
+      prompt,
+      FacilitySelectionSchema,
+      { system: systemMessage }
+    )
+
+    console.log(`[LLMBehaviorDecider] ${logContext}: ${selection.facilityId} (${selection.reason})`)
+
+    const facility = facilities.find(f => f.id === selection.facilityId) ?? facilities[0]
+    return { facility, reason: selection.reason }
+  }
+
+  /**
    * 施設を選択する（eat, bathe等）
    */
   private async selectFacility(
@@ -219,18 +259,10 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       return { type: 'idle', reason: `${decision.action}できる施設がない` }
     }
 
-    // 施設決定のヘルパー関数
-    const buildFacilityDecision = (facility: NearbyFacility, reason: string): BehaviorDecision => ({
-      type: 'action',
-      actionId: this.getActionIdFromFacility(facility),
-      targetFacilityId: facility.id,
-      reason,
-    })
-
     // 1つだけなら自動選択
     if (relevantFacilities.length === 1) {
       const facility = relevantFacilities[0]
-      return buildFacilityDecision(facility, `${facility.label}で${decision.action}`)
+      return this.buildFacilityDecision(facility, `${facility.label}で${decision.action}`)
     }
 
     // 複数施設がある場合、LLMに選択させる
@@ -241,21 +273,14 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       context.character.money
     )
 
-    console.log('[LLMBehaviorDecider] Facility selection prompt:', prompt)
-
-    const selection = await llmGenerateObject(
+    const { facility, reason } = await this.selectFacilityWithLLM(
+      relevantFacilities,
       prompt,
-      FacilitySelectionSchema,
-      {
-        system: 'キャラクターとして、利用する施設を選んでください。JSON形式で回答してください。',
-      }
+      'キャラクターとして、利用する施設を選んでください。JSON形式で回答してください。',
+      'Facility selection'
     )
 
-    console.log(`[LLMBehaviorDecider] Facility selection: ${selection.facilityId} (${selection.reason})`)
-
-    // 選択された施設を探す（見つからない場合は最初の施設をフォールバック）
-    const selectedFacility = relevantFacilities.find(f => f.id === selection.facilityId) ?? relevantFacilities[0]
-    return buildFacilityDecision(selectedFacility, selection.reason)
+    return this.buildFacilityDecision(facility, reason)
   }
 
   /**
@@ -916,5 +941,118 @@ ${facilityList}
       }
     }
     return parts.join('・')
+  }
+
+  // ===========================================================================
+  // Step 14: ステータス割り込み - 施設選択専用
+  // ===========================================================================
+
+  /**
+   * ステータス割り込み時の施設選択
+   * システムが強制アクションを決定し、LLMは施設選択のみを行う
+   */
+  async decideInterruptFacility(
+    forcedAction: string,
+    context: BehaviorContext
+  ): Promise<BehaviorDecision> {
+    console.log(`[LLMBehaviorDecider] Interrupt facility selection for action: ${forcedAction}`)
+
+    const relevantFacilities = this.getRelevantFacilities(forcedAction, context)
+    const actionLabel = this.getActionLabel(forcedAction)
+
+    // 施設がない場合のフォールバック
+    if (relevantFacilities.length === 0) {
+      return this.buildInterruptFallbackDecision(actionLabel, context)
+    }
+
+    // 単一施設なら自動選択
+    if (relevantFacilities.length === 1) {
+      const facility = relevantFacilities[0]
+      return this.buildFacilityDecision(
+        facility,
+        `緊急: ${actionLabel}が必要（${facility.label}を選択）`,
+        true
+      )
+    }
+
+    // 複数施設ならLLMに選択させる
+    const prompt = this.buildInterruptFacilitySelectionPrompt(
+      context.character.name,
+      actionLabel,
+      relevantFacilities,
+      context.character.money
+    )
+
+    const { facility, reason } = await this.selectFacilityWithLLM(
+      relevantFacilities,
+      prompt,
+      '緊急状況です。施設を選んでください。JSON形式で回答してください。',
+      'Interrupt facility selection'
+    )
+
+    return this.buildFacilityDecision(facility, `緊急: ${reason}`, true)
+  }
+
+  /**
+   * 割り込み時のフォールバック決定
+   * 施設が見つからない場合、自宅へ移動または idle
+   */
+  private buildInterruptFallbackDecision(
+    actionLabel: string,
+    context: BehaviorContext
+  ): BehaviorDecision {
+    // 自宅(home)マップがあれば移動を提案
+    const homeMap = context.nearbyMaps?.find(m => m.id === 'home')
+    if (homeMap && context.character.currentMapId !== 'home') {
+      return {
+        type: 'move',
+        targetMapId: 'home',
+        reason: `緊急: ${actionLabel}が必要だが施設がないため自宅へ移動`,
+      }
+    }
+
+    // 自宅にも施設がない、または既に自宅にいる場合は idle
+    return {
+      type: 'idle',
+      reason: `緊急: ${actionLabel}が必要だが利用可能な施設がない`,
+    }
+  }
+
+  /**
+   * 緊急時の施設選択プロンプトを構築
+   */
+  private buildInterruptFacilitySelectionPrompt(
+    characterName: string,
+    actionLabel: string,
+    facilities: NearbyFacility[],
+    money: number
+  ): string {
+    const facilityList = facilities
+      .map(f => this.formatFacilityForSelection(f))
+      .join('\n')
+
+    return `あなたは${characterName}です。
+【緊急】${actionLabel}が必要です！ステータスが危険な状態です。
+
+【所持金】${money}円
+
+【利用可能な施設】
+${facilityList}
+
+最も適切な施設を選んでください。距離、料金、所持金を考慮してください。`
+  }
+
+  /**
+   * アクション種別からラベルを取得
+   */
+  private getActionLabel(action: string): string {
+    const labels: Record<string, string> = {
+      eat: '食事',
+      sleep: '睡眠',
+      toilet: 'トイレ',
+      bathe: '入浴',
+      rest: '休憩',
+    }
+    return labels[action] || action
   }
 }
