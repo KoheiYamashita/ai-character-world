@@ -298,6 +298,7 @@ export class SqliteStore implements StateStore {
       conversation: null,
       currentAction: null,
       pendingAction: null,
+      actionCounter: 0, // Runtime state - reset on load
     }
   }
 

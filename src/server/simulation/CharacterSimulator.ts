@@ -17,6 +17,8 @@ export class CharacterSimulator {
   private transitionStates: Map<string, TransitionSimState> = new Map()
   private conversationDestinations: Map<string, ConversationDestination> = new Map()
   private onNavigationComplete: ((characterId: string) => void) | null = null
+  // Track navigation state from previous tick for completion detection
+  private wasNavigatingLastTick: Set<string> = new Set()
 
   constructor(worldState: WorldStateManager, config: SimulationConfig) {
     this.worldState = worldState
@@ -57,6 +59,43 @@ export class CharacterSimulator {
         this.updateMovement(character, deltaTime)
       }
     }
+
+    // Detect navigation completion (navigating last tick → idle this tick)
+    this.detectNavigationCompletion()
+  }
+
+  // Check if character is in any navigation-related state
+  private isCharacterNavigating(character: SimCharacter): boolean {
+    return character.navigation.isMoving ||
+           this.transitionStates.has(character.id) ||
+           character.crossMapNavigation?.isActive === true
+  }
+
+  // Detect and handle navigation completion by comparing with previous tick
+  private detectNavigationCompletion(): void {
+    const currentlyNavigating = new Set<string>()
+
+    // Collect current navigation states (after all processing)
+    for (const character of this.worldState.getAllCharacters()) {
+      if (this.isCharacterNavigating(character)) {
+        currentlyNavigating.add(character.id)
+      }
+    }
+
+    // Detect transitions from navigating to idle
+    for (const characterId of this.wasNavigatingLastTick) {
+      if (!currentlyNavigating.has(characterId)) {
+        const character = this.worldState.getCharacter(characterId)
+        // Only trigger if truly idle (not started action or conversation)
+        if (character && !character.currentAction && !character.conversation?.isActive) {
+          if (this.onNavigationComplete) {
+            this.onNavigationComplete(characterId)
+          }
+        }
+      }
+    }
+
+    this.wasNavigatingLastTick = currentlyNavigating
   }
 
   private updateMovement(character: SimCharacter, deltaTime: number): void {
@@ -127,10 +166,7 @@ export class CharacterSimulator {
       return
     }
 
-    // Navigation complete - trigger next behavior decision
-    if (this.onNavigationComplete) {
-      this.onNavigationComplete(character.id)
-    }
+    // Navigation completion is now detected in detectNavigationCompletion()
   }
 
   private handleCrossMapArrival(
@@ -150,6 +186,8 @@ export class CharacterSimulator {
 
     // No more segments - reached final destination
     this.worldState.completeCrossMapNavigation(character.id)
+
+    // Navigation completion is now detected in detectNavigationCompletion()
   }
 
   private handleContinueToNextNode(character: SimCharacter, nextIndex: number, newPosition: Position): void {

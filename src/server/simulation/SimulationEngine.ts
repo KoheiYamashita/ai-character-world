@@ -65,6 +65,8 @@ export class SimulationEngine {
   private lastDay: number = 1
   // Status interrupt threshold (design: 10%)
   private static readonly INTERRUPT_THRESHOLD = 10
+  // System auto-move interval (every N actions)
+  private static readonly SYSTEM_AUTO_MOVE_INTERVAL = 3
   // Status type → forced action mapping (Step 14)
   private static readonly STATUS_INTERRUPT_ACTIONS: Record<string, string> = {
     bladder: 'toilet',
@@ -441,6 +443,16 @@ export class SimulationEngine {
     if (this.pendingDecisions.has(characterId)) return
     if (!this.isCharacterIdle(character)) return
 
+    // Increment action counter
+    const newCounter = character.actionCounter + 1
+    this.worldState.updateCharacter(characterId, { actionCounter: newCounter })
+
+    // Check for system auto-move (every 5 actions)
+    // If triggered, skip normal behavior decision
+    if (this.checkSystemAutoMove(character, newCounter)) {
+      return
+    }
+
     const currentTime = this.worldState.getTime()
     this.makeBehaviorDecision(character, currentTime)
   }
@@ -472,6 +484,82 @@ export class SimulationEngine {
 
       this.makeBehaviorDecision(character, currentTime)
     }
+  }
+
+  // Check if character has any status below threshold (for system auto-move skip)
+  private hasLowStatus(character: SimCharacter): boolean {
+    const threshold = SimulationEngine.INTERRUPT_THRESHOLD
+    return character.bladder < threshold ||
+           character.satiety < threshold ||
+           character.energy < threshold ||
+           character.hygiene < threshold
+  }
+
+  // Select a random map within 3 hops (excluding current map)
+  private selectRandomNearbyMap(currentMapId: string): string | null {
+    // Collect all nearby map IDs (excluding current map)
+    const nearbyMapIds = this.traverseNearbyMaps(currentMapId, (_map, mapId, distance) =>
+      distance > 0 ? [mapId] : []
+    )
+
+    if (nearbyMapIds.length === 0) {
+      return null
+    }
+
+    // Random selection
+    const randomIndex = Math.floor(Math.random() * nearbyMapIds.length)
+    return nearbyMapIds[randomIndex]
+  }
+
+  // Start system auto-move to a target map
+  private startSystemAutoMove(character: SimCharacter, targetMapId: string): boolean {
+    const targetMap = this.worldState.getMap(targetMapId)
+    if (!targetMap?.spawnNodeId) {
+      console.log(`[SimulationEngine] System auto-move failed: no spawn node for map ${targetMapId}`)
+      return false
+    }
+
+    const success = this.characterSimulator.navigateToMap(
+      character.id,
+      targetMapId,
+      targetMap.spawnNodeId
+    )
+
+    if (success) {
+      console.log(`[SimulationEngine] System auto-move: ${character.name} -> ${targetMapId}`)
+    } else {
+      console.log(`[SimulationEngine] System auto-move failed: ${character.name} -> ${targetMapId}`)
+    }
+
+    return success
+  }
+
+  // Check and execute system auto-move (called after action completion)
+  private checkSystemAutoMove(character: SimCharacter, actionCounter: number): boolean {
+    // Not yet at interval threshold
+    if (actionCounter < SimulationEngine.SYSTEM_AUTO_MOVE_INTERVAL) {
+      return false
+    }
+
+    // Status interrupt active (any status < 10%) - skip auto-move but count progresses
+    // Don't reset counter - will check again after interrupt is resolved
+    if (this.hasLowStatus(character)) {
+      console.log(`[SimulationEngine] System auto-move skipped (status interrupt): ${character.name}`)
+      return false
+    }
+
+    // Reset counter (regardless of whether auto-move succeeds)
+    this.worldState.updateCharacter(character.id, { actionCounter: 0 })
+
+    // Select random nearby map (within 3 hops)
+    const targetMapId = this.selectRandomNearbyMap(character.currentMapId)
+    if (!targetMapId) {
+      console.log(`[SimulationEngine] System auto-move skipped (no nearby maps): ${character.name}`)
+      return false
+    }
+
+    // Start navigation to target map
+    return this.startSystemAutoMove(character, targetMapId)
   }
 
   // Trigger status interrupt for a character (called when status drops below threshold)
@@ -1470,6 +1558,11 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         const savedStartTime = await stateStore.loadServerStartTime()
         if (savedStartTime) {
           engine.setServerStartTime(savedStartTime)
+        } else {
+          // serverStartTime not found in DB (legacy data) - save current time
+          // This ensures day counting works correctly from this point forward
+          console.log(`${logPrefix} serverStartTime not found in DB, saving current time`)
+          await stateStore.saveServerStartTime(engine.getServerStartTime())
         }
 
         // Supplement character profiles (personality, tendencies, customPrompt)
