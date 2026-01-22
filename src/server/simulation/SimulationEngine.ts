@@ -290,13 +290,21 @@ export class SimulationEngine {
     const currentDay = realTime.day
     if (currentDay !== this.lastDay) {
       console.log(`[SimulationEngine] Day changed: ${this.lastDay} -> ${currentDay}`)
+      const previousDay = this.lastDay
       this.lastDay = currentDay
-      this.clearScheduleCache()
-      this.clearActionHistoryCache()
-      // Async reload schedule cache (non-blocking)
-      this.loadScheduleCache().catch(err => {
-        console.error('[SimulationEngine] Error reloading schedule cache:', err)
-      })
+      // Async seed + reload, then clear old entries
+      // Note: Don't clear cache before loading - this causes race condition
+      // where getScheduleForCharacter() returns null during async operation
+      this.seedDefaultSchedules()
+        .then(() => this.loadScheduleCache())
+        .then(() => {
+          // Clear only previous day's entries (new day's data is already loaded)
+          this.clearScheduleCacheForDay(previousDay)
+          this.clearActionHistoryCacheForDay(previousDay)
+        })
+        .catch(err => {
+          console.error('[SimulationEngine] Error seeding/reloading schedule cache:', err)
+        })
     }
 
     // Check for status decay with elapsed time scaling
@@ -1022,19 +1030,13 @@ export class SimulationEngine {
     return `${characterId}-${day}`
   }
 
-  // Get schedule for a character (DB cache priority, fallback to default)
+  // Get schedule for a character (DB cache only, seeded on startup)
   private getScheduleForCharacter(characterId: string): ScheduleEntry[] | null {
     const currentDay = this.worldState.getTime().day
     const cacheKey = this.characterDayCacheKey(characterId, currentDay)
 
-    // Try DB cache first
-    const cachedSchedule = this.scheduleCache.get(cacheKey)
-    if (cachedSchedule) {
-      return cachedSchedule
-    }
-
-    // Fallback to default schedules from characters.json
-    return this.defaultSchedules.get(characterId) ?? null
+    // Return from DB cache (seeded on startup/day-change)
+    return this.scheduleCache.get(cacheKey) ?? null
   }
 
   /**
@@ -1146,9 +1148,8 @@ export class SimulationEngine {
     const currentDay = this.worldState.getTime().day
     const cacheKey = this.characterDayCacheKey(characterId, currentDay)
 
-    // Get current schedule entries
-    let entries = this.scheduleCache.get(cacheKey) ?? this.defaultSchedules.get(characterId) ?? []
-    entries = [...entries] // Clone to avoid mutating original
+    // Clone entries from DB cache (seeded on startup/day-change)
+    const entries = [...(this.scheduleCache.get(cacheKey) ?? [])]
 
     const { type, entry } = update
 
@@ -1204,6 +1205,27 @@ export class SimulationEngine {
     }
   }
 
+  // Seed default schedules to DB for all characters on current day (if not exists)
+  async seedDefaultSchedules(): Promise<void> {
+    if (!this.stateStore) return
+
+    const currentDay = this.worldState.getTime().day
+
+    for (const [characterId, entries] of this.defaultSchedules) {
+      try {
+        // Check if schedule already exists in DB
+        const existing = await this.stateStore.loadSchedule(characterId, currentDay)
+        if (!existing) {
+          // Seed from default schedules
+          await this.stateStore.saveSchedule({ characterId, day: currentDay, entries })
+          console.log(`[SimulationEngine] Seeded default schedule for ${characterId} (day ${currentDay})`)
+        }
+      } catch (error) {
+        console.error(`[SimulationEngine] Error seeding schedule for ${characterId}:`, error)
+      }
+    }
+  }
+
   // Load schedules from DB into cache for all characters on current day
   async loadScheduleCache(): Promise<void> {
     if (!this.stateStore) return
@@ -1230,9 +1252,29 @@ export class SimulationEngine {
     this.scheduleCache.clear()
   }
 
+  // Clear schedule cache entries for a specific day only
+  private clearScheduleCacheForDay(day: number): void {
+    const suffix = `-${day}`
+    for (const key of this.scheduleCache.keys()) {
+      if (key.endsWith(suffix)) {
+        this.scheduleCache.delete(key)
+      }
+    }
+  }
+
   // Clear action history cache (called when day changes)
   clearActionHistoryCache(): void {
     this.actionHistoryCache.clear()
+  }
+
+  // Clear action history cache entries for a specific day only
+  private clearActionHistoryCacheForDay(day: number): void {
+    const suffix = `-${day}`
+    for (const key of this.actionHistoryCache.keys()) {
+      if (key.endsWith(suffix)) {
+        this.actionHistoryCache.delete(key)
+      }
+    }
   }
 
   // Record action history (called from ActionExecutor callback)
@@ -1586,17 +1628,15 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         engine.setActionConfigs(config.actions)
       }
 
+      // Load schedules and action history BEFORE starting engine
+      // This prevents race condition where ticks fire before data is loaded
+      await engine.seedDefaultSchedules()
+      await engine.loadScheduleCache()
+      await engine.loadActionHistoryCache()
+      engine.initializeLastDay()
+
       engine.start()
       console.log(`${logPrefix} Simulation engine started`)
-
-      // Load schedule cache from DB
-      await engine.loadScheduleCache()
-
-      // Load action history cache from DB
-      await engine.loadActionHistoryCache()
-
-      // Initialize lastDay for day-change detection
-      engine.initializeLastDay()
 
       // Trigger initial behavior decisions for all idle characters
       engine.triggerInitialBehaviorDecisions()
