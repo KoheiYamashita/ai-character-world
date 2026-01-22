@@ -49,6 +49,28 @@ export class ActionExecutor {
     return this.actionConfigs[actionType]
   }
 
+  /**
+   * キャラクターが実行中のアクションの perMinute 効果を取得
+   * @returns perMinute 効果、またはアクション実行中でない/固定時間アクションの場合は null
+   */
+  getActivePerMinuteEffects(characterId: string): EffectPerMinute | null {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character?.currentAction) return null
+
+    const actionId = character.currentAction.actionId
+    const actionDef = ACTIONS[actionId]
+    if (!actionDef) return null
+
+    const actionConfig = this.actionConfigs[actionDef.type]
+    if (!actionConfig) return null
+
+    // 固定時間アクションには perMinute がないので null を返す
+    if (actionConfig.fixed) return null
+
+    // 可変時間アクションの perMinute を返す
+    return actionConfig.perMinute ?? null
+  }
+
   /** Set callback for action completion events */
   setOnActionComplete(callback: ActionCompleteCallback): void {
     this.onActionComplete = callback
@@ -262,14 +284,10 @@ export class ActionExecutor {
     })
 
     // ステータス効果を適用
-    if (actionConfig) {
-      if (actionConfig.perMinute && durationMinutes !== undefined) {
-        // 可変時間アクション: perMinute × durationMinutes
-        this.applyPerMinuteEffects(characterId, actionConfig.perMinute, durationMinutes)
-      } else if (actionConfig.fixed && actionConfig.effects) {
-        // 固定時間アクション: 固定の効果を適用
-        this.applyStatEffects(characterId, actionConfig.effects)
-      }
+    // 可変時間アクション: perMinute 効果は SimulationEngine.applyStatusDecay でリアルタイム適用済み
+    // 固定時間アクション: 完了時に固定の効果を適用
+    if (actionConfig?.fixed && actionConfig.effects) {
+      this.applyStatEffects(characterId, actionConfig.effects)
     }
 
     // 適用後ステータスをログ
@@ -373,23 +391,6 @@ export class ActionExecutor {
     stats: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>
   ): void {
     this.applyStatEffectsInternal(characterId, stats)
-  }
-
-  /**
-   * 分あたりの効果を適用（可変時間アクション用）
-   * 効果量 = perMinute × durationMinutes
-   */
-  private applyPerMinuteEffects(
-    characterId: string,
-    perMinute: EffectPerMinute,
-    durationMinutes: number
-  ): void {
-    this.applyStatEffectsInternal(
-      characterId,
-      perMinute,
-      durationMinutes,
-      `perMinute effects (${durationMinutes}min)`
-    )
   }
 
   private clamp(value: number, min: number, max: number): number {

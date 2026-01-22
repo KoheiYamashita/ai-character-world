@@ -391,6 +391,64 @@ LLMが `durationMinutes` を指定可能。効果は `perMinute × durationMinut
 | talk | 5分 | mood+20 |
 | thinking | 0分 | なし（LLM決定中表示用） |
 
+### ステータス効果のリアルタイム適用
+
+アクション実行中のステータス変化は、完了時の一括適用ではなく**リアルタイムで適用**される。
+
+#### 仕様
+
+1. **可変時間アクション**: `perMinute` 効果がリアルタイムで適用される
+   - アクション中は該当ステータスの通常減少を**停止**
+   - 代わりに `perMinute` の値で**置き換え**（合算ではない）
+   - `perMinute` で定義されていないステータスは通常通り減少
+
+2. **固定時間アクション**: 完了時に `effects` を一括適用（従来通り）
+   - 短時間なのでリアルタイム適用の必要なし
+
+#### 例: sleep アクション中（8時間）
+
+| ステータス | 通常減少 | アクション中 | 備考 |
+|-----------|---------|-------------|------|
+| energy    | -0.05/分 | **+0.208/分** | perMinute で置き換え |
+| mood      | -0.02/分 | **+0.042/分** | perMinute で置き換え |
+| satiety   | -0.1/分  | -0.1/分 | 通常通り減少 |
+| hygiene   | -0.03/分 | -0.03/分 | 通常通り減少 |
+| bladder   | -0.15/分 | -0.15/分 | 通常通り減少 |
+
+#### 例: work アクション中（4時間）
+
+| ステータス | 通常減少 | アクション中 | 備考 |
+|-----------|---------|-------------|------|
+| energy    | -0.05/分 | **-0.33/分** | perMinute で置き換え（消耗） |
+| mood      | -0.02/分 | **-0.08/分** | perMinute で置き換え（消耗） |
+| satiety   | -0.1/分  | -0.1/分 | 通常通り減少 |
+| hygiene   | -0.03/分 | -0.03/分 | 通常通り減少 |
+| bladder   | -0.15/分 | -0.15/分 | 通常通り減少 |
+
+#### 処理フロー
+
+```
+SimulationEngine.applyStatusDecay(elapsedMinutes)
+  for each character:
+    perMinute = actionExecutor.getActivePerMinuteEffects(characterId)
+
+    for each stat (satiety, energy, hygiene, mood, bladder):
+      if perMinute[stat] exists:
+        // 減少を停止し、perMinute で置き換え
+        newValue = current + perMinute[stat] * elapsedMinutes
+      else:
+        // 通常の減少を適用
+        newValue = current - decayRate[stat] * elapsedMinutes
+
+      clamp(newValue, 0, 100)
+```
+
+#### 設計意図
+
+- **リアルな進行**: 睡眠中は徐々に回復、仕事中は徐々に消耗
+- **割り込みの意味**: 睡眠を中断すると回復が途中で止まる
+- **二重適用の防止**: 完了時の一括適用を削除し、リアルタイムのみで効果適用
+
 ### 登録例（definitions.ts）
 
 ```typescript

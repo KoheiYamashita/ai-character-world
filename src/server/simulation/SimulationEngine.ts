@@ -15,6 +15,7 @@ import type { StateStore } from '../persistence/StateStore'
 import type { BehaviorDecider } from '../behavior/BehaviorDecider'
 import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
+import { calculateStatChange } from '@/lib/statusUtils'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -389,6 +390,10 @@ export class SimulationEngine {
   // Apply status decay scaled by elapsed minutes
   // All stats: 100 = good, 0 = bad. All decrease over time.
   // Also checks for status interrupts (when stat drops below threshold)
+  //
+  // アクション実行中の場合:
+  // - perMinute で定義されたステータスは減少を停止し、perMinute の値で「置き換え」
+  // - perMinute で定義されていないステータスは通常通り減少
   private applyStatusDecay(elapsedMinutes: number): void {
     if (!this.timeConfig) return
 
@@ -397,12 +402,27 @@ export class SimulationEngine {
     const threshold = SimulationEngine.INTERRUPT_THRESHOLD
 
     for (const char of characters) {
-      // Calculate new values
-      const newSatiety = Math.max(0, char.satiety - decayRates.satietyPerMinute * elapsedMinutes)
-      const newBladder = Math.max(0, char.bladder - decayRates.bladderPerMinute * elapsedMinutes)
-      const newEnergy = Math.max(0, char.energy - decayRates.energyPerMinute * elapsedMinutes)
-      const newHygiene = Math.max(0, char.hygiene - decayRates.hygienePerMinute * elapsedMinutes)
-      const newMood = Math.max(0, char.mood - decayRates.moodPerMinute * elapsedMinutes)
+      // アクション実行中の場合、perMinute 効果を取得
+      const perMinuteEffects = this.actionExecutor.getActivePerMinuteEffects(char.id)
+
+      // 各ステータスの新しい値を計算
+      // perMinute で定義されている場合は perMinute の値で置き換え、
+      // そうでない場合は通常の減少を適用
+      const newSatiety = calculateStatChange(
+        char.satiety, decayRates.satietyPerMinute, elapsedMinutes, perMinuteEffects?.satiety
+      )
+      const newBladder = calculateStatChange(
+        char.bladder, decayRates.bladderPerMinute, elapsedMinutes, perMinuteEffects?.bladder
+      )
+      const newEnergy = calculateStatChange(
+        char.energy, decayRates.energyPerMinute, elapsedMinutes, perMinuteEffects?.energy
+      )
+      const newHygiene = calculateStatChange(
+        char.hygiene, decayRates.hygienePerMinute, elapsedMinutes, perMinuteEffects?.hygiene
+      )
+      const newMood = calculateStatChange(
+        char.mood, decayRates.moodPerMinute, elapsedMinutes, perMinuteEffects?.mood
+      )
 
       // Update character stats
       this.worldState.updateCharacter(char.id, {

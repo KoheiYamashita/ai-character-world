@@ -710,8 +710,54 @@ describe('ActionExecutor', () => {
     })
   })
 
-  describe('perMinute effect calculation (docs/action-system.md:368)', () => {
-    it('should apply perMinute × durationMinutes for variable actions', () => {
+  describe('getActivePerMinuteEffects', () => {
+    it('should return perMinute effects for variable action', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentNodeId: 'test-2-2',
+      }))
+
+      executor.startAction('char-1', 'eat_home', undefined, undefined, 30)
+
+      const perMinute = executor.getActivePerMinuteEffects('char-1')
+
+      expect(perMinute).not.toBeNull()
+      expect(perMinute?.satiety).toBe(2) // テストの actionConfigs で設定した値
+      expect(perMinute?.mood).toBe(0.5)
+    })
+
+    it('should return null for fixed-time action', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentNodeId: 'test-2-2',
+      }))
+
+      executor.startAction('char-1', 'toilet')
+
+      const perMinute = executor.getActivePerMinuteEffects('char-1')
+
+      expect(perMinute).toBeNull()
+    })
+
+    it('should return null when no action is active', () => {
+      worldState.addCharacter(createTestCharacter('char-1'))
+
+      const perMinute = executor.getActivePerMinuteEffects('char-1')
+
+      expect(perMinute).toBeNull()
+    })
+  })
+
+  describe('perMinute effect - completeAction behavior (docs/action-system.md:368)', () => {
+    // perMinute 効果は SimulationEngine.applyStatusDecay でリアルタイム適用されるため、
+    // completeAction では適用されない
+    it('should NOT apply perMinute effects on completion (applied in real-time by SimulationEngine)', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
       ])
@@ -722,41 +768,36 @@ describe('ActionExecutor', () => {
         mood: 50,
       }))
 
-      // 30分の食事を開始（perMinute: satiety=2, mood=0.5）
+      // 30分の食事を開始
       executor.startAction('char-1', 'eat_home', undefined, undefined, 30)
 
       const char = worldState.getCharacter('char-1')
       executor.tick(char!.currentAction!.targetEndTime + 1000)
 
       const updatedChar = worldState.getCharacter('char-1')
-      // satiety: 0 + (2 × 30) = 60
-      expect(updatedChar?.satiety).toBe(60)
-      // mood: 50 + (0.5 × 30) = 65
-      expect(updatedChar?.mood).toBe(65)
+      // completeAction では perMinute 効果が適用されない（値は変化しない）
+      expect(updatedChar?.satiety).toBe(0)
+      expect(updatedChar?.mood).toBe(50)
     })
 
-    it('should clamp stat values to 0-100 range', () => {
+    it('should still apply fixed effects for fixed-time actions', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
         currentNodeId: 'test-2-2',
-        satiety: 90, // 高い値からスタート
-        mood: 95,
+        bladder: 0,
       }))
 
-      // 60分の食事（satiety=2×60=120加算だが100上限）
-      executor.startAction('char-1', 'eat_home', undefined, undefined, 60)
+      executor.startAction('char-1', 'toilet')
 
       const char = worldState.getCharacter('char-1')
       executor.tick(char!.currentAction!.targetEndTime + 1000)
 
       const updatedChar = worldState.getCharacter('char-1')
-      // satiety: 90 + 120 = 210 → 100に制限
-      expect(updatedChar?.satiety).toBe(100)
-      // mood: 95 + 30 = 125 → 100に制限
-      expect(updatedChar?.mood).toBe(100)
+      // 固定時間アクションの効果は完了時に適用される
+      expect(updatedChar?.bladder).toBe(100)
     })
   })
 })
