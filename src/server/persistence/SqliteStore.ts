@@ -73,6 +73,7 @@ export class SqliteStore implements StateStore {
 
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
+    this.db.pragma('foreign_keys = ON')
     this.initTables()
   }
 
@@ -116,6 +117,7 @@ export class SqliteStore implements StateStore {
       );
 
       -- Schedules
+      -- Note: UNIQUE(character_id, day) automatically creates an index
       CREATE TABLE IF NOT EXISTS schedules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         character_id TEXT NOT NULL,
@@ -125,9 +127,6 @@ export class SqliteStore implements StateStore {
         updated_at INTEGER NOT NULL,
         UNIQUE(character_id, day)
       );
-
-      CREATE INDEX IF NOT EXISTS idx_schedules_character_day
-        ON schedules(character_id, day);
 
       -- Action history (1 record per action)
       CREATE TABLE IF NOT EXISTS action_history (

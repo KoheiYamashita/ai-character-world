@@ -16,6 +16,7 @@ import type { BehaviorDecider } from '../behavior/BehaviorDecider'
 import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
+import { getAbstractActionsForTags } from '@/lib/facilityMapping'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -23,19 +24,6 @@ const DEFAULT_TIMEZONE = 'Asia/Tokyo'
 
 // Persistence save interval (30 seconds)
 const SAVE_INTERVAL_MS = 30000
-
-// Tag to actions mapping for facility-based actions
-// Maps facility tags to the abstract actions they enable
-const TAG_TO_ACTIONS: Record<string, string[]> = {
-  bedroom: ['sleep'],
-  kitchen: ['eat'],
-  restaurant: ['eat'],
-  bathroom: ['bathe'],
-  hotspring: ['bathe'],
-  toilet: ['toilet'],
-  workspace: ['work'],
-  public: ['rest'],
-}
 
 export class SimulationEngine {
   private worldState: WorldStateManager
@@ -68,6 +56,9 @@ export class SimulationEngine {
   private static readonly INTERRUPT_THRESHOLD = 10
   // System auto-move interval (every N actions)
   private static readonly SYSTEM_AUTO_MOVE_INTERVAL = 3
+  // SSE notification throttle (every N ticks instead of every tick)
+  private static readonly NOTIFICATION_THROTTLE_TICKS = 5
+  private notificationTickCounter = 0
   // Status type → forced action mapping (Step 14)
   private static readonly STATUS_INTERRUPT_ACTIONS: Record<string, string> = {
     bladder: 'toilet',
@@ -286,8 +277,12 @@ export class SimulationEngine {
 
     // Skip simulation updates if paused (but time still syncs)
     if (this.worldState.isPaused()) {
-      // Still notify subscribers so UI updates time
-      this.notifySubscribers()
+      // Still notify subscribers so UI updates time (throttled)
+      this.notificationTickCounter++
+      if (this.notificationTickCounter >= SimulationEngine.NOTIFICATION_THROTTLE_TICKS) {
+        this.notificationTickCounter = 0
+        this.notifySubscribers()
+      }
       return
     }
 
@@ -335,8 +330,12 @@ export class SimulationEngine {
       this.lastSaveTime = now
     }
 
-    // Notify subscribers
-    this.notifySubscribers()
+    // Notify subscribers (throttled to reduce SSE traffic)
+    this.notificationTickCounter++
+    if (this.notificationTickCounter >= SimulationEngine.NOTIFICATION_THROTTLE_TICKS) {
+      this.notificationTickCounter = 0
+      this.notifySubscribers()
+    }
   }
 
   // Update formatter cache when timezone changes
@@ -1050,7 +1049,7 @@ export class SimulationEngine {
     for (const obstacle of map.obstacles) {
       if (!obstacle.facility) continue
 
-      const availableActions = this.getActionsForFacilityTags(obstacle.facility.tags)
+      const availableActions = getAbstractActionsForTags(obstacle.facility.tags)
       if (availableActions.length === 0) continue
 
       facilities.push({
@@ -1114,7 +1113,7 @@ export class SimulationEngine {
         if (!obstacle.facility) continue
 
         // Calculate available actions from facility tags
-        const availableActions = this.getActionsForFacilityTags(obstacle.facility.tags)
+        const availableActions = getAbstractActionsForTags(obstacle.facility.tags)
 
         facilities.push({
           id: obstacle.id,
@@ -1140,24 +1139,6 @@ export class SimulationEngine {
       label: map.name || mapId,
       distance,
     }])
-  }
-
-  /**
-   * 施設タグから利用可能なアクションを取得
-   */
-  private getActionsForFacilityTags(tags: string[]): string[] {
-    const actions: string[] = []
-    for (const tag of tags) {
-      const tagActions = TAG_TO_ACTIONS[tag]
-      if (tagActions) {
-        for (const action of tagActions) {
-          if (!actions.includes(action)) {
-            actions.push(action)
-          }
-        }
-      }
-    }
-    return actions
   }
 
   // Apply schedule update proposed by LLM

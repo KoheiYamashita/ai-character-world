@@ -1,13 +1,11 @@
 import type {
-  Position,
-  Direction,
   WorldTime,
   Character,
   CrossMapRoute,
-  SpriteConfig,
   NPC,
   ActionState,
-  Employment,
+  Position,
+  Direction,
 } from '@/types'
 import type { ActionId } from './actions/definitions'
 
@@ -30,26 +28,7 @@ export interface ConversationState {
 }
 
 // Server-side character state (extends client Character with navigation)
-export interface SimCharacter {
-  id: string
-  name: string
-  sprite: SpriteConfig
-  money: number
-  satiety: number
-  energy: number
-  hygiene: number
-  mood: number
-  bladder: number
-  currentMapId: string
-  currentNodeId: string
-  position: Position
-  direction: Direction
-  // Employment info (workplace reference)
-  employment?: Employment
-  // LLM行動決定用のプロファイル情報
-  personality?: string        // 性格
-  tendencies?: string[]       // 行動傾向
-  customPrompt?: string       // 自由入力欄
+export interface SimCharacter extends Character {
   // Navigation state embedded for server-side simulation
   navigation: SimNavigationState
   // Cross-map navigation state

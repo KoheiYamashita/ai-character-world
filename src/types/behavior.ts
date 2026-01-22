@@ -1,6 +1,5 @@
-import type { ActionId } from '@/server/simulation/actions/definitions'
+import type { FacilityInfo, FacilityTag, WorldTime, ScheduleEntry, ActionId } from '@/types'
 import type { SimCharacter, SimNPC } from '@/server/simulation/types'
-import type { FacilityInfo, FacilityTag, WorldTime, ScheduleEntry } from '@/types'
 
 /**
  * 施設情報（LLMに提示用）

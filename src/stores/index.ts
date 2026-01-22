@@ -1,3 +1,3 @@
 export { useWorldStore } from './worldStore'
-export { useCharacterStore } from './characterStore'
-export { useNPCStore } from './npcStore'
+export { useCharacterStore, useCharacter, useCharacterIds } from './characterStore'
+export { useNPCStore, useNPC, useNPCsInMap } from './npcStore'

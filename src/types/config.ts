@@ -36,7 +36,7 @@ export interface SpriteAnimationConfig {
   idleFrame: number
 }
 
-export interface GridConfig {
+export interface WorldGridConfig {
   defaultCols: number
   defaultRows: number
   defaultWidth: number
@@ -140,7 +140,7 @@ export interface WorldConfig {
   movement: MovementConfig
   character: CharacterRenderConfig
   sprite: SpriteAnimationConfig
-  grid: GridConfig
+  grid: WorldGridConfig
   canvas: CanvasConfig
   theme: ThemeConfig
   initialState: InitialStateConfig

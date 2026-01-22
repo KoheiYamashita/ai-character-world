@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import type { Character, Position, Direction } from '@/types'
 
 // Clamp a value to 0-100 range
@@ -126,3 +127,23 @@ export const useCharacterStore = create<CharacterStore>((set, get) => ({
   updateMood: (id, delta) => get().updateStat(id, 'mood', delta),
   updateBladder: (id, delta) => get().updateStat(id, 'bladder', delta),
 }))
+
+/**
+ * Optimized selector for a single character
+ * Only re-renders when the specific character changes
+ */
+export function useCharacter(characterId: string): Character | undefined {
+  return useCharacterStore(
+    useShallow((state) => state.characters.get(characterId))
+  )
+}
+
+/**
+ * Optimized selector for character IDs only
+ * Useful for rendering character lists without full data
+ */
+export function useCharacterIds(): string[] {
+  return useCharacterStore(
+    useShallow((state) => Array.from(state.characters.keys()))
+  )
+}

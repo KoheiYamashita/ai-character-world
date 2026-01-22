@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
 import type { NPC } from '@/types'
 
 interface NPCStore {
@@ -46,3 +47,25 @@ export const useNPCStore = create<NPCStore>((set, get) => ({
 
   clearNPCs: () => set({ npcs: new Map() }),
 }))
+
+/**
+ * Optimized selector for a single NPC
+ * Only re-renders when the specific NPC changes
+ */
+export function useNPC(npcId: string): NPC | undefined {
+  return useNPCStore(
+    useShallow((state) => state.npcs.get(npcId))
+  )
+}
+
+/**
+ * Optimized selector for NPCs in a specific map
+ * Only re-renders when NPCs on that map change
+ */
+export function useNPCsInMap(mapId: string): NPC[] {
+  return useNPCStore(
+    useShallow((state) =>
+      Array.from(state.npcs.values()).filter((npc) => npc.mapId === mapId)
+    )
+  )
+}

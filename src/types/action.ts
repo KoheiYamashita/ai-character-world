@@ -1,6 +1,19 @@
 import type { Character } from './character'
 import type { FacilityTag } from './map'
 
+// アクションIDの型（循環依存を避けるため明示的に定義）
+export type ActionId =
+  | 'eat_home'
+  | 'eat_restaurant'
+  | 'sleep'
+  | 'toilet'
+  | 'bathe_home'
+  | 'bathe_hotspring'
+  | 'rest'
+  | 'talk'
+  | 'work'
+  | 'thinking'
+
 // キャラクターステータスの部分型（effects用）
 // Character型から数値ステータスを抽出
 export type CharacterStats = Pick<
@@ -53,7 +66,7 @@ export interface ActionDefinition {
 
 // アクション実行状態
 export interface ActionState {
-  actionId: string // 実行中のアクションID
+  actionId: ActionId // 実行中のアクションID
   startTime: number // 開始時刻(timestamp)
   targetEndTime: number // 終了予定時刻
   facilityId?: string // 使用中の施設ID

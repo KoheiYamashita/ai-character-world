@@ -1,4 +1,4 @@
-import type { ActionDefinition } from '@/types/action'
+import type { ActionDefinition, ActionId } from '@/types/action'
 
 /**
  * アクション定義一覧
@@ -7,7 +7,7 @@ import type { ActionDefinition } from '@/types/action'
  * ここでは requirements と emoji のみを定義する。
  * ActionExecutor が world-config.json から時間と効果を取得し、適用する。
  */
-export const ACTIONS: Record<string, ActionDefinition> = {
+export const ACTIONS: Record<ActionId, ActionDefinition> = {
   // 食事系
   eat_home: {
     type: 'eat',
@@ -122,5 +122,5 @@ export const ACTIONS: Record<string, ActionDefinition> = {
   },
 }
 
-// アクションIDの型
-export type ActionId = keyof typeof ACTIONS
+// ActionId は @/types/action からエクスポート（循環依存回避のため）
+export type { ActionId } from '@/types/action'

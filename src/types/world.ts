@@ -10,10 +10,3 @@ export interface TransitionState {
   toMapId: string | null
   progress: number
 }
-
-export interface WorldState {
-  currentMapId: string
-  time: WorldTime
-  isPaused: boolean
-  transition: TransitionState
-}

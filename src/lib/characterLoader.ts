@@ -5,6 +5,14 @@ const DEFAULT_CHARACTERS_PATH = '/data/characters.json'
 
 let cachedConfigs: CharacterConfig[] | null = null
 
+/**
+ * キャラクター設定キャッシュをクリア
+ * HMR時や設定リロード時に使用
+ */
+export function clearCharacterCache(): void {
+  cachedConfigs = null
+}
+
 export async function loadCharacterConfigs(): Promise<CharacterConfig[]> {
   if (cachedConfigs) {
     return cachedConfigs

@@ -6,35 +6,11 @@ import type { SimNPC } from '@/server/simulation/types'
 import type { ScheduleEntry, FacilityTag, ActionConfig, WorldTime } from '@/types'
 import type { EffectPerMinute } from '@/types/action'
 import { llmGenerateObject } from '@/server/llm'
-
-// =============================================================================
-// アクション→施設タグのマッピング
-// =============================================================================
-
-/**
- * 施設タグ → 具体的アクションIDのマッピング
- */
-const FACILITY_TAG_TO_ACTION: Record<string, ActionId> = {
-  kitchen: 'eat_home',
-  restaurant: 'eat_restaurant',
-  bathroom: 'bathe_home',
-  hotspring: 'bathe_hotspring',
-  bedroom: 'sleep',
-  toilet: 'toilet',
-  workspace: 'work',
-  public: 'rest',
-}
-
-/**
- * アクションが要求する施設タグのマッピング
- * FACILITY_TAG_TO_ACTIONの逆引き
- */
-const ACTION_FACILITY_TAGS: Record<string, FacilityTag[]> = Object.entries(FACILITY_TAG_TO_ACTION)
-  .reduce((acc, [tag, action]) => {
-    if (!acc[action]) acc[action] = []
-    acc[action].push(tag as FacilityTag)
-    return acc
-  }, {} as Record<string, FacilityTag[]>)
+import {
+  FACILITY_TAG_TO_ACTION_ID,
+  ACTION_TO_FACILITY_TAGS,
+  getActionIdFromFacilityTags,
+} from '@/lib/facilityMapping'
 
 // =============================================================================
 // Zod スキーマ
@@ -81,14 +57,6 @@ const FacilitySelectionSchema = z.object({
   facilityId: z.string().describe('選択した施設のID'),
   reason: z.string().describe('この施設を選んだ理由'),
 })
-
-/**
- * 抽象アクション → 施設タグのマッピング
- */
-const ACTION_TO_FACILITY_TAGS: Record<string, string[]> = {
-  eat: ['kitchen', 'restaurant'],
-  bathe: ['bathroom', 'hotspring'],
-}
 
 // =============================================================================
 // LLMBehaviorDecider
@@ -325,7 +293,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    */
   private getActionIdFromFacility(facility: NearbyFacility): ActionId {
     for (const tag of facility.tags) {
-      const actionId = FACILITY_TAG_TO_ACTION[tag]
+      const actionId = FACILITY_TAG_TO_ACTION_ID[tag]
       if (actionId) {
         return actionId
       }
@@ -471,7 +439,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   ): NearbyFacility | null {
     if (!nearbyFacilities || nearbyFacilities.length === 0) return null
 
-    const requiredTags = ACTION_FACILITY_TAGS[action]
+    const requiredTags = ACTION_TO_FACILITY_TAGS[action]
     if (!requiredTags || requiredTags.length === 0) return null
 
     // 必要なタグをすべて持つ施設を探す

@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 import {
   ensureEngineInitialized,
   type SerializedWorldState,
 } from '@/server/simulation'
+
+// Request validation schema
+const ALLOWED_ACTIONS = ['pause', 'unpause', 'toggle', 'start', 'stop'] as const
+const SimulationActionSchema = z.object({
+  action: z.enum(ALLOWED_ACTIONS, {
+    message: 'Invalid action. Must be one of: pause, unpause, toggle, start, stop',
+  }),
+})
 
 // GET - Get current simulation state
 export async function GET() {
@@ -32,9 +41,30 @@ export async function GET() {
 // POST - Control simulation (pause/unpause/restart)
 export async function POST(request: Request) {
   try {
+    // Parse and validate request body
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Invalid JSON in request body' },
+        { status: 400 }
+      )
+    }
+
+    const validation = SimulationActionSchema.safeParse(body)
+    if (!validation.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: validation.error.issues[0]?.message ?? 'Invalid request',
+        },
+        { status: 400 }
+      )
+    }
+
+    const { action } = validation.data
     const engine = await ensureEngineInitialized('[API]')
-    const body = await request.json()
-    const { action } = body as { action: string }
 
     switch (action) {
       case 'pause':
@@ -52,11 +82,6 @@ export async function POST(request: Request) {
       case 'stop':
         engine.stop()
         break
-      default:
-        return NextResponse.json(
-          { success: false, error: `Unknown action: ${action}` },
-          { status: 400 }
-        )
     }
 
     return NextResponse.json({
