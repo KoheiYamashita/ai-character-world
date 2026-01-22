@@ -775,7 +775,7 @@ export class SimulationEngine {
       this.worldState.updateCharacter(character.id, { pendingAction: null })
 
       // Try to execute the action
-      const success = this.actionExecutor.startAction(character.id, actionId, facilityId, targetNpcId, durationMinutes)
+      const success = this.actionExecutor.startAction(character.id, actionId, facilityId, targetNpcId, durationMinutes, reason)
       if (success) {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         if (targetNpcId) {
@@ -844,7 +844,7 @@ export class SimulationEngine {
 
     if (isAdjacent) {
       // Already adjacent - execute talk immediately
-      const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId)
+      const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId, undefined, reason)
       if (success) {
         console.log(`[SimulationEngine] ${character.name} started talk with ${npc.name} (${reason})`)
       } else {
@@ -930,7 +930,7 @@ export class SimulationEngine {
 
     // Execute immediately if: no specific facility OR already inside target facility
     if (!targetFacilityId || isInsideTargetFacility) {
-      const success = this.actionExecutor.startAction(character.id, actionId, targetFacilityId, undefined, durationMinutes)
+      const success = this.actionExecutor.startAction(character.id, actionId, targetFacilityId, undefined, durationMinutes, reason)
       if (success) {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         console.log(`[SimulationEngine] ${character.name} started action: ${actionId}${durationStr} (${reason})${targetFacilityId ? ` at facility: ${targetFacilityId}` : ''}`)
@@ -1284,6 +1284,7 @@ export class SimulationEngine {
     facilityId?: string
     targetNpcId?: string
     durationMinutes?: number
+    reason?: string
   }): void {
     const currentTime = this.worldState.getTime()
     const currentDay = currentTime.day
@@ -1292,9 +1293,8 @@ export class SimulationEngine {
     // Determine target (facility or NPC)
     const target = entry.facilityId ?? entry.targetNpcId
 
-    // Get pending action reason if available
-    const character = this.worldState.getCharacter(entry.characterId)
-    const reason = character?.pendingAction?.reason
+    // Get reason from entry (passed from ActionExecutor via ActionState)
+    const reason = entry.reason
 
     // Update cache
     const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)

@@ -16,6 +16,7 @@ export type ActionHistoryCallback = (entry: {
   facilityId?: string
   targetNpcId?: string
   durationMinutes?: number
+  reason?: string
 }) => void
 
 /**
@@ -99,13 +100,15 @@ export class ActionExecutor {
    * @param facilityId 施設ID（オプション）
    * @param targetNpcId 対象NPC ID（talkアクション用）
    * @param durationMinutes 実行時間（分）- 可変時間アクションの場合にLLMが指定
+   * @param reason 行動理由（LLMが出力したもの）
    */
   startAction(
     characterId: string,
     actionId: ActionId,
     facilityId?: string,
     targetNpcId?: string,
-    durationMinutes?: number
+    durationMinutes?: number,
+    reason?: string
   ): boolean {
     // 前提条件チェック (6-2)
     const checkResult = this.canExecuteAction(characterId, actionId)
@@ -144,6 +147,7 @@ export class ActionExecutor {
       facilityId: facilityId ?? facility?.owner,
       targetNpcId,  // talk アクション用
       durationMinutes: actualDurationMinutes,  // 選択された時間を記録
+      reason,  // 行動理由を記録
     }
 
     // キャラクター状態更新（displayEmoji設定含む）
@@ -334,6 +338,7 @@ export class ActionExecutor {
         facilityId: character.currentAction.facilityId,
         targetNpcId: character.currentAction.targetNpcId,
         durationMinutes,
+        reason: character.currentAction.reason,
       })
     }
 

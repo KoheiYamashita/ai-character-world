@@ -72,4 +72,5 @@ export interface ActionState {
   facilityId?: string // 使用中の施設ID
   targetNpcId?: string // talk アクション用：対象NPC ID
   durationMinutes?: number // 選択された時間（分）- 可変時間アクション用
+  reason?: string // 行動理由（LLMが出力したもの）
 }
