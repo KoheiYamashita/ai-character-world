@@ -4,6 +4,7 @@ import type { SimCharacter } from '../types'
 import type { WorldStateManager } from '../WorldState'
 import { ACTIONS, type ActionId } from './definitions'
 import { findZoneFacilityForNode, findBuildingFacilityNearNode } from '@/lib/facilityUtils'
+import { parseNodeIdToGridCoord } from '@/lib/gridUtils'
 
 /** Callback type for action completion events */
 export type ActionCompleteCallback = (characterId: string, actionId: ActionId) => void
@@ -400,21 +401,6 @@ export class ActionExecutor {
   // =====================
 
   /**
-   * Parse nodeId to extract grid coordinates.
-   * nodeId format: "{prefix}-{row}-{col}"
-   */
-  private parseNodeIdToGridCoord(nodeId: string): { row: number; col: number } | null {
-    const parts = nodeId.split('-')
-    if (parts.length < 3) return null
-
-    const row = parseInt(parts[parts.length - 2], 10)
-    const col = parseInt(parts[parts.length - 1], 10)
-
-    if (isNaN(row) || isNaN(col)) return null
-    return { row, col }
-  }
-
-  /**
    * Get the facility info for a character's current position.
    * Checks both zone facilities and building facilities (with proximity).
    */
@@ -425,7 +411,7 @@ export class ActionExecutor {
     const map = this.worldState.getMap(character.currentMapId)
     if (!map) return null
 
-    const coord = this.parseNodeIdToGridCoord(character.currentNodeId)
+    const coord = parseNodeIdToGridCoord(character.currentNodeId)
     if (!coord) return null
 
     // First check if inside a zone with facility

@@ -1,23 +1,6 @@
 import type { PathNode, Obstacle, FacilityInfo, FacilityTag } from '@/types'
 import { isNodeInsideZone } from '@/data/maps/grid'
-
-/**
- * Parse a node ID to extract grid coordinates.
- * Returns null if the node ID doesn't match the expected format.
- */
-function parseNodeIdToGridCoord(
-  nodeId: string,
-  gridPrefix: string
-): { row: number; col: number } | null {
-  const parts = nodeId.split('-')
-  if (parts.length < 3 || parts[0] !== gridPrefix) return null
-
-  const row = parseInt(parts[1], 10)
-  const col = parseInt(parts[2], 10)
-
-  if (isNaN(row) || isNaN(col)) return null
-  return { row, col }
-}
+import { parseNodeIdToGridCoord } from '@/lib/gridUtils'
 
 /**
  * Get facility info for a node if it's inside a zone with facility info.

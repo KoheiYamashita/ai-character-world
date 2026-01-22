@@ -2,6 +2,7 @@ import type { WorldMap, MapConfigJson, MapsDataJson, Obstacle, ObstacleConfigJso
 import type { NodeLabel, TileToPixelConfig } from '@/data/maps/grid'
 import { generateGridNodes, isPointInsideObstacle, tileToPixelObstacle, getGridDefaults } from '@/data/maps/grid'
 import { isConfigLoaded, getConfig, parseColor } from './worldConfigLoader'
+import { parseNodeIdToGridCoord, type GridCoordinate } from '@/lib/gridUtils'
 
 const DEFAULT_MAPS_PATH = '/data/maps.json'
 
@@ -54,22 +55,6 @@ function validateObstacleMinSize(mapId: string, obstacles: ObstacleConfigJson[])
       `Map "${mapId}" has undersized obstacles:\n${undersized.join('\n')}`
     )
   }
-}
-
-interface GridCoordinate {
-  row: number
-  col: number
-}
-
-function parseNodeIdToGridCoord(nodeId: string, gridPrefix: string): GridCoordinate | null {
-  const parts = nodeId.split('-')
-  if (parts.length < 3 || parts[0] !== gridPrefix) return null
-
-  const row = parseInt(parts[1], 10)
-  const col = parseInt(parts[2], 10)
-
-  if (isNaN(row) || isNaN(col)) return null
-  return { row, col }
 }
 
 function gridCoordToPixel(

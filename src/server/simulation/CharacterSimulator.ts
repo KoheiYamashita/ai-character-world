@@ -394,7 +394,7 @@ export class CharacterSimulator {
     if (!character || !npc) return
 
     // Make character and NPC face each other
-    const charToNpcDirection = this.getDirectionFromPositions(character.position, npc.position)
+    const charToNpcDirection = getDirection(character.position, npc.position)
     this.worldState.updateCharacterDirection(characterId, charToNpcDirection)
     this.worldState.updateNPCDirection(npcId, this.getOppositeDirection(charToNpcDirection))
 
@@ -433,19 +433,6 @@ export class CharacterSimulator {
       conversation: null,
       displayEmoji: undefined,  // Clear conversation emoji
     })
-  }
-
-  // Get direction from one position to another
-  private getDirectionFromPositions(from: Position, to: Position): Direction {
-    const dx = to.x - from.x
-    const dy = to.y - from.y
-
-    // Use the larger axis to determine primary direction
-    if (Math.abs(dx) > Math.abs(dy)) {
-      return dx > 0 ? 'right' : 'left'
-    } else {
-      return dy > 0 ? 'down' : 'up'
-    }
   }
 
   // Get opposite direction
