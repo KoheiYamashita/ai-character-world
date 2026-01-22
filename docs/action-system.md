@@ -72,7 +72,7 @@
 
 LLMの行動決定とは別に、システムが定期的にmoveアクションを発動する:
 
-- **発動条件**: 5回のアクション完了ごと（カウンターベース）
+- **発動条件**: 3回のアクション完了ごと（カウンターベース）
 - **行き先**: 3マップ以内のランダムな場所
 - **目的**: 同じ場所に留まることを防ぐ、偶発的な出会いの創出
 
@@ -82,7 +82,7 @@ LLMの行動決定とは別に、システムが定期的にmoveアクション�
 ステータス割り込み判定（いずれかのステータス < 10%）
   ↓ YES → 緊急アクション（カウントは進むがmoveスキップ）
   ↓ NO
-カウント == 5?
+カウント == 3?
   ├─ YES → 3マップ以内のランダムな場所へ自動move → カウントリセット
   └─ NO → LLMが次の行動を決定
 ```
@@ -230,8 +230,8 @@ interface JobInfo {
   title: string           // "ウェイター", "料理人"
   hourlyWage: number      // 時給
   workHours: {            // 営業時間（この時間内のみ働ける）
-    start: string         // "09:00"
-    end: string           // "22:00"
+    start: number         // 9 (時)
+    end: number           // 22 (時)
   }
 }
 ```
@@ -248,7 +248,7 @@ interface JobInfo {
       "jobId": "waiter",
       "title": "ウェイター",
       "hourlyWage": 1000,
-      "workHours": { "start": "10:00", "end": "22:00" }
+      "workHours": { "start": 10, "end": 22 }
     }
   }
 }
@@ -256,13 +256,17 @@ interface JobInfo {
 
 ### 雇用状態
 
-キャラクターに雇用状態を持たせる。
+キャラクターに雇用状態を持たせる。複数の職場で働けるように配列で管理。
 
 ```typescript
+interface WorkplaceInfo {
+  workplaceLabel: string  // 職場名（表示用）
+  mapId: string           // 職場があるマップID
+}
+
 interface Employment {
   jobId: string
-  workplaceId: string     // Zone/建物ID
-  mapId: string
+  workplaces: WorkplaceInfo[]  // 複数職場対応
 }
 
 interface SimCharacter {
@@ -281,14 +285,16 @@ interface SimCharacter {
   "name": "アリス",
   "employment": {
     "jobId": "waiter",
-    "workplaceId": "restaurant_zone",
-    "mapId": "town"
+    "workplaces": [
+      { "workplaceLabel": "レストラン", "mapId": "town" }
+    ]
   }
 }
 ```
 
 - **未雇用**: `employment`フィールドを省略
 - **雇用済み**: 上記のように職場情報を設定
+- **複数勤務先**: `workplaces`配列に複数の職場を追加可能
 
 ### workアクションの流れ
 

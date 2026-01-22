@@ -41,5 +41,9 @@ export function createCharacterFromConfig(
     position,
     direction: 'down',
     employment: config.employment,
+    // LLM行動決定用のプロファイル情報 (docs/llm-behavior-system.md:144-150)
+    personality: config.personality,
+    tendencies: config.tendencies,
+    customPrompt: config.customPrompt,
   }
 }

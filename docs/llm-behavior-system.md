@@ -50,7 +50,7 @@ LLMが状況に応じて調整
 
 ```typescript
 interface ScheduleEntry {
-  time: string           // "09:00" (HH:MM形式)
+  hour: number           // 9 (時)
   activity: string       // "仕事", "昼食", "自由時間"
   location?: string      // 場所（任意）
   note?: string          // 備考
@@ -60,6 +60,7 @@ interface DailySchedule {
   characterId: string    // キャラクターID
   day: number            // ワールド日数 (WorldTime.day)
   entries: ScheduleEntry[]
+  generatedAt: string    // 生成日時
 }
 ```
 
@@ -70,16 +71,17 @@ interface DailySchedule {
   "characterId": "kanon",
   "day": 1,
   "entries": [
-    { "time": "07:00", "activity": "起床" },
-    { "time": "07:30", "activity": "朝食" },
-    { "time": "09:00", "activity": "仕事", "location": "レストラン" },
-    { "time": "12:00", "activity": "昼食" },
-    { "time": "13:00", "activity": "仕事", "location": "レストラン" },
-    { "time": "18:00", "activity": "退勤" },
-    { "time": "19:00", "activity": "夕食" },
-    { "time": "20:00", "activity": "自由時間" },
-    { "time": "23:00", "activity": "就寝" }
-  ]
+    { "hour": 7, "activity": "起床" },
+    { "hour": 8, "activity": "朝食" },
+    { "hour": 9, "activity": "仕事", "location": "レストラン" },
+    { "hour": 12, "activity": "昼食" },
+    { "hour": 13, "activity": "仕事", "location": "レストラン" },
+    { "hour": 18, "activity": "退勤" },
+    { "hour": 19, "activity": "夕食" },
+    { "hour": 20, "activity": "自由時間" },
+    { "hour": 23, "activity": "就寝" }
+  ],
+  "generatedAt": "2024-01-01"
 }
 ```
 
