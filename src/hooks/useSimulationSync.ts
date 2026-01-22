@@ -74,17 +74,19 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
 
   const setCurrentMap = useWorldStore((s) => s.setCurrentMap)
   const setTime = useWorldStore((s) => s.setTime)
+  const setServerCharacters = useWorldStore((s) => s.setServerCharacters)
 
   const updateNPC = useNPCStore((s) => s.updateNPC)
 
   // Sync state from server to Zustand stores
+  // Note: Zustand store actions are stable references, so they don't need to be in the dependency array
   const syncStateToStores = useCallback((worldState: SerializedWorldState) => {
     // Update world state
     setCurrentMap(worldState.currentMapId)
     setTime(worldState.time)
 
     // Update characters
-    const serverCharacterIds = Object.keys(worldState.characters)
+    const characterIds = Object.keys(worldState.characters)
     for (const [id, simChar] of Object.entries(worldState.characters)) {
       const existingChar = getCharacter(id)
 
@@ -110,8 +112,8 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
 
     // Set active character if not already set (first character from server)
     const currentActiveId = useCharacterStore.getState().activeCharacterId
-    if (!currentActiveId && serverCharacterIds.length > 0) {
-      setActiveCharacter(serverCharacterIds[0])
+    if (!currentActiveId && characterIds.length > 0) {
+      setActiveCharacter(characterIds[0])
     }
 
     // Sync NPC state (direction and conversation state)
@@ -122,23 +124,17 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
       })
     }
 
+    // Sync server characters to world store for global access
+    setServerCharacters(worldState.characters)
+
     setState((prev) => ({
       ...prev,
       lastTick: worldState.tick,
       serverCharacters: worldState.characters,
       serverNPCs: worldState.npcs,
     }))
-  }, [
-    addCharacter,
-    getCharacter,
-    setActiveCharacter,
-    setCurrentMap,
-    setTime,
-    updateCharacter,
-    updateDirection,
-    updateNPC,
-    updatePosition,
-  ])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Handle SSE message
   const handleMessage = useCallback((event: MessageEvent) => {

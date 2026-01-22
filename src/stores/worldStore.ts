@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { WorldTime, TransitionState } from '@/types'
+import type { SimCharacter } from '@/server/simulation/types'
 
 // Initial state defaults (will be overridden when config loads in PixiAppSync)
 const INITIAL_MAP_ID = 'town'
@@ -11,6 +12,7 @@ interface WorldStore {
   isPaused: boolean
   transition: TransitionState
   mapsLoaded: boolean
+  serverCharacters: Record<string, SimCharacter>
 
   setCurrentMap: (mapId: string) => void
   setTime: (time: WorldTime) => void
@@ -20,6 +22,7 @@ interface WorldStore {
   updateTransitionProgress: (progress: number) => void
   endTransition: () => void
   setMapsLoaded: (loaded: boolean) => void
+  setServerCharacters: (characters: Record<string, SimCharacter>) => void
 }
 
 export const useWorldStore = create<WorldStore>((set, get) => ({
@@ -33,9 +36,11 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     progress: 0,
   },
   mapsLoaded: false,
+  serverCharacters: {},
 
   setCurrentMap: (mapId) => set({ currentMapId: mapId }),
   setMapsLoaded: (loaded) => set({ mapsLoaded: loaded }),
+  setServerCharacters: (characters) => set({ serverCharacters: characters }),
 
   setTime: (time) => set({ time }),
 

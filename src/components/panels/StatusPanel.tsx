@@ -4,9 +4,35 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useWorldStore, useCharacterStore } from '@/stores'
 import { getMaps } from '@/data/maps'
+import type { ActionId } from '@/types/action'
 
-function formatTime(hour: number, minute: number): string {
-  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+// アクションIDから日本語ラベルへのマッピング
+const ACTION_LABELS: Record<ActionId, string> = {
+  eat_home: '自宅で食事中',
+  eat_restaurant: 'レストランで食事中',
+  sleep: '睡眠中',
+  toilet: 'トイレ中',
+  bathe_home: '入浴中',
+  bathe_hotspring: '温泉に入浴中',
+  rest: '休憩中',
+  talk: '会話中',
+  work: '仕事中',
+  thinking: '考え中',
+}
+
+function formatTime(hour: number, minute: number, second?: number): string {
+  const hh = hour.toString().padStart(2, '0')
+  const mm = minute.toString().padStart(2, '0')
+  if (second === undefined) {
+    return `${hh}:${mm}`
+  }
+  const ss = second.toString().padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
+}
+
+function formatEndTime(targetEndTime: number): string {
+  const date = new Date(targetEndTime)
+  return formatTime(date.getHours(), date.getMinutes(), date.getSeconds())
 }
 
 interface StatBarProps {
@@ -19,7 +45,7 @@ function StatBar({ label, value }: StatBarProps): React.ReactNode {
     <div className="space-y-2">
       <div className="flex justify-between text-sm">
         <span>{label}</span>
-        <span>{value}%</span>
+        <span>{value.toFixed(2)}%</span>
       </div>
       <Progress value={value} className="h-2" />
     </div>
@@ -30,9 +56,12 @@ export function StatusPanel(): React.ReactNode {
   const time = useWorldStore((s) => s.time)
   const currentMapId = useWorldStore((s) => s.currentMapId)
   const mapsLoaded = useWorldStore((s) => s.mapsLoaded)
+  const serverCharacters = useWorldStore((s) => s.serverCharacters)
   const activeCharacter = useCharacterStore((s) => s.getActiveCharacter())
 
   const currentMap = mapsLoaded ? getMaps()[currentMapId] : null
+  const serverChar = activeCharacter ? serverCharacters[activeCharacter.id] : null
+  const currentAction = serverChar?.currentAction
 
   return (
     <div className="w-80 space-y-4">
@@ -112,15 +141,24 @@ export function StatusPanel(): React.ReactNode {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-lg">凡例</CardTitle>
+          <CardTitle className="text-lg">現在の行動</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground space-y-1">
-            <p>キャラクターは自動で行動します</p>
-            <p>赤ノード = 入口（マップ遷移）</p>
-            <p>緑ノード = スポーン地点</p>
-            <p>青ノード = 通路</p>
-          </div>
+          {currentAction ? (
+            <div className="space-y-2">
+              <p className="font-medium text-lg">
+                {ACTION_LABELS[currentAction.actionId] || currentAction.actionId}
+              </p>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">終了時刻</span>
+                <span className="font-mono">
+                  {formatEndTime(currentAction.targetEndTime)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">行動なし</p>
+          )}
         </CardContent>
       </Card>
     </div>
