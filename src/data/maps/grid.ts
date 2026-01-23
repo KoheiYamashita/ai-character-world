@@ -12,7 +12,6 @@ export interface GridConfig {
 export interface NodeLabel {
   nodeId: string
   label: string
-  type?: 'spawn' | 'waypoint'
 }
 
 export interface EntranceConfig {
@@ -477,12 +476,11 @@ export function generateGridNodes(
     )
   }
 
-  // Apply labels and type overrides
-  for (const { nodeId, label, type } of labels) {
+  // Apply labels
+  for (const { nodeId, label } of labels) {
     const node = nodeMap.get(nodeId)
     if (node) {
       node.label = label
-      if (type) node.type = type
     }
   }
 

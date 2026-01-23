@@ -17,7 +17,7 @@
     }
   },
   "movement": {
-    "speed": 150,
+    "speed": 75,
     "entranceProbability": 0.1
   },
   "character": {

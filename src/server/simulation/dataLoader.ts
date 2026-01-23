@@ -189,11 +189,10 @@ function generateGridNodesServer(
   }
 
   // Apply labels
-  for (const { nodeId, label, type } of labels) {
+  for (const { nodeId, label } of labels) {
     const node = nodeMap.get(nodeId)
     if (node) {
       node.label = label
-      if (type) node.type = type
     }
   }
 
@@ -287,6 +286,12 @@ function buildMapFromConfigServer(mapConfig: MapConfigJson, config: WorldConfig)
     mapConfig.entrances as EntranceConfig[],
     obstacles
   )
+
+  // Mark spawn node type from spawnNodeId
+  const spawnNode = nodes.find((n) => n.id === mapConfig.spawnNodeId)
+  if (spawnNode) {
+    spawnNode.type = 'spawn'
+  }
 
   return {
     id: mapConfig.id,

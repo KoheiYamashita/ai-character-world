@@ -190,6 +190,12 @@ export function buildMapFromConfig(config: MapConfigJson): WorldMap {
     obstacles
   )
 
+  // Mark spawn node type from spawnNodeId
+  const spawnNode = nodes.find((n) => n.id === config.spawnNodeId)
+  if (spawnNode) {
+    spawnNode.type = 'spawn'
+  }
+
   return {
     id: config.id,
     name: config.name,

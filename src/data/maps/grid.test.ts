@@ -319,7 +319,7 @@ describe('grid', () => {
       }
       const labels = [
         { nodeId: 'test-1-1', label: 'Center' },
-        { nodeId: 'test-0-0', label: 'Start', type: 'spawn' as const },
+        { nodeId: 'test-0-0', label: 'Start' },
       ]
 
       const result = generateGridNodes(config, labels)
@@ -329,7 +329,6 @@ describe('grid', () => {
 
       const start = result.find((n) => n.id === 'test-0-0')
       expect(start?.label).toBe('Start')
-      expect(start?.type).toBe('spawn')
     })
 
     it('should add entrance nodes', () => {

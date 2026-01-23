@@ -225,7 +225,7 @@ describe('simulation types', () => {
   describe('DEFAULT_SIMULATION_CONFIG', () => {
     it('should have valid default values', () => {
       expect(DEFAULT_SIMULATION_CONFIG.tickRate).toBe(20)
-      expect(DEFAULT_SIMULATION_CONFIG.movementSpeed).toBe(150)
+      expect(DEFAULT_SIMULATION_CONFIG.movementSpeed).toBe(75)
       expect(DEFAULT_SIMULATION_CONFIG.idleTimeMin).toBeGreaterThan(0)
       expect(DEFAULT_SIMULATION_CONFIG.idleTimeMax).toBeGreaterThan(DEFAULT_SIMULATION_CONFIG.idleTimeMin)
       expect(DEFAULT_SIMULATION_CONFIG.entranceProbability).toBeGreaterThanOrEqual(0)

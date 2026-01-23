@@ -192,7 +192,7 @@ export interface SimulationConfig {
 
 export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   tickRate: 20,
-  movementSpeed: 150,
+  movementSpeed: 75,
   idleTimeMin: 500,
   idleTimeMax: 1500,
   entranceProbability: 0.1,

@@ -101,7 +101,6 @@ export interface GridConfigJson {
 export interface NodeLabelJson {
   nodeId: string
   label: string
-  type?: 'spawn' | 'waypoint'
 }
 
 export interface EntranceConfigJson {

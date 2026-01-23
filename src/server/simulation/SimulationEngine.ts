@@ -57,9 +57,6 @@ export class SimulationEngine {
   private static readonly INTERRUPT_THRESHOLD = 10
   // System auto-move interval (every N actions)
   private static readonly SYSTEM_AUTO_MOVE_INTERVAL = 3
-  // SSE notification throttle (every N ticks instead of every tick)
-  private static readonly NOTIFICATION_THROTTLE_TICKS = 5
-  private notificationTickCounter = 0
   // Status type → forced action mapping (Step 14)
   private static readonly STATUS_INTERRUPT_ACTIONS: Record<string, string> = {
     bladder: 'toilet',
@@ -278,12 +275,7 @@ export class SimulationEngine {
 
     // Skip simulation updates if paused (but time still syncs)
     if (this.worldState.isPaused()) {
-      // Still notify subscribers so UI updates time (throttled)
-      this.notificationTickCounter++
-      if (this.notificationTickCounter >= SimulationEngine.NOTIFICATION_THROTTLE_TICKS) {
-        this.notificationTickCounter = 0
-        this.notifySubscribers()
-      }
+      this.notifySubscribers()
       return
     }
 
@@ -339,12 +331,8 @@ export class SimulationEngine {
       this.lastSaveTime = now
     }
 
-    // Notify subscribers (throttled to reduce SSE traffic)
-    this.notificationTickCounter++
-    if (this.notificationTickCounter >= SimulationEngine.NOTIFICATION_THROTTLE_TICKS) {
-      this.notificationTickCounter = 0
-      this.notifySubscribers()
-    }
+    // Notify subscribers
+    this.notifySubscribers()
   }
 
   // Update formatter cache when timezone changes
