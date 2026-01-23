@@ -8,242 +8,324 @@
 - エージェントの行動履歴・経験の記録と記憶の形成
 - エージェント同士やNPCとのインタラクションを通じた経験の蓄積
 
-### 技術的実現
-- 2Dマップ上でキャラクターがノードに沿って移動するシミュレーション基盤
-- サーバーサイドでのシミュレーション実行とSSEによるクライアント同期
-
 ## 技術スタック
-- Next.js 15 (App Router) + TypeScript
+- Next.js 15 (App Router) + TypeScript + React 19
 - PixiJS 8 (直接API使用、@pixi/react不使用)
 - Zustand 5 (状態管理)
 - shadcn/ui + Tailwind CSS 4
+- AI SDK (Anthropic / OpenAI / Google) - LLM行動決定
+- better-sqlite3 (永続化)
+- Vitest (テスト)
 
-## アーキテクチャ
+## アーキテクチャ概要
 
-### ノードベースのパス探索
-- マップはグリッド状のノード（12x9グリッド、障害物内は除外）で構成
-- ノード間は8方向（上下左右+斜め）で接続
-- BFSで最短経路を計算
-- 障害物領域内のノードは生成時にスキップ
-
-### 座標系
-
-グリッドはキャンバスの四辺にマージンを持つ設計。row/col は**ノード位置**を指す。
-
-- `row: 0, col: 0` = 最初のノード位置（マージン分内側、y=60px）
-- キャンバス端に到達するには `row: -1` や `col: -1` を使用
-- 計算式: `pixel = spacing * (index + 1)`
-
+### 全体構成
 ```
-y=0   ┌─────────────────────────────┐ ← row: -1
-      │   マージン                   │
-y=60  ├─────────────────────────────┤ ← row: 0 (最初のノード)
-      │   ノード 0〜8                │
-y=540 ├─────────────────────────────┤ ← row: 8 (最後のノード)
-      │   マージン                   │
-y=600 └─────────────────────────────┘ ← row: 9
+[ブラウザ]                    [Next.js サーバー]
+PixiAppSync.tsx ←── SSE ───── simulation-stream/route.ts
+  ↑ Zustand                         ↑
+StatusPanel.tsx              SimulationEngine (20Hz tick)
+                               ├── WorldState (状態管理)
+                               ├── CharacterSimulator (移動)
+                               ├── ActionExecutor (行動実行)
+                               └── LLMBehaviorDecider (AI意思決定)
+                                         ↓
+                                    SqliteStore (永続化)
 ```
 
-障害物・ゾーンも同じ座標系:
-- `row: 0` から始めると最初のノード位置から描画
-- キャンバス端まで広げるには `row: -1` を使用
-
-### 障害物システム
-- 各マップに`obstacles`配列で定義（タイルベース座標: `row`, `col`, `tileWidth`, `tileHeight`）
-- `mapLoader.ts`がタイル座標→ピクセル座標に変換
-- 2種類の障害物タイプ: `building`（デフォルト）と `zone`
-
-#### Building型（通過不可オブジェクト）
-- 家具、カウンターなど物理的な障害物
-- 内部ノードは生成されず、キャラクターは通過不可
-- 描画: 黄色枠線 + 内部にラベル表示
-- 最小サイズ: 2x2タイル
-
-#### Zone型（部屋エリア）
-- 寝室、キッチンなど壁で囲まれた空間
-- 内部にノードが生成され、キャラクターは移動可能
-- `wallSides`: 壁のある辺（`top`, `bottom`, `left`, `right`の配列）
-- `door`: 扉の位置（壁があっても通過可能な開口部）
-  - `side`: 扉がある壁の辺
-  - `start`: 壁終端位置（0-indexed、壁の最初のノード=0）
-  - `end`: 壁終端位置
-  - 開口部は`start < offset < end`の範囲（両端は壁）
-- 描画: グレー実線で壁、扉の位置は開口部
-- 最小サイズ: 4x4タイル
-- 壁上のノードは生成されない（扉位置を除く）
-- 壁を横切る斜め接続は自動的に切断（扉の位置を除く）
-
-```json
-// Zone型の例: start=2, end=4 → offset 0,1,2は壁、offset 3が開口部、offset 4以降は壁
-{
-  "row": 0, "col": 0, "tileWidth": 4, "tileHeight": 4,
-  "label": "寝室",
-  "type": "zone",
-  "wallSides": ["top", "left", "bottom", "right"],
-  "door": { "side": "right", "start": 2, "end": 4 }
-}
-```
-
-- バリデーション:
-  - 必須フィールドチェック（row, col, tileWidth, tileHeight）
-  - タイプ別最小サイズチェック（building: 2x2、zone: 4x4）
-  - ラベル-障害物衝突チェック（building型のみ）
-  - zone: wallSidesとdoorの整合性チェック
-
-### 入口システム
-- 各マップに`entrances`配列で定義（タイルベース座標: `row`, `col`）
-- グリッド範囲外の値も許容（マップ端に配置する場合: row=-1, col=12等）
-- `connectedNodeIds`で接続するグリッドノードを指定
-
-### 経路表示
-- 移動開始時に目的地までのルートを白線で描画
-- 移動完了時に自動で消去
-- `pathLineRef`で管理、`drawPathLine`/`clearPathLine`で操作
-
-### ノードタイプ
-- `waypoint` - 通常の移動可能ポイント（青）
-- `spawn` - スポーン地点（緑）
-- `entrance` - マップ遷移ポイント（赤）
-
-### マップ遷移
-- entranceノードに到達 → フェードアウト → 別マップのentranceに出現 → フェードイン
-- `leadsTo: { mapId, nodeId }` で遷移先を定義
-- フェードアニメーションは`setInterval`で実装、`fadeOutIntervalRef`/`fadeInIntervalRef`で管理
-- unmount時や新規遷移開始時に`clearTransitionIntervals()`でクリーンアップ
-
-### 状態管理 (Zustand)
-- `worldStore` - 現在マップ、時間、遷移状態
-- `characterStore` - キャラクター情報（位置、空腹、所持金）
-- `npcStore` - NPC情報
-
-### スプライトシステム
-- 行ベースのスプライトシート（3列×4行、各方向3フレーム）
-- 行構成: Row0=下、Row1=左、Row2=右、Row3=上
-- アニメーション: [0,1,2,1]ループ、停止時はフレーム1
-- キャラクター設定は`public/data/characters.json`で管理（正本）
-- `src/data/characters/index.ts`はZustand初期状態用の同期フォールバック
-- PixiJS `AnimatedSprite`で描画、方向変更時にテクスチャ切替
+### データフロー
+1. SimulationEngine が20Hzでtick実行
+2. キャラクターの移動・行動・ステータス変化を計算
+3. SSEで全クライアントにブロードキャスト
+4. クライアント側でPixiJSが60fpsで補間描画
 
 ## ディレクトリ構成
 ```
 src/
-├── app/                    # Next.js App Router
+├── app/                           # Next.js App Router
+│   ├── page.tsx                  # メインページ
+│   ├── preview/page.tsx          # マッププレビュー
+│   ├── log-viewer/page.tsx       # ログビューア
+│   └── api/
+│       ├── simulation/route.ts         # シミュレーション制御 (GET/POST)
+│       ├── simulation-stream/route.ts  # SSEストリーム
+│       └── db/route.ts                 # DB操作エンドポイント
+│
 ├── components/
-│   ├── world/             # PixiJS関連
-│   │   ├── WorldCanvas.tsx # dynamic importラッパー
-│   │   └── PixiAppSync.tsx # SSE同期・描画（サーバーモード）
-│   ├── panels/            # UIパネル
-│   └── ui/                # shadcn/ui
-├── stores/                # Zustand stores
-├── data/
-│   ├── maps/              # マップ定義（grid.tsで共通生成）
-│   └── characters/        # デフォルトキャラクター定義
-├── lib/                   # ユーティリティ
-│   ├── pathfinding.ts     # BFSパス探索
-│   ├── movement.ts        # 補間・方向計算
-│   ├── spritesheet.ts     # スプライトシート読み込み・テクスチャ生成
-│   ├── characterLoader.ts # JSON設定からキャラクター生成
-│   ├── mapLoader.ts       # マップJSON読み込み・障害物バリデーション
-│   └── worldConfigLoader.ts # ワールド設定JSON読み込み
-└── types/                 # 型定義
+│   ├── world/
+│   │   ├── WorldCanvas.tsx       # dynamic importラッパー
+│   │   ├── PixiAppSync.tsx       # PixiJS描画 + SSE同期
+│   │   └── MapPreview.tsx        # マッププレビュー描画
+│   ├── panels/
+│   │   └── StatusPanel.tsx       # ステータスUI
+│   └── ui/                       # shadcn/ui
+│
+├── hooks/
+│   └── useSimulationSync.ts      # SSE接続・状態同期
+│
+├── stores/                        # Zustand
+│   ├── worldStore.ts             # ワールド状態（時間、マップ、遷移）
+│   ├── characterStore.ts         # キャラクター状態
+│   └── npcStore.ts               # NPC状態
+│
+├── server/
+│   ├── simulation/
+│   │   ├── SimulationEngine.ts         # メインオーケストレーター
+│   │   ├── WorldState.ts              # ワールド状態管理
+│   │   ├── CharacterSimulator.ts      # 移動・ナビゲーション
+│   │   ├── characterState.ts          # ステータス減衰計算
+│   │   ├── dataLoader.ts              # サーバー用データ読み込み
+│   │   ├── ensureEngineInitialized.ts  # シングルトン初期化
+│   │   ├── types.ts                   # SimCharacter等サーバー型
+│   │   └── actions/
+│   │       ├── ActionExecutor.ts      # 行動ライフサイクル管理
+│   │       └── definitions.ts         # アクション定義マップ
+│   │
+│   ├── behavior/
+│   │   ├── BehaviorDecider.ts         # 抽象インターフェース
+│   │   └── LLMBehaviorDecider.ts      # LLM意思決定（2段階）
+│   │
+│   ├── persistence/
+│   │   ├── StateStore.ts              # 抽象ストアIF
+│   │   ├── SqliteStore.ts             # SQLite実装
+│   │   └── MemoryStore.ts             # インメモリ（テスト用）
+│   │
+│   └── llm/
+│       ├── client.ts                  # LLMモデル生成
+│       └── errorHandler.ts            # エラーハンドリング・リトライ
+│
+├── data/maps/
+│   ├── grid.ts                   # ノード生成（正本）
+│   └── index.ts                  # マップローダー
+│
+├── lib/                           # ユーティリティ
+│   ├── pathfinding.ts            # BFSパス探索
+│   ├── movement.ts               # 補間・方向計算
+│   ├── spritesheet.ts            # スプライトシート処理
+│   ├── characterLoader.ts        # キャラクターJSON読み込み
+│   ├── mapLoader.ts              # マップ読み込み・バリデーション
+│   ├── npcLoader.ts              # NPC読み込み
+│   ├── worldConfigLoader.ts      # ワールド設定読み込み
+│   ├── pixiRenderers.ts          # 描画関数群
+│   ├── facilityUtils.ts          # 施設検索
+│   ├── facilityMapping.ts        # 施設タグ↔アクション対応
+│   ├── crossMapNavigation.ts     # マップ間経路探索
+│   ├── gridUtils.ts              # グリッド座標ヘルパー
+│   ├── obstacleUtils.ts          # 障害物判定
+│   ├── statusUtils.ts            # ステータス計算
+│   ├── timeUtils.ts              # 時間フォーマット
+│   └── errors.ts                 # カスタムエラー型
+│
+└── types/                         # 型定義
+    ├── character.ts              # Character, Direction, Stats
+    ├── world.ts                  # WorldTime, TransitionState
+    ├── map.ts                    # PathNode, Obstacle, FacilityInfo
+    ├── config.ts                 # WorldConfig
+    ├── action.ts                 # ActionId, ActionState, ActionEffects
+    ├── behavior.ts               # BehaviorContext, BehaviorDecision
+    ├── npc.ts                    # NPC
+    ├── job.ts                    # Employment, JobInfo
+    └── schedule.ts               # ScheduleEntry, DailySchedule
 
-public/
-├── assets/sprites/        # スプライト画像（288x384px、96x96フレーム）
-└── data/
-    ├── characters.json    # キャラクター設定
-    ├── maps.json          # マップ定義（障害物、entrance含む）
-    └── world-config.json  # ワールド設定（テーマ、タイミング等）
+public/data/
+├── world-config.json             # グローバル設定
+├── characters.json               # キャラクター定義（正本）
+└── maps.json                     # マップ定義（障害物、entrance、NPC、施設）
 
 scripts/
-├── generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
-└── validate-maps.mjs                # マップデータ検証スクリプト
+├── generate-placeholder-sprite.mjs
+├── validate-maps.mjs
+├── test-schedule-crud.mjs
+└── test-llm.ts
 ```
 
-## 重要な設計判断
+## サーバーサイドシミュレーション
 
-### PixiJS直接API使用
-- @pixi/reactは不使用
-- ticker駆動でリアルタイム更新
-- Reactの再レンダリングを介さずパフォーマンス向上
-- stale closure対策: `activeCharacterRef`, `currentMapIdRef` でtickerコールバック内の最新値を参照
-- Graphics再利用: transition overlayは単一インスタンスを`clear()`して再描画
-- 経路ライン: 移動開始時に新規作成、到着時に`destroy()`で破棄（parent存在チェック必須）
+### SimulationEngine
+- 20Hzのtickループでシミュレーション実行
+- 初回SSE接続時にlazy初期化（シングルトン）
+- 30秒ごとにSQLiteへ状態永続化
+
+### Tickフロー
+1. `CharacterSimulator.tick()` - 移動・パス追従・補間
+2. `ActionExecutor.tick()` - アクション進行・ステータス効果適用・完了判定
+3. 行動決定トリガー - ナビゲーション完了またはアクション完了時
+4. SSEブロードキャスト - 全接続クライアントへ状態送信
+
+### SimCharacter（サーバー側キャラクター状態）
+Character型を拡張:
+- `navigation`: 移動状態（isMoving, path, progress, startPosition, targetPosition）
+- `crossMapNavigation`: マップ間経路状態
+- `currentAction`: 実行中アクション
+- `pendingAction`: 移動後に実行予定のアクション
+- `displayEmoji`: 頭上表示絵文字
+
+## アクションシステム
+
+### アクション一覧
+| ID | 種別 | デフォルト時間 | 効果 |
+|---|---|---|---|
+| eat | 可変長 | 30分 | satiety +1.67/分 |
+| sleep | 可変長 | 480分 | energy +0.208/分 |
+| bathe | 可変長 | 30分 | hygiene +3.33/分 |
+| rest | 可変長 | 30分 | energy +0.5/分 |
+| work | 可変長 | 60分 | energy -0.33/分, 時給加算 |
+| toilet | 固定長 | 3-15分 | bladder +20/分 |
+| talk | 固定長 | 5分 | mood +20 |
+
+### ライフサイクル
+1. LLMまたはステータス割り込みがアクション決定
+2. 必要な施設へナビゲーション（facilityTags要件）
+3. アクション開始（targetEndTime設定）
+4. perMinute効果を毎tick適用（可変長）/ 完了時に一括適用（固定長）
+5. 完了 → 次の行動決定トリガー
+
+### ステータス割り込み
+ステータスが10%未満になると強制アクション発動:
+- bladder < 10% → toilet
+- satiety < 10% → eat
+- energy < 10% → sleep
+- hygiene < 10% → bathe
+
+## LLM行動決定
+
+### 2段階決定プロセス
+**Stage 1: アクション選択**
+- 入力: 現在ステータス、スケジュール、行動履歴、周辺施設・NPC、性格
+- 出力: action, target, reason, durationMinutes, scheduleUpdate
+
+**Stage 2: 詳細選択**（複数候補がある場合）
+- どのレストランで食べるか、どの寝室で寝るか等を選択
+
+### 環境変数
+```
+LLM_MODEL=anthropic/claude-sonnet-4    # or openai/gpt-4o-mini, google/gemini-2.0
+LLM_API_KEY=sk-...
+LLM_BASE_URL=http://localhost:5001     # 省略可
+```
+
+## マップシステム
 
 ### グリッドノード
-- 自由な移動感を出すため高密度のノードを配置
-- `src/data/maps/grid.ts` で共通生成（**ノード生成の正本**）
-- 生成時にスキップされるノード:
-  - Building領域内のノード
-  - Zone壁上のノード（扉位置を除く）
-- Zone領域内の移動可能ノードは生成される
-- 壁を横切る斜め接続は自動フィルタリング
-- 描画と探索で同じノードリストを使用（`grid.ts`が正本、`PixiAppSync.tsx`は追加フィルタなし）
-- キャッシュ管理: `mapLoader.ts`が一元管理、`clearMapCache()`でHMR時にリセット
-- デフォルト値: `getGridDefaults()`で一元管理（world-config.jsonから取得、未ロード時はフォールバック）
+- `src/data/maps/grid.ts` が正本（ノード生成の唯一のソース）
+- デフォルト12x9グリッド（world-config.jsonで設定可能）
+- ノードID: `{prefix}-{row}-{col}`
+- 8方向接続（上下左右+斜め）
+- BFSで最短経路計算（`findPathAvoidingNodes()`でNPCノード回避）
 
-### キャラクター移動
-- ランダム自動移動
-- 10%の確率でentranceへ、90%はマップ内を探索
-- 位置更新の最適化: スプライトは毎フレーム直接更新、storeへの反映はノード到達時のみ
-- `positionRef`で移動中の位置を保持、60fpsのstore更新を回避
-- 移動完了時に最終方向をstoreに保存
+### 座標系
+```
+pixel = spacing * (index + 1)
+row/col: 0始まり = 最初のノード位置
+row/col: -1 = キャンバス端（マージン外）
+```
 
-### 後方互換性
-- 基本的に後方互換性は不要（開発初期段階のため）
-- 不使用コードは完全に削除する
-- どうしても気になる場合はユーザーに確認すること
+### 障害物
+- **Building型**: 通過不可、内部ノードなし、最小2x2
+- **Zone型**: 壁付き部屋、内部移動可能、壁上ノードなし（扉除く）、最小4x4
+
+### 施設（Facility）
+障害物に`facility`プロパティで定義:
+- `tags`: FacilityTag[] (bathroom, kitchen, bedroom, toilet, restaurant, workspace, hotspring, hotel, public)
+- `quality`, `cost`, `owner`, `job`
+- アクション実行の場所要件として使用
+
+### 入口・マップ遷移
+- `entrances`配列で定義、`leadsTo: { mapId, nodeId }`で遷移先指定
+- フェードアウト → マップ切替 → フェードイン
+
+### マップ間ナビゲーション
+- `crossMapNavigation.ts`で複数マップをまたぐ経路を計算
+- entrance経由でマップ間を移動
+
+### 現在のマップ
+home, town, cafe, office, convenience, park
+
+## キャラクターシステム
+
+### ステータス（0-100）
+money（上限なし）, satiety, energy, hygiene, mood, bladder
+
+### スプライト
+- 96x96フレーム、3列×4行スプライトシート
+- Row0=下、Row1=左、Row2=右、Row3=上
+- アニメーション: [0,1,2,1]ループ、停止時フレーム1
+
+### スケジュール
+- キャラクターごとの日次スケジュール（ScheduleEntry[]）
+- LLMが提案するスケジュール変更をDBに永続化
+- 行動決定時の参考コンテキストとして使用
+
+### 雇用
+- `employment`: { jobId, workplaces[] }
+- workアクション時に時給加算
+
+## 永続化（SQLite）
+
+### テーブル
+- `character_states`: キャラクター全状態
+- `world_time`: ワールド時間
+- `schedules`: 日次スケジュール
+- `action_history`: 行動履歴
+
+### 保存タイミング
+- 30秒ごとに自動保存
+- サーバー再起動時に前回状態を復元
+
+## クライアント描画
+
+### PixiJS直接API
+- @pixi/react不使用、直接APIで性能確保
+- ticker駆動60fps描画
+- stale closure対策: Refで最新値参照
+
+### SSE同期
+- `useSimulationSync`フックでEventSource接続
+- サーバーからの状態更新をZustandストアに反映
+- クライアント側でノード間位置を線形補間（スムーズ描画）
 
 ## コマンド
 ```bash
-npm run dev    # 開発サーバー (http://localhost:3000)
-npm run build  # プロダクションビルド
-npm run lint   # ESLint
+npm run dev           # 開発サーバー (http://localhost:3000)
+npm run build         # プロダクションビルド
+npm run lint          # ESLint
+npm run test          # Vitest (watchモード)
+npm run test:run      # Vitest (単発実行)
+npm run test:coverage # カバレッジレポート
 
-# プレースホルダースプライト生成
-node scripts/generate-placeholder-sprite.mjs
-
-# マップデータ検証
-node scripts/validate-maps.mjs
+# ユーティリティ
+node scripts/generate-placeholder-sprite.mjs  # プレースホルダースプライト生成
+node scripts/validate-maps.mjs                # マップデータ検証
 ```
 
 ## マッププレビュー
-
-マップ構造（ノード、障害物、ゾーン、NPC配置）を確認するためのプレビューモード。
-
-### URL
 ```
 /preview?map={mapId}
 ```
+シミュレーション接続なしでマップ構造（ノード、障害物、NPC配置）を確認可能。
+スクリーンショットは `docs/Screenshots/` に保存。
 
-### 例
-- `/preview?map=town` - 広場
-- `/preview?map=home` - 自宅
-- `/preview?map=cafe` - カフェ
+## 重要な設計判断
 
-### 確認方法
-agent-browserを使って各マップを確認可能。シミュレーション接続なし、キャラクターなしで、マップ構造とNPC配置のみを表示する。
+### 後方互換性
+- 開発初期段階のため後方互換性は不要
+- 不使用コードは完全に削除する
 
-### スクリーンショット
-各マップのスクリーンショットは `docs/Screenshots/` に保存。
+### データの正本
+- キャラクター設定: `public/data/characters.json`
+- マップ定義: `public/data/maps.json`
+- グリッドノード生成: `src/data/maps/grid.ts`
+- ワールド設定: `public/data/world-config.json`
 
 ## 実装プラン管理
 
-実装計画は `docs/implementation-plan.md` に記載されている。
+実装計画は `docs/implementation-plan.md` に記載。
 
 ### 実装済みマーク
-各タスクの実装が完了したら、タスク番号の前に `✅` マークを追加する。
-
 ```markdown
-# 実装前
-| 1-1 | `src/types/character.ts` に `energy` 追加 | ビルド通過 |
-
-# 実装後
+# タスク完了時
 | ✅ 1-1 | `src/types/character.ts` に `energy` 追加 | ビルド通過 |
-```
 
-Stepの全タスクが完了したら、Step見出しにも `✅` を追加する。
-
-```markdown
-# 全タスク完了後
+# Step全完了時
 ### ✅ Step 1: ステータス拡張（全層対応）
 ```
