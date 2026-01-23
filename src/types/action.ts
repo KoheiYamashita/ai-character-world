@@ -3,12 +3,10 @@ import type { FacilityTag } from './map'
 
 // アクションIDの型（循環依存を避けるため明示的に定義）
 export type ActionId =
-  | 'eat_home'
-  | 'eat_restaurant'
+  | 'eat'
   | 'sleep'
   | 'toilet'
-  | 'bathe_home'
-  | 'bathe_hotspring'
+  | 'bathe'
   | 'rest'
   | 'talk'
   | 'work'
@@ -39,10 +37,8 @@ export interface EffectPerMinute {
 
 // アクションの前提条件
 export interface ActionRequirements {
-  facilityTags?: FacilityTag[] // 必要な施設タグ（AND条件）
-  ownership?: 'self' | 'any' // 所有権
+  facilityTags?: FacilityTag[] // 必要な施設タグ（いずれかのタグを持つ施設が必要）
   minStats?: Partial<CharacterStats> // 最低ステータス
-  cost?: 'facility' | number // 施設料金 or 固定額
   nearNpc?: boolean // NPC近くにいる必要
   employment?: boolean // 雇用されている必要
 }
@@ -51,14 +47,11 @@ export interface ActionRequirements {
 export interface ActionEffects {
   stats?: Partial<CharacterStats>
   money?: number | 'hourlyWage'
-  qualityBonus?: boolean
 }
 
 // アクション定義
 // Note: duration と effects.stats は world-config.json の actions セクションから読み込む
 export interface ActionDefinition {
-  type: string // アクションの基本タイプ
-  duration?: number // 固定時間アクション用（ms）- 通常は world-config.json から取得
   requirements: ActionRequirements
   effects: ActionEffects // stats は world-config.json から取得するため空でも可
   emoji?: string // 頭上表示用絵文字

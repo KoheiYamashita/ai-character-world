@@ -62,7 +62,7 @@ export class ActionExecutor {
     const actionDef = ACTIONS[actionId]
     if (!actionDef) return null
 
-    const actionConfig = this.actionConfigs[actionDef.type]
+    const actionConfig = this.actionConfigs[actionId]
     if (!actionConfig) return null
 
     // 固定時間アクションには perMinute がないので null を返す
@@ -119,20 +119,15 @@ export class ActionExecutor {
 
     const character = this.worldState.getCharacter(characterId)!
     const actionDef = ACTIONS[actionId]!
-    const actionConfig = this.actionConfigs[actionDef.type]
+    const actionConfig = this.actionConfigs[actionId]
 
-    // コストの支払い
+    // コストの支払い（施設にcostが設定されていれば支払う）
     const facility = this.getCurrentFacility(characterId)
-    if (actionDef.requirements.cost === 'facility' && facility?.cost !== undefined) {
+    if (facility?.cost !== undefined && facility.cost > 0) {
       this.worldState.updateCharacter(characterId, {
         money: character.money - facility.cost,
       })
       console.log(`[ActionExecutor] ${character.name} paid ${facility.cost} for ${actionId}`)
-    } else if (typeof actionDef.requirements.cost === 'number') {
-      this.worldState.updateCharacter(characterId, {
-        money: character.money - actionDef.requirements.cost,
-      })
-      console.log(`[ActionExecutor] ${character.name} paid ${actionDef.requirements.cost} for ${actionId}`)
     }
 
     // 時間計算
@@ -276,7 +271,7 @@ export class ActionExecutor {
     }
 
     // world-config.json からアクション設定を取得
-    const actionConfig = this.actionConfigs[actionDef.type]
+    const actionConfig = this.actionConfigs[actionId]
 
     // 適用前ステータスをログ
     console.log(`[ActionExecutor] ${character.name} before ${actionId}:`, {
@@ -291,7 +286,7 @@ export class ActionExecutor {
     // 可変時間アクション: perMinute 効果は SimulationEngine.applyStatusDecay でリアルタイム適用済み
     // 固定時間アクション: 完了時に固定の効果を適用
     if (actionConfig?.fixed && actionConfig.effects) {
-      this.applyStatEffects(characterId, actionConfig.effects)
+      this.applyStatEffectsInternal(characterId, actionConfig.effects)
     }
 
     // 適用後ステータスをログ
@@ -388,16 +383,6 @@ export class ActionExecutor {
     }
   }
 
-  /**
-   * ステータス効果の適用（固定値）
-   */
-  private applyStatEffects(
-    characterId: string,
-    stats: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>
-  ): void {
-    this.applyStatEffectsInternal(characterId, stats)
-  }
-
   private clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value))
   }
@@ -464,55 +449,34 @@ export class ActionExecutor {
     const requirements = actionDef.requirements
 
     // Check facility tags at MAP level (not position level)
-    // Character can execute action if there's a facility with required tags anywhere on the map
+    // Character can execute action if there's an accessible facility with any required tag on the map
     if (requirements.facilityTags && requirements.facilityTags.length > 0) {
       const map = this.worldState.getMap(character.currentMapId)
       if (!map) {
         return { canExecute: false, reason: 'Map not found' }
       }
 
-      // Check if map has a facility with all required tags
-      const hasFacility = map.obstacles.some(obs => {
+      // Check if map has an accessible facility with any of the required tags
+      // Accessible = no owner (public) OR owned by this character, AND affordable
+      const hasAccessibleFacility = map.obstacles.some(obs => {
         if (!obs.facility) return false
-        return requirements.facilityTags!.every(tag => obs.facility!.tags.includes(tag))
+        const hasTag = requirements.facilityTags!.some(tag => obs.facility!.tags.includes(tag))
+        if (!hasTag) return false
+        // Owner check: if facility has owner, only owner can use
+        if (obs.facility.owner && obs.facility.owner !== characterId) return false
+        // Cost check: if facility has cost, character needs enough money
+        if (obs.facility.cost !== undefined && character.money < obs.facility.cost) return false
+        return true
       })
 
-      if (!hasFacility) {
-        return { canExecute: false, reason: `Map has no facility with tags: ${requirements.facilityTags.join(', ')}` }
-      }
-    }
-
-    // Check ownership (for actions like eat_home that require self-owned facility)
-    // Note: ownership check still uses current facility since it's about WHERE to execute
-    const facility = this.getCurrentFacility(characterId)
-    if (requirements.ownership === 'self') {
-      // For ownership check, we need to verify the map has a self-owned facility
-      const map = this.worldState.getMap(character.currentMapId)
-      if (map && requirements.facilityTags) {
-        const hasSelfOwnedFacility = map.obstacles.some(obs => {
-          if (!obs.facility) return false
-          const hasAllTags = requirements.facilityTags!.every(tag => obs.facility!.tags.includes(tag))
-          return hasAllTags && obs.facility.owner === characterId
-        })
-        if (!hasSelfOwnedFacility) {
-          return { canExecute: false, reason: `No self-owned facility with tags: ${requirements.facilityTags.join(', ')}` }
-        }
-      }
-    }
-
-    // Check cost
-    if (requirements.cost === 'facility' && facility?.cost !== undefined) {
-      if (character.money < facility.cost) {
-        return { canExecute: false, reason: `Not enough money: ${character.money} < ${facility.cost}` }
-      }
-    } else if (typeof requirements.cost === 'number') {
-      if (character.money < requirements.cost) {
-        return { canExecute: false, reason: `Not enough money: ${character.money} < ${requirements.cost}` }
+      if (!hasAccessibleFacility) {
+        return { canExecute: false, reason: `No accessible facility with tags: ${requirements.facilityTags.join(', ')}` }
       }
     }
 
     // Check employment requirement
     if (requirements.employment) {
+      const facility = this.getCurrentFacility(characterId)
       const employmentCheck = this.checkEmploymentRequirements(character, facility)
       if (!employmentCheck.canExecute) {
         return employmentCheck

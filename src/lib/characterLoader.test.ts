@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createCharacterFromConfig, loadCharacterConfigs } from './characterLoader'
+import { createCharacterFromConfig } from './characterLoader'
 import type { CharacterConfig } from '@/types'
 import * as worldConfigLoader from './worldConfigLoader'
 
@@ -26,7 +26,7 @@ describe('characterLoader', () => {
           {
             id: 'test-char',
             name: 'Test',
-            sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+            sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
             defaultStats: { money: 100, satiety: 50, energy: 50, hygiene: 50, mood: 50, bladder: 50 },
           },
         ],
@@ -81,15 +81,76 @@ describe('characterLoader', () => {
     })
   })
 
+  describe('cache behavior', () => {
+    it('should return cached result on second call without fetching again', async () => {
+      vi.spyOn(worldConfigLoader, 'isConfigLoaded').mockReturnValue(false)
+
+      const mockCharacters = {
+        characters: [{ id: 'cached-char', name: 'Cached' }],
+      }
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockCharacters),
+      })
+
+      // Use dynamic import to get a fresh module with empty cache
+      const { loadCharacterConfigs: loadFn, clearCharacterCache: clearFn } = await import('./characterLoader')
+
+      // First call - should fetch
+      const result1 = await loadFn()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(result1[0].id).toBe('cached-char')
+
+      // Second call - should use cache (no additional fetch)
+      const result2 = await loadFn()
+      expect(mockFetch).toHaveBeenCalledTimes(1) // still 1
+      expect(result2).toBe(result1) // same reference
+
+      // Clear cache and call again - should fetch
+      clearFn()
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ characters: [{ id: 'new-char', name: 'New' }] }),
+      })
+      const result3 = await loadFn()
+      expect(mockFetch).toHaveBeenCalledTimes(2) // now 2
+      expect(result3[0].id).toBe('new-char')
+    })
+  })
+
+  describe('clearCharacterCache', () => {
+    it('should clear cached configs', async () => {
+      vi.spyOn(worldConfigLoader, 'isConfigLoaded').mockReturnValue(false)
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ characters: [{ id: 'c1', name: 'C1' }] }),
+      })
+
+      const { loadCharacterConfigs: loadFn, clearCharacterCache: clearFn } = await import('./characterLoader')
+
+      await loadFn()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      // After clearing, next load should fetch again
+      clearFn()
+      await loadFn()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+  })
+
   describe('createCharacterFromConfig', () => {
     it('should create character from config', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Test Character',
         sprite: {
-          sheet: 'test.png',
-          frameWidth: 32,
-          frameHeight: 32,
+          sheetUrl: 'test.png',
+          frameWidth: 96,
+          frameHeight: 96,
+          cols: 3,
+          rows: 4,
+          rowMapping: { down: 0, left: 1, right: 2, up: 3 },
         },
         defaultStats: {
           money: 1000,
@@ -127,9 +188,12 @@ describe('characterLoader', () => {
         id: 'test-char',
         name: 'Test',
         sprite: {
-          sheet: 'custom-sprite.png',
+          sheetUrl: 'custom-sprite.png',
           frameWidth: 64,
           frameHeight: 64,
+          cols: 3,
+          rows: 4,
+          rowMapping: { down: 0, left: 1, right: 2, up: 3 },
         },
         defaultStats: {
           money: 0,
@@ -148,7 +212,7 @@ describe('characterLoader', () => {
         { x: 0, y: 0 }
       )
 
-      expect(character.sprite.sheet).toBe('custom-sprite.png')
+      expect(character.sprite.sheetUrl).toBe('custom-sprite.png')
       expect(character.sprite.frameWidth).toBe(64)
       expect(character.sprite.frameHeight).toBe(64)
     })
@@ -157,7 +221,7 @@ describe('characterLoader', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Worker',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         defaultStats: {
           money: 500,
           satiety: 50,
@@ -168,8 +232,7 @@ describe('characterLoader', () => {
         },
         employment: {
           jobId: 'barista',
-          facilityId: 'cafe-counter',
-          mapId: 'cafe',
+          workplaces: [{ workplaceLabel: 'カフェカウンター', mapId: 'cafe' }],
         },
       }
 
@@ -182,15 +245,15 @@ describe('characterLoader', () => {
 
       expect(character.employment).toBeDefined()
       expect(character.employment?.jobId).toBe('barista')
-      expect(character.employment?.facilityId).toBe('cafe-counter')
-      expect(character.employment?.mapId).toBe('cafe')
+      expect(character.employment?.workplaces[0].workplaceLabel).toBe('カフェカウンター')
+      expect(character.employment?.workplaces[0].mapId).toBe('cafe')
     })
 
     it('should handle config without employment', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Unemployed',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         defaultStats: {
           money: 100,
           satiety: 50,
@@ -219,7 +282,7 @@ describe('characterLoader', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Alice',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         defaultStats: {
           money: 1000,
           satiety: 50,
@@ -245,7 +308,7 @@ describe('characterLoader', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Alice',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         defaultStats: {
           money: 1000,
           satiety: 50,
@@ -276,7 +339,7 @@ describe('characterLoader', () => {
       const config: CharacterConfig = {
         id: 'test-char',
         name: 'Alice',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         defaultStats: {
           money: 1000,
           satiety: 50,

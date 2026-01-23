@@ -17,9 +17,12 @@ describe('npcLoader', () => {
         id: 'npc-1',
         name: 'Test NPC',
         sprite: {
-          sheet: 'npc.png',
-          frameWidth: 32,
-          frameHeight: 32,
+          sheetUrl: 'npc.png',
+          frameWidth: 96,
+          frameHeight: 96,
+          cols: 3,
+          rows: 4,
+          rowMapping: { down: 0, left: 1, right: 2, up: 3 },
         },
         spawnNodeId: 'node-0-0',
       }
@@ -39,16 +42,19 @@ describe('npcLoader', () => {
         id: 'npc-1',
         name: 'Test NPC',
         sprite: {
-          sheet: 'custom-npc.png',
+          sheetUrl: 'custom-npc.png',
           frameWidth: 48,
           frameHeight: 48,
+          cols: 3,
+          rows: 4,
+          rowMapping: { down: 0, left: 1, right: 2, up: 3 },
         },
         spawnNodeId: 'node-0-0',
       }
 
       const npc = createNPCFromConfig(config, 'map', { x: 0, y: 0 })
 
-      expect(npc.sprite?.sheet).toBe('custom-npc.png')
+      expect(npc.sprite?.sheetUrl).toBe('custom-npc.png')
       expect(npc.sprite?.frameWidth).toBe(48)
     })
   })
@@ -72,13 +78,13 @@ describe('npcLoader', () => {
         {
           id: 'npc-1',
           name: 'NPC 1',
-          sprite: { sheet: 'npc.png', frameWidth: 32, frameHeight: 32 },
+          sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
         },
         {
           id: 'npc-2',
           name: 'NPC 2',
-          sprite: { sheet: 'npc.png', frameWidth: 32, frameHeight: 32 },
+          sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-1-1',
         },
       ]
@@ -109,13 +115,13 @@ describe('npcLoader', () => {
         {
           id: 'npc-1',
           name: 'NPC 1',
-          sprite: { sheet: 'npc.png', frameWidth: 32, frameHeight: 32 },
+          sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
         },
         {
           id: 'npc-2',
           name: 'NPC 2',
-          sprite: { sheet: 'npc.png', frameWidth: 32, frameHeight: 32 },
+          sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'non-existent-node',
         },
       ]
@@ -134,7 +140,7 @@ describe('npcLoader', () => {
         {
           id: 'npc-1',
           name: 'NPC 1',
-          sprite: { sheet: 'npc.png', frameWidth: 32, frameHeight: 32 },
+          sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
         },
       ]

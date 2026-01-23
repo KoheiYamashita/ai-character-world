@@ -21,7 +21,7 @@ export async function GET() {
         'Content-Disposition': 'inline; filename="state.db"',
       },
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Failed to read database file' },
       { status: 500 }

@@ -181,16 +181,17 @@ interface FacilityInfo {
 アクション実行時、以下のルールで利用可能な施設を検索:
 
 1. **検索範囲**: 現在地から3マップ以内（entrance経由のホップ数でカウント）
-2. **マッチング**: `requirements.facilityTags`と照合（AND条件: すべてのタグが必要）
-3. **所有権**: `ownership: "self"`の場合、`facility.owner`がキャラクターIDと一致
-4. **フォールバック**: 該当施設がなければ自宅を使用
-5. **提示**: 料金・品質・移動距離をLLMに提示し、選択させる
+2. **マッチング**: `requirements.facilityTags`と照合（OR条件: いずれかのタグを持つ施設）
+3. **所有権**: `facility.owner`が設定されている場合、そのオーナーのみ使用可
+4. **料金**: `facility.cost`が設定されている場合、所持金チェック
+5. **フォールバック**: 該当施設がなければ自宅を使用
+6. **提示**: 料金・品質・移動距離をLLMに提示し、選択させる
 
 ### アクション実行条件
 
-- **実行可能条件**: 対応する施設タグを持つZoneに入ること
-  - 例: `bedroom`タグを持つZone内にいれば`sleep`アクション実行可能
-  - 例: `kitchen`タグを持つZone内にいれば`eat_home`アクション実行可能
+- **実行可能条件**: 対応する施設タグを持つ施設がマップ内に存在すること
+  - 例: `bedroom`タグを持つ施設がマップにあれば`sleep`アクション実行可能
+  - 例: `kitchen`または`restaurant`タグを持つ施設がマップにあれば`eat`アクション実行可能
 - **実行中の移動**: アクション実行中は移動不可（その場に留まる）
 - **実行中の表示**: 頭上に対応する絵文字を表示
 
@@ -316,15 +317,10 @@ interface SimCharacter {
 
 ```typescript
 interface ActionDefinition {
-  type: string
-  duration: number              // 所要時間(ms)
-
   // 前提条件
   requirements: {
-    facilityTags?: FacilityTag[]   // 必要な施設タグ（AND条件: すべて必要）
-    ownership?: "self" | "any"     // 所有権（self=自分の物件のみ）
+    facilityTags?: FacilityTag[]   // 必要な施設タグ（OR条件: いずれかを持つ施設が必要）
     minStats?: Partial<CharacterStats>
-    cost?: "facility" | number     // 施設料金 or 固定額
     nearNpc?: boolean              // NPC近くにいる必要
     employment?: boolean           // 雇用されている必要（workの場合）
   }
@@ -333,10 +329,14 @@ interface ActionDefinition {
   effects: {
     stats?: Partial<CharacterStats>
     money?: number | "hourlyWage"  // 固定額 or 時給計算
-    qualityBonus?: boolean         // 品質で効果量変動
   }
+
+  emoji?: string                   // 頭上表示用絵文字
 }
 ```
+
+注: `duration` と `effects.stats` は `world-config.json` の actions セクションから読み込む。
+所有権(`owner`)・料金(`cost`)・品質(`quality`)は施設側(`FacilityInfo`)のプロパティとして管理する。
 
 ### アクション設定の外部化
 
@@ -452,45 +452,33 @@ SimulationEngine.applyStatusDecay(elapsedMinutes)
 ### 登録例（definitions.ts）
 
 ```typescript
-const ACTIONS: Record<string, ActionDefinition> = {
-  eat_home: {
-    type: "eat",
+const ACTIONS: Record<ActionId, ActionDefinition> = {
+  eat: {
     // duration と effects.stats は world-config.json から取得
-    requirements: {
-      facilityTags: ["kitchen"],
-      ownership: "self",
-      cost: 300,  // 食材費
-    },
+    requirements: { facilityTags: ["kitchen", "restaurant"] },
     effects: {},
-    emoji: "🍳",
-  },
-
-  eat_restaurant: {
-    type: "eat",
-    requirements: {
-      facilityTags: ["restaurant"],
-      cost: "facility",
-    },
-    effects: {
-      qualityBonus: true,
-    },
     emoji: "🍽️",
   },
 
+  bathe: {
+    requirements: { facilityTags: ["bathroom", "hotspring"] },
+    effects: {},
+    emoji: "🛁",
+  },
+
+  sleep: {
+    requirements: { facilityTags: ["bedroom"] },
+    effects: {},
+    emoji: "💤",
+  },
+
   work: {
-    type: "work",
-    requirements: {
-      facilityTags: ["workspace"],
-      employment: true,
-    },
-    effects: {
-      money: "hourlyWage",
-    },
+    requirements: { facilityTags: ["workspace"], employment: true },
+    effects: { money: "hourlyWage" },
     emoji: "💼",
   },
 
   thinking: {
-    type: "thinking",
     // fixed: true, duration: 0 → 手動完了
     requirements: {},
     effects: {},

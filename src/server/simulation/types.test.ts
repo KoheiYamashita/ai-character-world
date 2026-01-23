@@ -97,7 +97,7 @@ describe('simulation types', () => {
       const char: Character = {
         id: 'test-char',
         name: 'Test Character',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         money: 1000,
         satiety: 80,
         energy: 70,
@@ -110,8 +110,7 @@ describe('simulation types', () => {
         direction: 'down',
         employment: {
           jobId: 'barista',
-          facilityId: 'cafe-counter',
-          mapId: 'cafe',
+          workplaces: [{ workplaceLabel: 'カフェカウンター', mapId: 'cafe' }],
         },
         personality: 'friendly',
         tendencies: ['social', 'curious'],
@@ -139,7 +138,7 @@ describe('simulation types', () => {
       const char: Character = {
         id: 'test-char',
         name: 'Test',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         money: 100,
         satiety: 50,
         energy: 50,
@@ -162,7 +161,7 @@ describe('simulation types', () => {
       const char: Character = {
         id: 'test-char',
         name: 'Test',
-        sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         money: 100,
         satiety: 50,
         energy: 50,
@@ -188,6 +187,7 @@ describe('simulation types', () => {
       const npc: NPC = {
         id: 'test-npc',
         name: 'Test NPC',
+        sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         mapId: 'test-map',
         currentNodeId: 'node-0-0',
         position: { x: 100, y: 200 },
@@ -208,6 +208,7 @@ describe('simulation types', () => {
       const npc: NPC = {
         id: 'test-npc',
         name: 'Test',
+        sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
         mapId: 'test',
         currentNodeId: 'node',
         position: { x: 100, y: 100 },
@@ -238,7 +239,7 @@ function createTestSimCharacter(id: string): SimCharacter {
   return {
     id,
     name: `Character ${id}`,
-    sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+    sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
     money: 1000,
     satiety: 80,
     energy: 70,

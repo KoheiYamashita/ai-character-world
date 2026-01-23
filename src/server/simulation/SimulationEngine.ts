@@ -16,7 +16,8 @@ import type { BehaviorDecider } from '../behavior/BehaviorDecider'
 import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
-import { getAbstractActionsForTags } from '@/lib/facilityMapping'
+import { getActionsForTags } from '@/lib/facilityMapping'
+import { getDirection } from '@/lib/movement'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 
@@ -727,7 +728,7 @@ export class SimulationEngine {
   }
 
   // Make behavior decision for a single character
-  private makeBehaviorDecision(character: SimCharacter, currentTime: WorldTime): void {
+  private makeBehaviorDecision(character: SimCharacter, _currentTime: WorldTime): void {
     this.pendingDecisions.add(character.id)
     this.actionExecutor.startAction(character.id, 'thinking')
 
@@ -779,6 +780,7 @@ export class SimulationEngine {
       if (success) {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         if (targetNpcId) {
+          this.faceEachOtherForTalk(character.id, targetNpcId)
           const npc = this.worldState.getNPC(targetNpcId)
           console.log(`[SimulationEngine] ${character.name} arrived and started action: ${actionId}${durationStr} with ${npc?.name ?? targetNpcId} (${reason})`)
         } else {
@@ -846,6 +848,7 @@ export class SimulationEngine {
       // Already adjacent - execute talk immediately
       const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId, undefined, reason)
       if (success) {
+        this.faceEachOtherForTalk(character.id, targetNpcId)
         console.log(`[SimulationEngine] ${character.name} started talk with ${npc.name} (${reason})`)
       } else {
         console.log(`[SimulationEngine] ${character.name} failed to start talk with ${npc.name}`)
@@ -886,6 +889,19 @@ export class SimulationEngine {
       console.log(`[SimulationEngine] ${character.name} failed to start navigation to NPC ${npc.name}`)
       this.triggerActionDecision(character)
     }
+  }
+
+  // Make character and NPC face each other when starting a talk action
+  private faceEachOtherForTalk(characterId: string, npcId: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    const npc = this.worldState.getNPC(npcId)
+    if (!character || !npc) return
+
+    const charToNpcDirection = getDirection(character.position, npc.position)
+    this.worldState.updateCharacterDirection(characterId, charToNpcDirection)
+
+    const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' } as const
+    this.worldState.updateNPCDirection(npcId, opposites[charToNpcDirection])
   }
 
   // Handle facility-based action: move to facility if not inside, then execute
@@ -1051,7 +1067,7 @@ export class SimulationEngine {
     for (const obstacle of map.obstacles) {
       if (!obstacle.facility) continue
 
-      const availableActions = getAbstractActionsForTags(obstacle.facility.tags)
+      const availableActions = getActionsForTags(obstacle.facility.tags)
       if (availableActions.length === 0) continue
 
       facilities.push({
@@ -1115,7 +1131,7 @@ export class SimulationEngine {
         if (!obstacle.facility) continue
 
         // Calculate available actions from facility tags
-        const availableActions = getAbstractActionsForTags(obstacle.facility.tags)
+        const availableActions = getActionsForTags(obstacle.facility.tags)
 
         facilities.push({
           id: obstacle.id,

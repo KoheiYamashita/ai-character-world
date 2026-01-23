@@ -539,7 +539,6 @@ describe('grid', () => {
 
       // Check that horizontal movement through door is allowed
       // The door node (if it exists) should connect to outside
-      const doorNode = result.find((n) => n.id === 'test-2-4')
       // Door node should exist (it's in the door opening, not on wall)
       // Actually, the wall is at col 4 (zone boundary), and nodes ON the wall
       // are skipped UNLESS they're in the door opening

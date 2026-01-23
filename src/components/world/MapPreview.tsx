@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
 import { loadMaps, getCachedMaps, getNPCConfigsForMap } from '@/lib/mapLoader'
 import { loadNPCsFromMapConfig } from '@/lib/npcLoader'
@@ -26,8 +26,6 @@ export default function MapPreview({ mapId }: MapPreviewProps): React.ReactNode 
   const [isReady, setIsReady] = useState(false)
   const [mapsLoaded, setMapsLoaded] = useState(false)
   const [config, setConfig] = useState<WorldConfig | null>(null)
-  const [currentMap, setCurrentMap] = useState<WorldMap | null>(null)
-  const [npcs, setNpcs] = useState<NPC[]>([])
 
   // Load world config
   useEffect(() => {
@@ -44,28 +42,21 @@ export default function MapPreview({ mapId }: MapPreviewProps): React.ReactNode 
     })
   }, [config])
 
-  // Get current map and NPCs
-  useEffect(() => {
-    if (!mapsLoaded) return
-
+  // Derive current map and NPCs from loaded data
+  const { currentMap, npcs } = useMemo((): { currentMap: WorldMap | null; npcs: NPC[] } => {
+    if (!mapsLoaded) return { currentMap: null, npcs: [] }
     try {
       const maps = getCachedMaps()
       const map = maps[mapId]
       if (map) {
-        setCurrentMap(map)
-
-        // Load NPCs for this map
         const npcConfigs = getNPCConfigsForMap(mapId)
-        if (npcConfigs.length > 0) {
-          const loadedNpcs = loadNPCsFromMapConfig(mapId, npcConfigs, map)
-          setNpcs(loadedNpcs)
-        } else {
-          setNpcs([])
-        }
+        const loadedNpcs = npcConfigs.length > 0 ? loadNPCsFromMapConfig(mapId, npcConfigs, map) : []
+        return { currentMap: map, npcs: loadedNpcs }
       }
     } catch {
       console.warn('Maps not yet available')
     }
+    return { currentMap: null, npcs: [] }
   }, [mapsLoaded, mapId])
 
   // Initialize PixiJS
@@ -175,7 +166,7 @@ export default function MapPreview({ mapId }: MapPreviewProps): React.ReactNode 
     title.x = 10
     title.y = 10
     app.stage.addChild(title)
-  }, [isReady, config, currentMap, npcs])
+  }, [isReady, config, currentMap, npcs, mapId])
 
   if (!currentMap) {
     return (

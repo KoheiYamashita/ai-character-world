@@ -8,7 +8,7 @@ function createTestCharacter(id: string, mapId: string = 'test-map'): SimCharact
   return {
     id,
     name: `Character ${id}`,
-    sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+    sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
     money: 1000,
     satiety: 80,
     energy: 70,
@@ -57,6 +57,7 @@ function createTestNPC(id: string, mapId: string): NPC {
   return {
     id,
     name: `NPC ${id}`,
+    sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
     mapId,
     currentNodeId: 'node-0-0',
     position: { x: 100, y: 100 },

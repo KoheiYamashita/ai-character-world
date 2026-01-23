@@ -9,7 +9,6 @@ import { llmGenerateObject } from '@/server/llm'
 import {
   FACILITY_TAG_TO_ACTION_ID,
   ACTION_TO_FACILITY_TAGS,
-  getActionIdFromFacilityTags,
 } from '@/lib/facilityMapping'
 
 // =============================================================================
@@ -180,11 +179,12 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   private buildFacilityDecision(
     facility: NearbyFacility,
     reason: string,
-    includeMapId: boolean = false
+    includeMapId: boolean = false,
+    preferredAction?: string
   ): BehaviorDecision {
     return {
       type: 'action',
-      actionId: this.getActionIdFromFacility(facility),
+      actionId: this.getActionIdFromFacility(facility, preferredAction),
       targetFacilityId: facility.id,
       targetMapId: includeMapId && facility.distance > 0 ? facility.mapId : undefined,
       reason,
@@ -291,7 +291,18 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   /**
    * 施設から具体的なアクションIDを取得
    */
-  private getActionIdFromFacility(facility: NearbyFacility): ActionId {
+  private getActionIdFromFacility(facility: NearbyFacility, preferredAction?: string): ActionId {
+    // preferredAction が指定されている場合、そのアクションに対応するタグを施設が持っていれば優先
+    if (preferredAction) {
+      const preferredTags = ACTION_TO_FACILITY_TAGS[preferredAction]
+      if (preferredTags) {
+        const hasMatchingTag = facility.tags.some(tag => preferredTags.includes(tag as FacilityTag))
+        if (hasMatchingTag) {
+          return preferredAction as ActionId
+        }
+      }
+    }
+
     for (const tag of facility.tags) {
       const actionId = FACILITY_TAG_TO_ACTION_ID[tag]
       if (actionId) {
@@ -326,7 +337,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     // 施設から BehaviorDecision を構築するヘルパー
     const buildFacilityAction = (facility: NearbyFacility): BehaviorDecision => ({
       type: 'action',
-      actionId: this.getActionIdFromFacility(facility),
+      actionId: this.getActionIdFromFacility(facility, action),
       targetFacilityId: facility.id,
       targetMapId: facility.distance > 0 ? facility.mapId : undefined,
       reason,
@@ -654,22 +665,8 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       return 'なし'
     }
 
-    // 具体的アクションを抽象アクションに変換
-    const abstractActions = new Set<string>()
-    for (const action of actions) {
-      // eat_home, eat_restaurant → eat
-      if (action.startsWith('eat_')) {
-        abstractActions.add('eat')
-      }
-      // bathe_home, bathe_hotspring → bathe
-      else if (action.startsWith('bathe_')) {
-        abstractActions.add('bathe')
-      }
-      // その他はそのまま
-      else {
-        abstractActions.add(action)
-      }
-    }
+    // アクションIDをそのまま使用（eat, bathe等は既に統一済み）
+    const abstractActions = new Set<string>(actions)
 
     // アクション→施設情報のマッピングを構築（現在マップの施設から）
     const actionFacilityMap = new Map<string, string[]>()
@@ -939,7 +936,8 @@ ${facilityList}
       return this.buildFacilityDecision(
         facility,
         `緊急: ${actionLabel}が必要（${facility.label}を選択）`,
-        true
+        true,
+        forcedAction
       )
     }
 
@@ -958,7 +956,7 @@ ${facilityList}
       'Interrupt facility selection'
     )
 
-    return this.buildFacilityDecision(facility, `緊急: ${reason}`, true)
+    return this.buildFacilityDecision(facility, `緊急: ${reason}`, true, forcedAction)
   }
 
   /**

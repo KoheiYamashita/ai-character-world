@@ -12,7 +12,7 @@ function createTestCharacter(
   return {
     id,
     name: `Character ${id}`,
-    sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+    sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
     money: 1000,
     satiety: 50,
     energy: 50,
@@ -104,9 +104,8 @@ describe('ActionExecutor', () => {
         perMinute: { energy: 0.5, mood: 0.1 },
       },
       toilet: {
-        fixed: true,
-        duration: 5,
-        effects: { bladder: 100 },
+        durationRange: { min: 3, max: 15, default: 5 },
+        perMinute: { bladder: 20 },
       },
       bathe: {
         durationRange: { min: 15, max: 60, default: 30 },
@@ -157,42 +156,42 @@ describe('ActionExecutor', () => {
     })
 
     it('should start action successfully', () => {
-      const result = executor.startAction('char-1', 'eat_home')
+      const result = executor.startAction('char-1', 'eat')
 
       expect(result).toBe(true)
       const char = worldState.getCharacter('char-1')
       expect(char?.currentAction).not.toBeNull()
-      expect(char?.currentAction?.actionId).toBe('eat_home')
+      expect(char?.currentAction?.actionId).toBe('eat')
     })
 
     it('should set display emoji', () => {
-      executor.startAction('char-1', 'eat_home')
+      executor.startAction('char-1', 'eat')
 
       const char = worldState.getCharacter('char-1')
-      expect(char?.displayEmoji).toBe('🍳')
+      expect(char?.displayEmoji).toBe('🍽️')
     })
 
     it('should fail when already executing action', () => {
-      executor.startAction('char-1', 'eat_home')
+      executor.startAction('char-1', 'eat')
       const result = executor.startAction('char-1', 'sleep')
 
       expect(result).toBe(false)
     })
 
     it('should fail for non-existent character', () => {
-      const result = executor.startAction('non-existent', 'eat_home')
+      const result = executor.startAction('non-existent', 'eat')
       expect(result).toBe(false)
     })
 
     it('should accept custom duration for variable actions', () => {
-      executor.startAction('char-1', 'eat_home', undefined, undefined, 45)
+      executor.startAction('char-1', 'eat', undefined, undefined, 45)
 
       const char = worldState.getCharacter('char-1')
       expect(char?.currentAction?.durationMinutes).toBe(45)
     })
 
     it('should clamp duration to range', () => {
-      executor.startAction('char-1', 'eat_home', undefined, undefined, 120)
+      executor.startAction('char-1', 'eat', undefined, undefined, 120)
 
       const char = worldState.getCharacter('char-1')
       expect(char?.currentAction?.durationMinutes).toBe(60) // max is 60
@@ -211,7 +210,7 @@ describe('ActionExecutor', () => {
         currentNodeId: 'test-2-2',
       }))
 
-      executor.startAction('char-1', 'eat_restaurant')
+      executor.startAction('char-1', 'eat')
 
       const char = worldState.getCharacter('char-1')
       expect(char?.money).toBe(500)
@@ -230,7 +229,7 @@ describe('ActionExecutor', () => {
     })
 
     it('should cancel active action', () => {
-      executor.startAction('char-1', 'eat_home')
+      executor.startAction('char-1', 'eat')
       executor.cancelAction('char-1')
 
       const char = worldState.getCharacter('char-1')
@@ -262,7 +261,7 @@ describe('ActionExecutor', () => {
     })
 
     it('should return true when action active', () => {
-      executor.startAction('char-1', 'eat_home')
+      executor.startAction('char-1', 'eat')
       expect(executor.isExecutingAction('char-1')).toBe(true)
     })
   })
@@ -314,7 +313,9 @@ describe('ActionExecutor', () => {
 
       const updatedChar = worldState.getCharacter('char-1')
       expect(updatedChar?.currentAction).toBeNull()
-      expect(updatedChar?.bladder).toBe(100) // Effect applied
+      // perMinute効果はSimulationEngine.applyStatusDecayで適用されるため、
+      // ActionExecutorのcompleteActionではbladderは変化しない
+      expect(updatedChar?.bladder).toBe(0)
     })
 
     it('should not complete thinking action automatically', () => {
@@ -357,7 +358,7 @@ describe('ActionExecutor', () => {
 
   describe('canExecuteAction', () => {
     it('should fail when character not found', () => {
-      const result = executor.canExecuteAction('non-existent', 'eat_home')
+      const result = executor.canExecuteAction('non-existent', 'eat')
       expect(result.canExecute).toBe(false)
       expect(result.reason).toContain('not found')
     })
@@ -377,7 +378,7 @@ describe('ActionExecutor', () => {
       worldState.addCharacter(createTestCharacter('char-1', {
         currentNodeId: 'test-2-2',
         currentAction: {
-          actionId: 'eat_home',
+          actionId: 'eat',
           startTime: Date.now(),
           targetEndTime: Date.now() + 60000,
         },
@@ -402,7 +403,7 @@ describe('ActionExecutor', () => {
         },
       }))
 
-      const result = executor.canExecuteAction('char-1', 'eat_home', {
+      const result = executor.canExecuteAction('char-1', 'eat', {
         ignoreCurrentAction: true,
       })
       expect(result.canExecute).toBe(true)
@@ -413,12 +414,12 @@ describe('ActionExecutor', () => {
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1'))
 
-      const result = executor.canExecuteAction('char-1', 'eat_home')
+      const result = executor.canExecuteAction('char-1', 'eat')
       expect(result.canExecute).toBe(false)
-      expect(result.reason).toContain('no facility')
+      expect(result.reason).toContain('No accessible facility')
     })
 
-    it('should fail when ownership requirement not met', () => {
+    it('should fail when facility is owned by someone else', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('kitchen', 0, 0, {
           tags: ['kitchen'],
@@ -430,12 +431,12 @@ describe('ActionExecutor', () => {
         currentNodeId: 'test-2-2',
       }))
 
-      const result = executor.canExecuteAction('char-1', 'eat_home')
+      const result = executor.canExecuteAction('char-1', 'eat')
       expect(result.canExecute).toBe(false)
-      expect(result.reason).toContain('self-owned')
+      expect(result.reason).toContain('No accessible facility')
     })
 
-    it('should fail when not enough money for cost', () => {
+    it('should fail when not enough money for facility cost', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('restaurant', 0, 0, {
           tags: ['restaurant'],
@@ -448,9 +449,9 @@ describe('ActionExecutor', () => {
         currentNodeId: 'test-2-2',
       }))
 
-      const result = executor.canExecuteAction('char-1', 'eat_restaurant')
+      const result = executor.canExecuteAction('char-1', 'eat')
       expect(result.canExecute).toBe(false)
-      expect(result.reason).toContain('Not enough money')
+      expect(result.reason).toContain('No accessible facility')
     })
   })
 
@@ -467,7 +468,7 @@ describe('ActionExecutor', () => {
 
       const actions = executor.getAvailableActions('char-1')
 
-      expect(actions).toContain('eat_home')
+      expect(actions).toContain('eat')
       expect(actions).toContain('sleep')
       expect(actions).not.toContain('thinking') // System action excluded
     })
@@ -488,7 +489,7 @@ describe('ActionExecutor', () => {
 
       const actions = executor.getAvailableActions('char-1')
 
-      expect(actions).toContain('eat_home')
+      expect(actions).toContain('eat')
     })
   })
 
@@ -720,7 +721,7 @@ describe('ActionExecutor', () => {
         currentNodeId: 'test-2-2',
       }))
 
-      executor.startAction('char-1', 'eat_home', undefined, undefined, 30)
+      executor.startAction('char-1', 'eat', undefined, undefined, 30)
 
       const perMinute = executor.getActivePerMinuteEffects('char-1')
 
@@ -729,7 +730,7 @@ describe('ActionExecutor', () => {
       expect(perMinute?.mood).toBe(0.5)
     })
 
-    it('should return null for fixed-time action', () => {
+    it('should return perMinute effects for toilet (variable-time action)', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
       ])
@@ -739,6 +740,23 @@ describe('ActionExecutor', () => {
       }))
 
       executor.startAction('char-1', 'toilet')
+
+      const perMinute = executor.getActivePerMinuteEffects('char-1')
+
+      expect(perMinute).not.toBeNull()
+      expect(perMinute?.bladder).toBe(20) // 本番同様 perMinute で bladder 回復
+    })
+
+    it('should return null for fixed-time action', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('park', 0, 0, { tags: ['public'] }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentNodeId: 'test-2-2',
+      }))
+
+      executor.startAction('char-1', 'rest')
 
       const perMinute = executor.getActivePerMinuteEffects('char-1')
 
@@ -769,7 +787,7 @@ describe('ActionExecutor', () => {
       }))
 
       // 30分の食事を開始
-      executor.startAction('char-1', 'eat_home', undefined, undefined, 30)
+      executor.startAction('char-1', 'eat', undefined, undefined, 30)
 
       const char = worldState.getCharacter('char-1')
       executor.tick(char!.currentAction!.targetEndTime + 1000)
@@ -782,22 +800,157 @@ describe('ActionExecutor', () => {
 
     it('should still apply fixed effects for fixed-time actions', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
+        createZoneWithFacility('park', 0, 0, { tags: ['public'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
         currentNodeId: 'test-2-2',
-        bladder: 0,
+        energy: 50,
+        mood: 50,
       }))
 
-      executor.startAction('char-1', 'toilet')
+      executor.startAction('char-1', 'rest')
 
       const char = worldState.getCharacter('char-1')
       executor.tick(char!.currentAction!.targetEndTime + 1000)
 
       const updatedChar = worldState.getCharacter('char-1')
       // 固定時間アクションの効果は完了時に適用される
-      expect(updatedChar?.bladder).toBe(100)
+      expect(updatedChar?.energy).toBe(60) // +10
+      expect(updatedChar?.mood).toBe(55) // +5
+    })
+  })
+
+  describe('getCurrentFacility', () => {
+    it('should return facility info when character is inside zone', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      // Character at test-2-2 → row=2, col=2 → inside zone (tileRow=0, tileWidth=4: row > 0 && row < 4)
+      worldState.addCharacter(createTestCharacter('char-1', { currentNodeId: 'test-2-2' }))
+
+      const facility = executor.getCurrentFacility('char-1')
+      expect(facility).not.toBeNull()
+      expect(facility?.tags).toContain('kitchen')
+    })
+
+    it('should return null when character does not exist', () => {
+      const facility = executor.getCurrentFacility('nonexistent')
+      expect(facility).toBeNull()
+    })
+
+    it('should return null when map does not exist', () => {
+      worldState.addCharacter(createTestCharacter('char-1', { currentMapId: 'unknown-map' }))
+      const facility = executor.getCurrentFacility('char-1')
+      expect(facility).toBeNull()
+    })
+  })
+
+  describe('getAvailableActions', () => {
+    it('should return actions available on the map', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1'))
+
+      const actions = executor.getAvailableActions('char-1')
+      expect(actions).toContain('toilet')
+      // thinking should NOT be included
+      expect(actions).not.toContain('thinking')
+    })
+
+    it('should respect ignoreCurrentAction for thinking character', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentAction: { actionId: 'thinking', startTime: Date.now(), targetEndTime: Date.now() + 1000 },
+      }))
+
+      // Should still return available actions (thinking is ignored for availability)
+      const actions = executor.getAvailableActions('char-1')
+      expect(actions).toContain('toilet')
+    })
+
+    it('should not return actions when character has non-thinking action', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentAction: { actionId: 'eat', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+      }))
+
+      const actions = executor.getAvailableActions('char-1')
+      // No actions available (busy with eat)
+      expect(actions).toHaveLength(0)
+    })
+  })
+
+  describe('employment check', () => {
+    it('should reject work action without employment', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('workspace-1', 0, 0, {
+          tags: ['workspace'],
+          job: { jobId: 'barista', title: 'バリスタ', hourlyWage: 1200, workHours: { start: 9, end: 17 } },
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1'))
+
+      const result = executor.canExecuteAction('char-1', 'work')
+      expect(result.canExecute).toBe(false)
+      expect(result.reason).toContain('employment')
+    })
+  })
+
+  describe('forceCompleteAction edge case', () => {
+    it('should do nothing when character has no action', () => {
+      const map = createTestMap('test-map')
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1'))
+
+      // Should not throw
+      executor.forceCompleteAction('char-1')
+
+      const char = worldState.getCharacter('char-1')
+      expect(char?.currentAction).toBeNull()
+    })
+  })
+
+  describe('completeAction with hourly wage', () => {
+    it('should pay hourly wage on work action completion', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('workspace-1', 0, 0, {
+          tags: ['workspace'],
+          job: { jobId: 'barista', title: 'バリスタ', hourlyWage: 1200, workHours: { start: 0, end: 24 } },
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      // Set time to be within work hours
+      worldState.setTime({ hour: 10, minute: 0, day: 1 })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentNodeId: 'test-2-2',
+        money: 500,
+        employment: { jobId: 'barista', workplaces: [{ workplaceLabel: 'ワークスペース', mapId: 'test-map' }] },
+      }))
+      executor.setActionConfigs({
+        work: { durationRange: { min: 60, max: 480, default: 120 }, perMinute: {} },
+      } as Record<string, ActionConfig>)
+
+      executor.startAction('char-1', 'work')
+
+      const char = worldState.getCharacter('char-1')!
+      // Fast forward to completion (2 hour work)
+      executor.tick(char.currentAction!.targetEndTime + 1000)
+
+      const updatedChar = worldState.getCharacter('char-1')!
+      // Should have earned money (2 hours * 1200 = 2400 approximately)
+      expect(updatedChar.money).toBeGreaterThan(500)
+      expect(updatedChar.currentAction).toBeNull()
     })
   })
 })

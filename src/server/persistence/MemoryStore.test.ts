@@ -8,7 +8,7 @@ function createTestCharacter(id: string): SimCharacter {
   return {
     id,
     name: `Character ${id}`,
-    sprite: { sheet: 'test.png', frameWidth: 32, frameHeight: 32 },
+    sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
     money: 1000,
     satiety: 80,
     energy: 70,
@@ -208,10 +208,9 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         entries: [
-          { hour: 8, activity: 'wake_up' },
-          { hour: 9, activity: 'work' },
+          { time: '08:00', activity: 'wake_up' },
+          { time: '09:00', activity: 'work' },
         ],
-        generatedAt: '2024-01-01',
       }
       await store.saveSchedule(schedule)
 
@@ -231,19 +230,16 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         entries: [],
-        generatedAt: '2024-01-01',
       })
       await store.saveSchedule({
         characterId: 'char-1',
         day: 2,
         entries: [],
-        generatedAt: '2024-01-01',
       })
       await store.saveSchedule({
         characterId: 'char-2',
         day: 1,
         entries: [],
-        generatedAt: '2024-01-01',
       })
 
       const result = await store.loadSchedulesForCharacter('char-1')
@@ -258,7 +254,6 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         entries: [],
-        generatedAt: '2024-01-01',
       })
       await store.deleteSchedule('char-1', 1)
 
@@ -271,13 +266,11 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         entries: [],
-        generatedAt: '2024-01-01',
       })
       await store.saveSchedule({
         characterId: 'char-1',
         day: 2,
         entries: [],
-        generatedAt: '2024-01-01',
       })
 
       await store.deleteAllSchedulesForCharacter('char-1')
@@ -293,14 +286,14 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         time: '08:00',
-        actionId: 'eat_home',
+        actionId: 'eat',
         durationMinutes: 30,
       })
 
       const history = await store.loadActionHistoryForDay('char-1', 1)
 
       expect(history).toHaveLength(1)
-      expect(history[0].actionId).toBe('eat_home')
+      expect(history[0].actionId).toBe('eat')
       expect(history[0].time).toBe('08:00')
     })
 
@@ -309,7 +302,7 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         time: '08:00',
-        actionId: 'eat_home',
+        actionId: 'eat',
       })
       await store.addActionHistory({
         characterId: 'char-1',
@@ -333,7 +326,7 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         time: '08:00',
-        actionId: 'eat_home',
+        actionId: 'eat',
       })
       await store.addActionHistory({
         characterId: 'char-1',
@@ -346,7 +339,7 @@ describe('MemoryStore', () => {
       const day2 = await store.loadActionHistoryForDay('char-1', 2)
 
       expect(day1).toHaveLength(1)
-      expect(day1[0].actionId).toBe('eat_home')
+      expect(day1[0].actionId).toBe('eat')
       expect(day2).toHaveLength(1)
       expect(day2[0].actionId).toBe('sleep')
     })
@@ -380,13 +373,12 @@ describe('MemoryStore', () => {
         characterId: 'char-1',
         day: 1,
         entries: [],
-        generatedAt: '2024-01-01',
       })
       await store.addActionHistory({
         characterId: 'char-1',
         day: 1,
         time: '08:00',
-        actionId: 'eat_home',
+        actionId: 'eat',
       })
 
       await store.clear()

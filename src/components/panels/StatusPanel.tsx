@@ -8,12 +8,10 @@ import type { ActionId } from '@/types/action'
 
 // アクションIDから日本語ラベルへのマッピング
 const ACTION_LABELS: Record<ActionId, string> = {
-  eat_home: '自宅で食事中',
-  eat_restaurant: 'レストランで食事中',
+  eat: '食事中',
   sleep: '睡眠中',
   toilet: 'トイレ中',
-  bathe_home: '入浴中',
-  bathe_hotspring: '温泉に入浴中',
+  bathe: '入浴中',
   rest: '休憩中',
   talk: '会話中',
   work: '仕事中',

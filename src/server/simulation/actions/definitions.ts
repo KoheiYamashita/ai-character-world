@@ -8,114 +8,51 @@ import type { ActionDefinition, ActionId } from '@/types/action'
  * ActionExecutor が world-config.json から時間と効果を取得し、適用する。
  */
 export const ACTIONS: Record<ActionId, ActionDefinition> = {
-  // 食事系
-  eat_home: {
-    type: 'eat',
-    requirements: {
-      facilityTags: ['kitchen'],
-      ownership: 'self',
-    },
+  eat: {
+    requirements: { facilityTags: ['kitchen', 'restaurant'] },
     effects: {},
-    emoji: '🍳',
-  },
-
-  eat_restaurant: {
-    type: 'eat',
-    requirements: {
-      facilityTags: ['restaurant'],
-      ownership: 'any',
-      cost: 'facility',
-    },
-    effects: {
-      qualityBonus: true,
-    },
     emoji: '🍽️',
   },
 
-  // 睡眠
   sleep: {
-    type: 'sleep',
-    requirements: {
-      facilityTags: ['bedroom'],
-      ownership: 'self',
-    },
+    requirements: { facilityTags: ['bedroom'] },
     effects: {},
     emoji: '💤',
   },
 
-  // トイレ
   toilet: {
-    type: 'toilet',
-    requirements: {
-      facilityTags: ['toilet'],
-      ownership: 'any',
-    },
+    requirements: { facilityTags: ['toilet'] },
     effects: {},
     emoji: '🚽',
   },
 
-  // 入浴系
-  bathe_home: {
-    type: 'bathe',
-    requirements: {
-      facilityTags: ['bathroom'],
-      ownership: 'self',
-    },
+  bathe: {
+    requirements: { facilityTags: ['bathroom', 'hotspring'] },
     effects: {},
     emoji: '🛁',
   },
 
-  bathe_hotspring: {
-    type: 'bathe',
-    requirements: {
-      facilityTags: ['hotspring'],
-      ownership: 'any',
-      cost: 'facility',
-    },
-    effects: {
-      qualityBonus: true,
-    },
-    emoji: '♨️',
-  },
-
-  // 休憩
   rest: {
-    type: 'rest',
-    requirements: {
-      facilityTags: ['public'],
-      ownership: 'any',
-    },
+    requirements: { facilityTags: ['public'] },
     effects: {},
     emoji: '☕',
   },
 
-  // 会話（固定時間アクション - world-config.json で fixed: true）
+  // 固定時間アクション - world-config.json で fixed: true
   talk: {
-    type: 'talk',
-    requirements: {
-      nearNpc: true,
-    },
+    requirements: { nearNpc: true },
     effects: {},
     emoji: '💬',
   },
 
-  // 仕事
   work: {
-    type: 'work',
-    requirements: {
-      facilityTags: ['workspace'],
-      employment: true,
-    },
-    effects: {
-      money: 'hourlyWage',
-    },
+    requirements: { facilityTags: ['workspace'], employment: true },
+    effects: { money: 'hourlyWage' },
     emoji: '💼',
   },
 
-  // 思考中（LLM行動決定用）
   // fixed: true, duration: 0 なので手動で completeAction() を呼ぶ必要がある
   thinking: {
-    type: 'thinking',
     requirements: {},
     effects: {},
     emoji: '🤔',

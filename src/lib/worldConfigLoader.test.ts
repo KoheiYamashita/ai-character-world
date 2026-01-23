@@ -111,22 +111,26 @@ describe('worldConfigLoader', () => {
         theme: {
           obstacle: {
             building: {
-              strokeColor: '#ff0000',
+              fill: '#330000',
+              alpha: 0.3,
+              stroke: '#ff0000',
               strokeWidth: 2,
               labelColor: '#ffffff',
             },
             zone: {
-              strokeColor: '#00ff00',
+              fill: '#003300',
+              alpha: 0.3,
+              stroke: '#00ff00',
               strokeWidth: 1,
               labelColor: '#000000',
             },
           },
         },
-      } as WorldConfig
+      } as unknown as WorldConfig
 
       const theme = getObstacleTheme(config, 'building')
 
-      expect(theme.strokeColor).toBe('#ff0000')
+      expect(theme.stroke).toBe('#ff0000')
     })
 
     it('should return zone theme from new format', () => {
@@ -134,27 +138,33 @@ describe('worldConfigLoader', () => {
         theme: {
           obstacle: {
             building: {
-              strokeColor: '#ff0000',
+              fill: '#330000',
+              alpha: 0.3,
+              stroke: '#ff0000',
               strokeWidth: 2,
               labelColor: '#ffffff',
             },
             zone: {
-              strokeColor: '#00ff00',
+              fill: '#003300',
+              alpha: 0.3,
+              stroke: '#00ff00',
               strokeWidth: 1,
               labelColor: '#000000',
             },
           },
         },
-      } as WorldConfig
+      } as unknown as WorldConfig
 
       const theme = getObstacleTheme(config, 'zone')
 
-      expect(theme.strokeColor).toBe('#00ff00')
+      expect(theme.stroke).toBe('#00ff00')
     })
 
     it('should return same theme for old format', () => {
       const oldTheme = {
-        strokeColor: '#888888',
+        fill: '#888888',
+        alpha: 0.3,
+        stroke: '#888888',
         strokeWidth: 2,
         labelColor: '#ffffff',
       }
@@ -162,7 +172,7 @@ describe('worldConfigLoader', () => {
         theme: {
           obstacle: oldTheme,
         },
-      } as WorldConfig
+      } as unknown as WorldConfig
 
       const buildingTheme = getObstacleTheme(config, 'building')
       const zoneTheme = getObstacleTheme(config, 'zone')

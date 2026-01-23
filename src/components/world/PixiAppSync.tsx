@@ -230,6 +230,7 @@ export default function PixiAppSync(): React.ReactNode {
     }
 
     loadSprite()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCharacter?.id, spriteSheetUrl])
 
   // Render map and character
@@ -578,6 +579,7 @@ export default function PixiAppSync(): React.ReactNode {
       clearPathLine()
       clearAllHeadIcons()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady, activeCharacter?.id, localMapsLoaded, clearPathLine, drawPathLine, clearAllHeadIcons])
 
   // Connection status overlay
