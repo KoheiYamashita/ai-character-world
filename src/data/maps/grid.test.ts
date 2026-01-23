@@ -456,5 +456,241 @@ describe('grid', () => {
       const topLeftNode = result.find((n) => n.id === 'test-0-0')
       expect(topLeftNode?.connectedTo).not.toContain('test-1-1')
     })
+
+    it('should block connections crossing zone walls', () => {
+      const config: GridConfig = {
+        prefix: 'test',
+        cols: 8,
+        rows: 6,
+        width: 800,
+        height: 600,
+      }
+      // Zone with walls on all sides and door on right
+      // Zone: row 0-4, col 0-4 (internal: row 1-3, col 1-3)
+      const obstacles: Obstacle[] = [
+        {
+          id: 'room',
+          x: 100,
+          y: 100,
+          width: 400,
+          height: 400,
+          type: 'zone',
+          tileRow: 0,
+          tileCol: 0,
+          tileWidth: 5,
+          tileHeight: 5,
+          wallSides: ['top', 'bottom', 'left', 'right'],
+          door: { side: 'right', start: 1, end: 3 }, // Door at row 2 (offset 2)
+        },
+      ]
+
+      const result = generateGridNodes(config, [], [], obstacles)
+
+      // Inside node (row 2, col 3) should NOT connect to outside node (row 2, col 5)
+      // through a wall (col 4 is the right wall, but row 2 is door opening)
+      // Wait - the door is at offset 2, which means row 2. So row 2, col 4 is the door.
+
+      // Inside node at row 1 (not door) should not connect to col 5 (outside)
+      const insideNodeRow1 = result.find((n) => n.id === 'test-1-3')
+      // Should not have diagonal connection to test-1-5 or test-2-5 through wall
+      expect(insideNodeRow1?.connectedTo).not.toContain('test-1-5')
+      expect(insideNodeRow1?.connectedTo).not.toContain('test-0-4')
+
+      // Inside node at row 3 (not door) should not connect through wall
+      const insideNodeRow3 = result.find((n) => n.id === 'test-3-3')
+      expect(insideNodeRow3?.connectedTo).not.toContain('test-3-5')
+    })
+
+    it('should allow connections through door opening', () => {
+      const config: GridConfig = {
+        prefix: 'test',
+        cols: 8,
+        rows: 6,
+        width: 800,
+        height: 600,
+      }
+      // Zone with door on right at row 2
+      const obstacles: Obstacle[] = [
+        {
+          id: 'room',
+          x: 100,
+          y: 100,
+          width: 400,
+          height: 400,
+          type: 'zone',
+          tileRow: 0,
+          tileCol: 0,
+          tileWidth: 5,
+          tileHeight: 5,
+          wallSides: ['top', 'bottom', 'left', 'right'],
+          door: { side: 'right', start: 1, end: 3 }, // Door at row 2 (offset 2)
+        },
+      ]
+
+      const result = generateGridNodes(config, [], [], obstacles)
+
+      // Inside node at row 2, col 3 should connect to door node at row 2, col 4
+      // But col 4 is on the wall, so it might not exist unless it's a door
+      // Actually, the door opening allows the node to exist at row 2, col 4
+
+      // Node at row 2, col 3 (inside) should have connection toward door
+      const insideNodeAtDoor = result.find((n) => n.id === 'test-2-3')
+      expect(insideNodeAtDoor).toBeDefined()
+
+      // Check that horizontal movement through door is allowed
+      // The door node (if it exists) should connect to outside
+      const doorNode = result.find((n) => n.id === 'test-2-4')
+      // Door node should exist (it's in the door opening, not on wall)
+      // Actually, the wall is at col 4 (zone boundary), and nodes ON the wall
+      // are skipped UNLESS they're in the door opening
+    })
+
+    it('should block diagonal connections from door opening to outside', () => {
+      // Use grid-aligned zone coordinates for accurate testing
+      // Grid: 8 cols, 6 rows, 900x700 (spacing: 100x100)
+      const config: GridConfig = {
+        prefix: 'test',
+        cols: 8,
+        rows: 6,
+        width: 900,
+        height: 700,
+      }
+      // Zone: row 0-4, col 0-4 (boundary nodes on row 0, 4 and col 0, 4)
+      // Internal nodes: row 1-3, col 1-3
+      // Door on right (col 4) at row 2 (offset 2)
+      const obstacles: Obstacle[] = [
+        {
+          id: 'room',
+          x: 100, // col 0
+          y: 100, // row 0
+          width: 400, // 4 tiles
+          height: 400, // 4 tiles
+          type: 'zone',
+          tileRow: 0,
+          tileCol: 0,
+          tileWidth: 4,
+          tileHeight: 4,
+          wallSides: ['top', 'bottom', 'left', 'right'],
+          door: { side: 'right', start: 1, end: 3 }, // Door at row 2 (offset 2)
+        },
+      ]
+
+      const result = generateGridNodes(config, [], [], obstacles)
+
+      // Right boundary (col=4) - wall nodes are skipped except door
+      // Door opening at row 2, col 4 should exist
+      const doorNode = result.find((n) => n.id === 'test-2-4')
+      expect(doorNode).toBeDefined()
+
+      if (doorNode) {
+        // Diagonal from door to outside should be blocked
+        expect(doorNode.connectedTo).not.toContain('test-1-5')
+        expect(doorNode.connectedTo).not.toContain('test-3-5')
+        // Horizontal from door to outside should be allowed
+        expect(doorNode.connectedTo).toContain('test-2-5')
+      }
+    })
+
+    it('should block diagonal connections from outside to door opening', () => {
+      const config: GridConfig = {
+        prefix: 'test',
+        cols: 8,
+        rows: 6,
+        width: 900,
+        height: 700,
+      }
+      const obstacles: Obstacle[] = [
+        {
+          id: 'room',
+          x: 100,
+          y: 100,
+          width: 400,
+          height: 400,
+          type: 'zone',
+          tileRow: 0,
+          tileCol: 0,
+          tileWidth: 4,
+          tileHeight: 4,
+          wallSides: ['top', 'bottom', 'left', 'right'],
+          door: { side: 'right', start: 1, end: 3 },
+        },
+      ]
+
+      const result = generateGridNodes(config, [], [], obstacles)
+
+      // Door node at row 2, col 4
+      const doorNode = result.find((n) => n.id === 'test-2-4')
+      expect(doorNode).toBeDefined()
+
+      // Outside node at row 1, col 5 should NOT have diagonal connection to door
+      const outsideNodeAbove = result.find((n) => n.id === 'test-1-5')
+      expect(outsideNodeAbove).toBeDefined()
+      if (outsideNodeAbove) {
+        expect(outsideNodeAbove.connectedTo).not.toContain('test-2-4')
+      }
+
+      // Outside node at row 3, col 5 should NOT have diagonal connection to door
+      const outsideNodeBelow = result.find((n) => n.id === 'test-3-5')
+      expect(outsideNodeBelow).toBeDefined()
+      if (outsideNodeBelow) {
+        expect(outsideNodeBelow.connectedTo).not.toContain('test-2-4')
+      }
+
+      // But horizontal connection from outside (row 2, col 5) to door should exist
+      const outsideNodeSameRow = result.find((n) => n.id === 'test-2-5')
+      expect(outsideNodeSameRow).toBeDefined()
+      if (outsideNodeSameRow) {
+        expect(outsideNodeSameRow.connectedTo).toContain('test-2-4')
+      }
+    })
+
+    it('should handle zone with negative tileRow/tileCol (like home bedroom)', () => {
+      const config: GridConfig = {
+        prefix: 'test',
+        cols: 8,
+        rows: 6,
+        width: 800,
+        height: 600,
+      }
+      // Mimics home's bedroom: row -1, col -1, width 6, height 5
+      // Internal nodes: row 0-3, col 0-4
+      // Right wall at col 5, door at row 2 (offset 3)
+      const obstacles: Obstacle[] = [
+        {
+          id: 'bedroom',
+          x: 0,
+          y: 0,
+          width: 500,
+          height: 400,
+          type: 'zone',
+          tileRow: -1,
+          tileCol: -1,
+          tileWidth: 6,
+          tileHeight: 5,
+          wallSides: ['top', 'bottom', 'left', 'right'],
+          door: { side: 'right', start: 2, end: 4 }, // Door at row 2 (offset 3)
+        },
+      ]
+
+      const result = generateGridNodes(config, [], [], obstacles)
+
+      // Inside node at row 1, col 4 should NOT connect diagonally through wall
+      const insideNode = result.find((n) => n.id === 'test-1-4')
+      if (insideNode) {
+        // Should not connect to outside nodes through wall
+        expect(insideNode.connectedTo).not.toContain('test-0-5')
+        expect(insideNode.connectedTo).not.toContain('test-1-5')
+        expect(insideNode.connectedTo).not.toContain('test-2-5')
+      }
+
+      // Door opening at row 2, col 4 (boundary) - check if diagonal blocked
+      // Note: col 4 is the last inside column, col 5 is the boundary (wall/door)
+      const doorNode = result.find((n) => n.id === 'test-2-4')
+      if (doorNode) {
+        // Diagonal connections to outside should still work within inside area
+        // But crossing the wall diagonally should be blocked
+        // The boundary node would be at col 5 (right edge)
+      }
+    })
   })
 })

@@ -80,7 +80,6 @@ export function tileToPixelEntrance(
 }
 
 export function isPointInsideObstacle(x: number, y: number, obstacle: Obstacle): boolean {
-  // 起点ベース: 境界ノードは含まない（< を使用）
   return (
     x >= obstacle.x &&
     x < obstacle.x + obstacle.width &&
@@ -92,7 +91,12 @@ export function isPointInsideObstacle(x: number, y: number, obstacle: Obstacle):
 function isInsideAnyBuildingObstacle(x: number, y: number, obstacles: Obstacle[]): boolean {
   return obstacles
     .filter((obs) => obs.type === 'building')
-    .some((obstacle) => isPointInsideObstacle(x, y, obstacle))
+    .some((obs) => (
+      x >= obs.x &&
+      x <= obs.x + obs.width &&
+      y >= obs.y &&
+      y <= obs.y + obs.height
+    ))
 }
 
 interface WallGeometry {
@@ -158,6 +162,31 @@ export function isNodeInsideZone(row: number, col: number, zone: Obstacle): bool
 }
 
 /**
+ * Check if a node at (row, col) is on the zone boundary (wall edge or door opening).
+ * Returns the side(s) the node is on, or empty array if not on boundary.
+ */
+function getNodeBoundarySides(row: number, col: number, zone: Obstacle): WallSide[] {
+  const sides: WallSide[] = []
+
+  const topEdge = zone.tileRow
+  const bottomEdge = zone.tileRow + zone.tileHeight
+  const leftEdge = zone.tileCol
+  const rightEdge = zone.tileCol + zone.tileWidth
+
+  // Check if within zone's column range for top/bottom edges
+  const inColRange = col > leftEdge && col < rightEdge
+  // Check if within zone's row range for left/right edges
+  const inRowRange = row > topEdge && row < bottomEdge
+
+  if (row === topEdge && inColRange) sides.push('top')
+  if (row === bottomEdge && inColRange) sides.push('bottom')
+  if (col === leftEdge && inRowRange) sides.push('left')
+  if (col === rightEdge && inRowRange) sides.push('right')
+
+  return sides
+}
+
+/**
  * Check if a node at pixel position (x, y) is on a zone wall.
  * This is the source of truth - PixiAppSync.tsx renders all nodes returned by generateGridNodes.
  */
@@ -196,6 +225,18 @@ function isOnZoneWall(nodeX: number, nodeY: number, obstacles: Obstacle[]): bool
 }
 
 /**
+ * Check if a node is completely outside a zone (not inside and not on boundary).
+ */
+function isNodeCompletelyOutside(row: number, col: number, zone: Obstacle): boolean {
+  const topEdge = zone.tileRow
+  const bottomEdge = zone.tileRow + zone.tileHeight
+  const leftEdge = zone.tileCol
+  const rightEdge = zone.tileCol + zone.tileWidth
+
+  return row < topEdge || row > bottomEdge || col < leftEdge || col > rightEdge
+}
+
+/**
  * Check if a connection between two nodes crosses a zone wall (and not through a door).
  * Returns true if the connection should be blocked.
  * zone.tileRow/tileCol = 起点ノード位置
@@ -212,7 +253,34 @@ function connectionCrossesZoneWall(
   const fromInside = isNodeInsideZone(fromRow, fromCol, zone)
   const toInside = isNodeInsideZone(toRow, toCol, zone)
 
-  // Both inside or both outside: no wall crossing
+  // Check if connection is diagonal
+  const isDiagonal = fromRow !== toRow && fromCol !== toCol
+
+  // Check boundary status for both nodes
+  const fromBoundary = getNodeBoundarySides(fromRow, fromCol, zone)
+  const toBoundary = getNodeBoundarySides(toRow, toCol, zone)
+
+  // Special case: diagonal connections from/to door opening
+  // If one node is on a boundary (including door opening) and the other is completely outside,
+  // diagonal connections should be blocked as they cross the wall
+  if (isDiagonal) {
+    const fromOnBoundary = fromBoundary.length > 0
+    const toOnBoundary = toBoundary.length > 0
+    const fromOutside = isNodeCompletelyOutside(fromRow, fromCol, zone)
+    const toOutside = isNodeCompletelyOutside(toRow, toCol, zone)
+
+    // Block diagonal from boundary to completely outside (or vice versa)
+    if ((fromOnBoundary && toOutside) || (toOnBoundary && fromOutside)) {
+      // Check if the wall on the crossed side exists
+      for (const side of fromOnBoundary ? fromBoundary : toBoundary) {
+        if (zone.wallSides?.includes(side)) {
+          return true
+        }
+      }
+    }
+  }
+
+  // Both inside or both outside (and not boundary case): no wall crossing
   if (fromInside === toInside) return false
 
   // One inside, one outside: determine which wall is crossed
