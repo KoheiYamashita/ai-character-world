@@ -269,12 +269,15 @@
 
 ---
 
-### Step 21: 当日の一時状態
+### ✅ Step 21: 当日の一時状態（recentConversationsCache）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 21-1 | `CharacterDailyState` 実装（recentConversations） | オンメモリで保持 |
-| 21-2 | sleep アクション実行時にクリア | 睡眠後にリセット |
+| ✅ 21-1 | `recentConversationsCache` + `recentConversationsCacheDay` をSimulationEngineに追加 | ビルド通過 |
+| ✅ 21-2 | `loadRecentConversationsCache()` 実装（`npc_summaries`から当日分ロード） | 起動時ログ確認 |
+| ✅ 21-3 | 起動時ロード・`onSummaryPersist`でキャッシュ更新 | 会話後にキャッシュ反映 |
+| ✅ 21-4 | sleep完了+日付変更時のみキャッシュクリア | 日またぎsleepでリセット |
+| ✅ 21-5 | `buildBehaviorContext()` / `ConversationContext` にキャッシュ接続 | プロンプトに直近会話表示 |
 
 ---
 

@@ -2554,4 +2554,248 @@ describe('SimulationEngine (integration)', () => {
       expect((engine as any).midTermMemoriesCache.get('c1')).toEqual(testMemories)
     })
   })
+
+  describe('recentConversationsCache', () => {
+    it('should load recent conversations from store into cache', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        loadNPCSummariesForDay: vi.fn().mockResolvedValue([
+          { characterId: 'c1', npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 1000 },
+          { characterId: 'c1', npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2000 },
+        ]),
+      }
+      engine.setStateStore(mockStore as never)
+
+      await engine.loadRecentConversationsCache()
+
+      const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
+      expect(cache.get('c1')).toHaveLength(2)
+      expect(cache.get('c1')).toEqual([
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 1000 },
+        { npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2000 },
+      ])
+      expect(mockStore.loadNPCSummariesForDay).toHaveBeenCalledWith(expect.any(Number))
+    })
+
+    it('should set cacheDay for each character on load', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        loadNPCSummariesForDay: vi.fn().mockResolvedValue([
+          { characterId: 'c1', npcId: 'npc1', npcName: 'テスト太郎', summary: '会話', timestamp: 1000 },
+        ]),
+      }
+      engine.setStateStore(mockStore as never)
+
+      await engine.loadRecentConversationsCache()
+
+      const cacheDay = (engine as any).recentConversationsCacheDay as Map<string, number>
+      expect(cacheDay.has('c1')).toBe(true)
+    })
+
+    it('should include recentConversations in buildBehaviorContext', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      const testConversations = [
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話', timestamp: 1000 },
+      ]
+      ;(engine as any).recentConversationsCache.set('c1', testConversations)
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      expect(context.recentConversations).toEqual(testConversations)
+    })
+
+    it('should return undefined recentConversations when cache is empty', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      expect(context.recentConversations).toBeUndefined()
+    })
+
+    it('should update cache when summary persist callback is triggered', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        saveNPCSummary: vi.fn().mockResolvedValue(undefined),
+      }
+      engine.setStateStore(mockStore as never)
+
+      // Access the postProcessor's onSummaryPersist callback
+      const postProcessor = (engine as any).conversationPostProcessor
+      const summaryCallback = postProcessor.onSummaryPersist
+      expect(summaryCallback).toBeDefined()
+
+      await summaryCallback({
+        characterId: 'c1',
+        npcId: 'npc1',
+        npcName: 'テスト太郎',
+        summary: '新しい会話',
+        topics: ['天気'],
+        goalAchieved: true,
+        timestamp: 3000,
+      })
+
+      const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
+      expect(cache.get('c1')).toHaveLength(1)
+      expect(cache.get('c1')![0]).toMatchObject({
+        npcId: 'npc1',
+        npcName: 'テスト太郎',
+        summary: '新しい会話',
+        timestamp: 3000,
+      })
+    })
+
+    it('should set cacheDay on first summary persist when not previously set', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        saveNPCSummary: vi.fn().mockResolvedValue(undefined),
+      }
+      engine.setStateStore(mockStore as never)
+
+      const postProcessor = (engine as any).conversationPostProcessor
+      const summaryCallback = postProcessor.onSummaryPersist
+      expect(summaryCallback).toBeDefined()
+
+      await summaryCallback({
+        characterId: 'c1',
+        npcId: 'npc1',
+        npcName: 'テスト太郎',
+        summary: '会話',
+        topics: [],
+        goalAchieved: true,
+        timestamp: 1000,
+      })
+
+      const cacheDay = (engine as any).recentConversationsCacheDay as Map<string, number>
+      expect(cacheDay.has('c1')).toBe(true)
+    })
+
+    it('should clear cache on sleep completion when day has changed', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Populate cache with day 1 data
+      ;(engine as any).recentConversationsCache.set('c1', [
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '昨日の会話', timestamp: 1000 },
+      ])
+      ;(engine as any).recentConversationsCacheDay.set('c1', 1)
+
+      // Advance world time to day 2
+      const worldState = (engine as any).worldState
+      worldState.setTime({ ...worldState.getTime(), day: 2 })
+
+      // Simulate sleep action completion
+      const actionExecutor = (engine as any).actionExecutor
+      const onCompleteCallback = actionExecutor.onActionComplete
+      if (onCompleteCallback) {
+        onCompleteCallback('c1', 'sleep')
+      }
+
+      // Cache should be cleared
+      expect((engine as any).recentConversationsCache.has('c1')).toBe(false)
+      expect((engine as any).recentConversationsCacheDay.has('c1')).toBe(false)
+    })
+
+    it('should NOT clear cache on sleep completion when day has not changed', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      const testConversations = [
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '今日の会話', timestamp: 1000 },
+      ]
+      ;(engine as any).recentConversationsCache.set('c1', testConversations)
+      ;(engine as any).recentConversationsCacheDay.set('c1', 1)
+
+      // World time is still day 1
+      const worldState = (engine as any).worldState
+      worldState.setTime({ ...worldState.getTime(), day: 1 })
+
+      // Simulate sleep action completion
+      const actionExecutor = (engine as any).actionExecutor
+      const onCompleteCallback = actionExecutor.onActionComplete
+      if (onCompleteCallback) {
+        onCompleteCallback('c1', 'sleep')
+      }
+
+      // Cache should NOT be cleared
+      expect((engine as any).recentConversationsCache.get('c1')).toEqual(testConversations)
+      expect((engine as any).recentConversationsCacheDay.get('c1')).toBe(1)
+    })
+
+    it('should NOT clear cache on non-sleep action completion', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      const testConversations = [
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '会話', timestamp: 1000 },
+      ]
+      ;(engine as any).recentConversationsCache.set('c1', testConversations)
+      ;(engine as any).recentConversationsCacheDay.set('c1', 1)
+
+      // Advance to day 2
+      const worldState = (engine as any).worldState
+      worldState.setTime({ ...worldState.getTime(), day: 2 })
+
+      // Simulate eat action completion (not sleep)
+      const actionExecutor = (engine as any).actionExecutor
+      const onCompleteCallback = actionExecutor.onActionComplete
+      if (onCompleteCallback) {
+        onCompleteCallback('c1', 'eat')
+      }
+
+      // Cache should NOT be cleared (only sleep triggers clear)
+      expect((engine as any).recentConversationsCache.get('c1')).toEqual(testConversations)
+    })
+
+    it('should handle empty store results gracefully', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        loadNPCSummariesForDay: vi.fn().mockResolvedValue([]),
+      }
+      engine.setStateStore(mockStore as never)
+
+      await engine.loadRecentConversationsCache()
+
+      const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
+      expect(cache.size).toBe(0)
+    })
+
+    it('should handle multiple characters in cache', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1'), createTestCharacter('c2')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockStore = {
+        loadNPCSummariesForDay: vi.fn().mockResolvedValue([
+          { characterId: 'c1', npcId: 'npc1', npcName: 'NPC1', summary: 'c1の会話', timestamp: 1000 },
+          { characterId: 'c2', npcId: 'npc2', npcName: 'NPC2', summary: 'c2の会話', timestamp: 2000 },
+        ]),
+      }
+      engine.setStateStore(mockStore as never)
+
+      await engine.loadRecentConversationsCache()
+
+      const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
+      expect(cache.get('c1')).toHaveLength(1)
+      expect(cache.get('c2')).toHaveLength(1)
+    })
+  })
 })

@@ -1,5 +1,5 @@
 import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry } from '@/types'
-import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
+import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry, MidTermMemory, RecentConversation } from '@/types/behavior'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -63,6 +63,10 @@ export class SimulationEngine {
   private actionHistoryCache: Map<string, ActionHistoryEntry[]> = new Map()
   // Mid-term memories cache: key = characterId
   private midTermMemoriesCache: Map<string, MidTermMemory[]> = new Map()
+  // Recent conversations cache: key = characterId, loaded from npc_summaries for current day
+  private recentConversationsCache: Map<string, RecentConversation[]> = new Map()
+  // Tracks which day the cache was populated for (used to detect day boundary on sleep)
+  private recentConversationsCacheDay: Map<string, number> = new Map()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
   private pendingDecisions: Set<string> = new Set()
   // Track last day for day-change detection (schedule cache refresh)
@@ -100,6 +104,18 @@ export class SimulationEngine {
       entry.day = currentTime.day
       entry.time = this.formatTimeString(currentTime)
       if (this.stateStore) await this.stateStore.saveNPCSummary(entry)
+      // Update recentConversationsCache (optimistic)
+      const cached = this.recentConversationsCache.get(entry.characterId) ?? []
+      cached.push({
+        npcId: entry.npcId,
+        npcName: entry.npcName,
+        summary: entry.summary,
+        timestamp: entry.timestamp,
+      })
+      this.recentConversationsCache.set(entry.characterId, cached)
+      if (!this.recentConversationsCacheDay.has(entry.characterId)) {
+        this.recentConversationsCacheDay.set(entry.characterId, currentTime.day)
+      }
       // Notify log subscribers
       this.notifyLogSubscribersConversation(entry)
     })
@@ -145,6 +161,18 @@ export class SimulationEngine {
     // Set action completion callback for behavior decision trigger
     this.actionExecutor.setOnActionComplete((characterId, actionId) => {
       console.log(`[SimulationEngine] Action complete callback: ${characterId} finished ${actionId}`)
+
+      // On sleep completion: clear recent conversations if day has changed
+      if (actionId === 'sleep') {
+        const currentDay = this.worldState.getTime().day
+        const cacheDay = this.recentConversationsCacheDay.get(characterId)
+        if (cacheDay !== undefined && currentDay > cacheDay) {
+          this.recentConversationsCache.delete(characterId)
+          this.recentConversationsCacheDay.delete(characterId)
+          console.log(`[SimulationEngine] Cleared recentConversations for ${characterId} (slept across day boundary: ${cacheDay} -> ${currentDay})`)
+        }
+      }
+
       // Note: talk action is completed by ConversationExecutor, not by timer
       this.onActionComplete(characterId)
     })
@@ -735,6 +763,7 @@ export class SimulationEngine {
       currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
       nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
       nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+      recentConversations: this.recentConversationsCache.get(character.id),
       midTermMemories: this.midTermMemoriesCache.get(character.id),
       todayActions: includeTodayActions ? this.getActionHistoryForCharacter(character.id) : undefined,
     }
@@ -1053,7 +1082,7 @@ export class SimulationEngine {
 
     // Build conversation context
     const context: ConversationContext = {
-      recentConversations: [],
+      recentConversations: this.recentConversationsCache.get(characterId) ?? [],
       midTermMemories: this.midTermMemoriesCache.get(characterId) ?? [],
       todayActions: this.getActionHistoryForCharacter(characterId),
       schedule: this.getScheduleForCharacter(characterId),
@@ -1575,6 +1604,34 @@ export class SimulationEngine {
     await this.loadMidTermMemoriesCache()
   }
 
+  // Load recent conversations from DB for current day
+  async loadRecentConversationsCache(): Promise<void> {
+    if (!this.stateStore) return
+    const currentDay = this.worldState.getTime().day
+    const summaries = await this.stateStore.loadNPCSummariesForDay(currentDay)
+
+    this.recentConversationsCache.clear()
+    this.recentConversationsCacheDay.clear()
+    for (const entry of summaries) {
+      const cached = this.recentConversationsCache.get(entry.characterId) ?? []
+      cached.push({
+        npcId: entry.npcId,
+        npcName: entry.npcName,
+        summary: entry.summary,
+        timestamp: entry.timestamp,
+      })
+      this.recentConversationsCache.set(entry.characterId, cached)
+      this.recentConversationsCacheDay.set(entry.characterId, currentDay)
+    }
+    let totalEntries = 0
+    for (const arr of this.recentConversationsCache.values()) {
+      totalEntries += arr.length
+    }
+    if (totalEntries > 0) {
+      console.log(`[SimulationEngine] Loaded ${totalEntries} recent conversations for day ${currentDay}`)
+    }
+  }
+
   // Get today's logs from cache and DB (for initial load)
   async getTodayLogs(): Promise<ActivityLogEntry[]> {
     const currentDay = this.worldState.getTime().day
@@ -2008,6 +2065,7 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       await engine.loadScheduleCache()
       await engine.loadActionHistoryCache()
       await engine.loadMidTermMemoriesCache()
+      await engine.loadRecentConversationsCache()
       engine.initializeLastDay()
 
       engine.start()

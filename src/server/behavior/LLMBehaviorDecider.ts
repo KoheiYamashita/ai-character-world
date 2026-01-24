@@ -514,7 +514,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push(character.customPrompt || 'なし')
     parts.push('')
 
-    // 直近の会話（将来拡張）
+    // 直近の会話（sleep+日付変更でクリア）
     parts.push('【直近の会話】')
     if (recentConversations && recentConversations.length > 0) {
       parts.push(recentConversations.map(c => `- ${c.npcName}: ${c.summary}`).join('\n'))

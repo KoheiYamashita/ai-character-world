@@ -28,7 +28,7 @@ export interface ActionHistoryEntry {
 }
 
 /**
- * 直近の会話履歴（将来拡張用）
+ * 直近の会話履歴（sleep+日付変更でクリア）
  */
 export interface RecentConversation {
   npcId: string
@@ -99,7 +99,7 @@ export interface BehaviorContext {
   currentMapFacilities?: CurrentMapFacility[] // 現在マップの施設（アクション表示用）
   nearbyFacilities?: NearbyFacility[]         // 他マップの施設（移動が必要）
   nearbyMaps?: NearbyMap[]                    // 移動可能なマップ（3ホップ以内）
-  recentConversations?: RecentConversation[]  // 直近の会話（将来拡張）
+  recentConversations?: RecentConversation[]  // 直近の会話（sleep+日付変更でクリア）
   midTermMemories?: MidTermMemory[]           // 中期記憶
   todayActions?: ActionHistoryEntry[]         // 当日の行動履歴
 }
