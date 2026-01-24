@@ -29,6 +29,10 @@ const mockStoreInstance = {
   saveNPCState: vi.fn().mockResolvedValue(undefined),
   loadNPCState: vi.fn().mockResolvedValue(null),
   loadAllNPCStates: vi.fn().mockResolvedValue(new Map()),
+  loadNPCSummariesForDay: vi.fn().mockResolvedValue([]),
+  addMidTermMemory: vi.fn().mockResolvedValue(undefined),
+  loadActiveMidTermMemories: vi.fn().mockResolvedValue([]),
+  deleteExpiredMidTermMemories: vi.fn().mockResolvedValue(0),
 }
 
 const mockLoadWorldDataServer = vi.fn()

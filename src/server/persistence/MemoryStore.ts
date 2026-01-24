@@ -1,7 +1,7 @@
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
-import type { ActionHistoryEntry } from '@/types/behavior'
+import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 
 /**
  * In-memory implementation of StateStore.
@@ -17,6 +17,7 @@ export class MemoryStore implements StateStore {
   private actionHistory: Map<string, ActionHistoryEntry[]> = new Map() // key: `${characterId}:${day}`
   private npcSummaries: ConversationSummaryEntry[] = []
   private npcStates: Map<string, NPCDynamicState> = new Map()
+  private midTermMemories: MidTermMemory[] = []
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -205,6 +206,24 @@ export class MemoryStore implements StateStore {
     return result
   }
 
+  // Mid-term memory methods
+
+  async addMidTermMemory(memory: MidTermMemory): Promise<void> {
+    this.midTermMemories.push({ ...memory })
+  }
+
+  async loadActiveMidTermMemories(characterId: string, currentDay: number): Promise<MidTermMemory[]> {
+    return this.midTermMemories
+      .filter(m => m.characterId === characterId && m.expiresDay >= currentDay)
+      .sort((a, b) => b.createdDay - a.createdDay)
+  }
+
+  async deleteExpiredMidTermMemories(currentDay: number): Promise<number> {
+    const before = this.midTermMemories.length
+    this.midTermMemories = this.midTermMemories.filter(m => m.expiresDay >= currentDay)
+    return before - this.midTermMemories.length
+  }
+
   async hasData(): Promise<boolean> {
     return this.state !== null || this.characters.size > 0
   }
@@ -218,6 +237,7 @@ export class MemoryStore implements StateStore {
     this.actionHistory.clear()
     this.npcSummaries = []
     this.npcStates.clear()
+    this.midTermMemories = []
   }
 
   async close(): Promise<void> {

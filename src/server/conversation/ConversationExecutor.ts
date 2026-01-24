@@ -210,7 +210,7 @@ export class ConversationExecutor {
     // 同期で後処理（次の行動決定に必要な情報を更新）
     if (this.postProcessor) {
       try {
-        await this.postProcessor.process(completedSession, npc, character)
+        await this.postProcessor.process(completedSession, npc, character, context.currentTime)
       } catch (error) {
         console.error(`[ConversationExecutor] PostProcessor error for ${character.name}:`, error)
       }

@@ -38,12 +38,18 @@ export interface RecentConversation {
 }
 
 /**
- * 中期記憶（将来拡張用）
+ * 中期記憶
+ * 会話終了時にLLMで抽出された「行動に影響する情報」
+ * ワールド時間の日数ベースで有効期限管理
  */
 export interface MidTermMemory {
+  id: string
+  characterId: string
   content: string
-  importance: number
-  timestamp: number
+  importance: 'low' | 'medium' | 'high'
+  createdDay: number    // WorldTime.day（作成時のワールド日）
+  expiresDay: number    // WorldTime.day（この日を超えたら削除）
+  sourceNpcId?: string
 }
 
 /**
@@ -94,7 +100,7 @@ export interface BehaviorContext {
   nearbyFacilities?: NearbyFacility[]         // 他マップの施設（移動が必要）
   nearbyMaps?: NearbyMap[]                    // 移動可能なマップ（3ホップ以内）
   recentConversations?: RecentConversation[]  // 直近の会話（将来拡張）
-  midTermMemories?: MidTermMemory[]           // 中期記憶（将来拡張）
+  midTermMemories?: MidTermMemory[]           // 中期記憶
   todayActions?: ActionHistoryEntry[]         // 当日の行動履歴
 }
 

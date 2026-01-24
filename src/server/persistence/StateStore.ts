@@ -1,6 +1,6 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
-import type { ActionHistoryEntry } from '@/types/behavior'
+import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 
 /**
  * Abstract interface for state persistence.
@@ -131,6 +131,22 @@ export interface StateStore {
    * Load all NPC dynamic states
    */
   loadAllNPCStates(): Promise<Map<string, NPCDynamicState>>
+
+  /**
+   * Add a mid-term memory
+   */
+  addMidTermMemory(memory: MidTermMemory): Promise<void>
+
+  /**
+   * Load active mid-term memories for a character (not expired)
+   */
+  loadActiveMidTermMemories(characterId: string, currentDay: number): Promise<MidTermMemory[]>
+
+  /**
+   * Delete expired mid-term memories
+   * Returns number of deleted records
+   */
+  deleteExpiredMidTermMemories(currentDay: number): Promise<number>
 
   /**
    * Check if store has been initialized with data

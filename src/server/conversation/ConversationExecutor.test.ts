@@ -288,7 +288,7 @@ describe('ConversationExecutor', () => {
 
       const context: ConversationContext = {
         recentConversations: [{ npcId: 'npc-1', npcName: 'TestNPC', summary: '先日カレーを食べた', timestamp: 100 }],
-        midTermMemories: [{ content: '明日は休みだ', importance: 5, timestamp: 200 }],
+        midTermMemories: [{ id: 'mem-1', characterId: 'char-1', content: '明日は休みだ', importance: 'medium' as const, createdDay: 1, expiresDay: 2 }],
         todayActions: [{ time: '10:00', actionId: 'eat', target: 'cafe-1', reason: '朝食' }],
         schedule: [{ time: '13:00', activity: '昼食' }],
         currentTime: { hour: 12, minute: 30, day: 1 },

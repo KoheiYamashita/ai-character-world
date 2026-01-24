@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState } from '@/types'
-import type { ActionHistoryEntry } from '@/types/behavior'
+import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -167,6 +167,20 @@ export class SqliteStore implements StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_npc_summaries_day
         ON npc_summaries(day);
+
+      -- Mid-term memories
+      CREATE TABLE IF NOT EXISTS mid_term_memories (
+        id TEXT PRIMARY KEY,
+        character_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        importance TEXT NOT NULL,
+        created_day INTEGER NOT NULL,
+        expires_day INTEGER NOT NULL,
+        source_npc_id TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mid_term_memories_character
+        ON mid_term_memories(character_id, expires_day);
 
       -- NPC dynamic states
       CREATE TABLE IF NOT EXISTS npc_states (
@@ -683,6 +697,56 @@ export class SqliteStore implements StateStore {
     return result
   }
 
+  // Mid-term memory CRUD methods
+
+  async addMidTermMemory(memory: MidTermMemory): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO mid_term_memories (id, character_id, content, importance, created_day, expires_day, source_npc_id)
+      VALUES (@id, @character_id, @content, @importance, @created_day, @expires_day, @source_npc_id)
+    `)
+
+    stmt.run({
+      id: memory.id,
+      character_id: memory.characterId,
+      content: memory.content,
+      importance: memory.importance,
+      created_day: memory.createdDay,
+      expires_day: memory.expiresDay,
+      source_npc_id: memory.sourceNpcId ?? null,
+    })
+  }
+
+  async loadActiveMidTermMemories(characterId: string, currentDay: number): Promise<MidTermMemory[]> {
+    const stmt = this.db.prepare(
+      'SELECT * FROM mid_term_memories WHERE character_id = ? AND expires_day >= ? ORDER BY created_day DESC'
+    )
+    const rows = stmt.all(characterId, currentDay) as Array<{
+      id: string
+      character_id: string
+      content: string
+      importance: string
+      created_day: number
+      expires_day: number
+      source_npc_id: string | null
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      characterId: row.character_id,
+      content: row.content,
+      importance: row.importance as 'low' | 'medium' | 'high',
+      createdDay: row.created_day,
+      expiresDay: row.expires_day,
+      sourceNpcId: row.source_npc_id ?? undefined,
+    }))
+  }
+
+  async deleteExpiredMidTermMemories(currentDay: number): Promise<number> {
+    const stmt = this.db.prepare('DELETE FROM mid_term_memories WHERE expires_day < ?')
+    const result = stmt.run(currentDay)
+    return result.changes
+  }
+
   async hasData(): Promise<boolean> {
     const stmt = this.db.prepare('SELECT COUNT(*) as count FROM character_states')
     const result = stmt.get() as { count: number }
@@ -698,6 +762,7 @@ export class SqliteStore implements StateStore {
       DELETE FROM action_history;
       DELETE FROM npc_summaries;
       DELETE FROM npc_states;
+      DELETE FROM mid_term_memories;
     `)
   }
 

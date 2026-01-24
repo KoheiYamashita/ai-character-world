@@ -280,6 +280,7 @@ describe('ConversationPostProcessor', () => {
       updatedFacts: ['fact1', 'fact2'],
       mood: 'neutral',
       topicsDiscussed: [],
+      memories: [],
     })
 
     const session = createTestSession()
@@ -293,5 +294,179 @@ describe('ConversationPostProcessor', () => {
     expect(prompt).toContain('TestNPC')
     expect(prompt).toContain('TestChar')
     expect(prompt).toContain('最近の様子を聞く')
+  })
+
+  describe('mid-term memory extraction', () => {
+    it('should call memory persist callback with extracted memories', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: 'カフェで待ち合わせの約束をした',
+        affinityChange: 5,
+        updatedFacts: ['この店は10年営業している', '名物はカレーライス'],
+        mood: 'happy',
+        topicsDiscussed: ['待ち合わせ'],
+        memories: [
+          { content: '明日14時にカフェで待ち合わせ', importance: 'high' },
+          { content: 'NPCは水曜日が定休日', importance: 'medium' },
+        ],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+      const currentTime = { hour: 12, minute: 0, day: 5 }
+
+      await processor.process(session, npc, character, currentTime)
+
+      expect(memoryPersistSpy).toHaveBeenCalledTimes(1)
+      const memories = memoryPersistSpy.mock.calls[0][0]
+      expect(memories).toHaveLength(2)
+
+      expect(memories[0]).toEqual(expect.objectContaining({
+        characterId: 'char-1',
+        content: '明日14時にカフェで待ち合わせ',
+        importance: 'high',
+        createdDay: 5,
+        expiresDay: 7, // high: +2
+        sourceNpcId: 'npc-1',
+      }))
+      expect(memories[1]).toEqual(expect.objectContaining({
+        characterId: 'char-1',
+        content: 'NPCは水曜日が定休日',
+        importance: 'medium',
+        createdDay: 5,
+        expiresDay: 6, // medium: +1
+        sourceNpcId: 'npc-1',
+      }))
+    })
+
+    it('should set expiresDay based on importance', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: 'test',
+        affinityChange: 0,
+        updatedFacts: [],
+        mood: 'neutral',
+        topicsDiscussed: [],
+        memories: [
+          { content: 'low importance', importance: 'low' },
+          { content: 'medium importance', importance: 'medium' },
+          { content: 'high importance', importance: 'high' },
+        ],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+      const currentTime = { hour: 10, minute: 0, day: 3 }
+
+      await processor.process(session, npc, character, currentTime)
+
+      const memories = memoryPersistSpy.mock.calls[0][0]
+      expect(memories[0].expiresDay).toBe(3) // low: +0
+      expect(memories[1].expiresDay).toBe(4) // medium: +1
+      expect(memories[2].expiresDay).toBe(5) // high: +2
+    })
+
+    it('should not call memory persist callback when memories array is empty', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: '普通の挨拶',
+        affinityChange: 2,
+        updatedFacts: ['この店は10年営業している', '名物はカレーライス'],
+        mood: 'neutral',
+        topicsDiscussed: ['挨拶'],
+        memories: [],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+      const currentTime = { hour: 12, minute: 0, day: 1 }
+
+      await processor.process(session, npc, character, currentTime)
+
+      expect(memoryPersistSpy).not.toHaveBeenCalled()
+    })
+
+    it('should not call memory persist callback when currentTime is not provided', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: 'test',
+        affinityChange: 0,
+        updatedFacts: [],
+        mood: 'neutral',
+        topicsDiscussed: [],
+        memories: [{ content: 'some memory', importance: 'high' }],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+
+      // No currentTime provided
+      await processor.process(session, npc, character)
+
+      expect(memoryPersistSpy).not.toHaveBeenCalled()
+    })
+
+    it('should generate unique memory ids', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: 'test',
+        affinityChange: 0,
+        updatedFacts: [],
+        mood: 'neutral',
+        topicsDiscussed: [],
+        memories: [
+          { content: 'memory 1', importance: 'low' },
+          { content: 'memory 2', importance: 'high' },
+        ],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+      const currentTime = { hour: 12, minute: 0, day: 1 }
+
+      await processor.process(session, npc, character, currentTime)
+
+      const memories = memoryPersistSpy.mock.calls[0][0]
+      expect(memories[0].id).not.toBe(memories[1].id)
+    })
+
+    it('should include memory extraction instruction in prompt', async () => {
+      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryPersist(memoryPersistSpy)
+
+      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+        summary: 'test',
+        affinityChange: 0,
+        updatedFacts: [],
+        mood: 'neutral',
+        topicsDiscussed: [],
+        memories: [],
+      })
+
+      const session = createTestSession()
+      const npc = createTestNPC()
+      const character = createTestCharacter()
+
+      await processor.process(session, npc, character)
+
+      const prompt = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      expect(prompt).toContain('memories')
+      expect(prompt).toContain('行動に影響')
+    })
   })
 })

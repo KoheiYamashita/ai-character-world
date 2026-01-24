@@ -1,5 +1,5 @@
 import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry } from '@/types'
-import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry } from '@/types/behavior'
+import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -16,6 +16,7 @@ import type { BehaviorDecider } from '../behavior/BehaviorDecider'
 import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
 import { ConversationManager } from '../conversation/ConversationManager'
 import { ConversationExecutor } from '../conversation/ConversationExecutor'
+import type { ConversationContext } from '../conversation/ConversationExecutor'
 import { ConversationPostProcessor } from '../conversation/ConversationPostProcessor'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
@@ -60,6 +61,8 @@ export class SimulationEngine {
   private scheduleCache: Map<string, ScheduleEntry[]> = new Map()
   // Action history cache: key = `${characterId}-${day}`, loaded from DB
   private actionHistoryCache: Map<string, ActionHistoryEntry[]> = new Map()
+  // Mid-term memories cache: key = characterId
+  private midTermMemoriesCache: Map<string, MidTermMemory[]> = new Map()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
   private pendingDecisions: Set<string> = new Set()
   // Track last day for day-change detection (schedule cache refresh)
@@ -102,6 +105,18 @@ export class SimulationEngine {
     })
     this.conversationPostProcessor.setOnNPCStatePersist(async (npcId, state) => {
       if (this.stateStore) await this.stateStore.saveNPCState(npcId, state)
+    })
+    this.conversationPostProcessor.setOnMemoryPersist(async (memories) => {
+      if (!this.stateStore || memories.length === 0) return
+      // Update cache first (optimistic) - DB failure won't block behavior decisions
+      const characterId = memories[0].characterId
+      const cached = this.midTermMemoriesCache.get(characterId) ?? []
+      cached.push(...memories)
+      this.midTermMemoriesCache.set(characterId, cached)
+      // Persist to DB
+      for (const memory of memories) {
+        await this.stateStore.addMidTermMemory(memory)
+      }
     })
     this.conversationExecutor.setPostProcessor(this.conversationPostProcessor)
 
@@ -410,6 +425,10 @@ export class SimulationEngine {
       this.saveState().catch(err => {
         console.error('[SimulationEngine] Error saving state:', err)
       })
+      // Delete expired mid-term memories and reload cache
+      this.cleanupAndReloadMidTermMemories(realTime.day).catch(err => {
+        console.error('[SimulationEngine] Error cleaning up mid-term memories:', err)
+      })
       this.lastSaveTime = now
     }
 
@@ -716,6 +735,7 @@ export class SimulationEngine {
       currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
       nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
       nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+      midTermMemories: this.midTermMemoriesCache.get(character.id),
       todayActions: includeTodayActions ? this.getActionHistoryForCharacter(character.id) : undefined,
     }
   }
@@ -1032,9 +1052,9 @@ export class SimulationEngine {
     }
 
     // Build conversation context
-    const context = {
-      recentConversations: [] as import('@/types/behavior').RecentConversation[],
-      midTermMemories: [] as import('@/types/behavior').MidTermMemory[],
+    const context: ConversationContext = {
+      recentConversations: [],
+      midTermMemories: this.midTermMemoriesCache.get(characterId) ?? [],
       todayActions: this.getActionHistoryForCharacter(characterId),
       schedule: this.getScheduleForCharacter(characterId),
       currentTime: this.worldState.getTime(),
@@ -1520,6 +1540,41 @@ export class SimulationEngine {
     }
   }
 
+  // Load mid-term memories from DB into cache for all characters
+  async loadMidTermMemoriesCache(): Promise<void> {
+    if (!this.stateStore) return
+
+    const currentDay = this.worldState.getTime().day
+    const characters = this.worldState.getAllCharacters()
+
+    this.midTermMemoriesCache.clear()
+
+    for (const char of characters) {
+      try {
+        const memories = await this.stateStore.loadActiveMidTermMemories(char.id, currentDay)
+        if (memories.length > 0) {
+          this.midTermMemoriesCache.set(char.id, memories)
+          console.log(`[SimulationEngine] Loaded ${memories.length} mid-term memories for ${char.name}`)
+        }
+      } catch (error) {
+        console.error(`[SimulationEngine] Error loading mid-term memories for ${char.id}:`, error)
+      }
+    }
+  }
+
+  // Delete expired mid-term memories and reload cache
+  private async cleanupAndReloadMidTermMemories(currentDay: number): Promise<void> {
+    if (!this.stateStore) return
+
+    const deleted = await this.stateStore.deleteExpiredMidTermMemories(currentDay)
+    if (deleted > 0) {
+      console.log(`[SimulationEngine] Deleted ${deleted} expired mid-term memories`)
+    }
+
+    // Reload cache from DB (reflects deletions)
+    await this.loadMidTermMemoriesCache()
+  }
+
   // Get today's logs from cache and DB (for initial load)
   async getTodayLogs(): Promise<ActivityLogEntry[]> {
     const currentDay = this.worldState.getTime().day
@@ -1947,11 +2002,12 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         engine.setActionConfigs(config.actions)
       }
 
-      // Load schedules and action history BEFORE starting engine
+      // Load schedules, action history, and mid-term memories BEFORE starting engine
       // This prevents race condition where ticks fire before data is loaded
       await engine.seedDefaultSchedules()
       await engine.loadScheduleCache()
       await engine.loadActionHistoryCache()
+      await engine.loadMidTermMemoriesCache()
       engine.initializeLastDay()
 
       engine.start()

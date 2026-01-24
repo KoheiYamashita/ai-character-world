@@ -345,6 +345,158 @@ describe('MemoryStore', () => {
     })
   })
 
+  describe('mid-term memories', () => {
+    it('should add and load active mid-term memories', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: '明日カフェで待ち合わせ',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 3,
+        sourceNpcId: 'npc-1',
+      })
+
+      const memories = await store.loadActiveMidTermMemories('char-1', 1)
+      expect(memories).toHaveLength(1)
+      expect(memories[0].content).toBe('明日カフェで待ち合わせ')
+      expect(memories[0].importance).toBe('high')
+      expect(memories[0].sourceNpcId).toBe('npc-1')
+    })
+
+    it('should filter by characterId', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: 'memory for char-1',
+        importance: 'medium',
+        createdDay: 1,
+        expiresDay: 2,
+      })
+      await store.addMidTermMemory({
+        id: 'mem-2',
+        characterId: 'char-2',
+        content: 'memory for char-2',
+        importance: 'low',
+        createdDay: 1,
+        expiresDay: 1,
+      })
+
+      const char1Memories = await store.loadActiveMidTermMemories('char-1', 1)
+      const char2Memories = await store.loadActiveMidTermMemories('char-2', 1)
+
+      expect(char1Memories).toHaveLength(1)
+      expect(char1Memories[0].content).toBe('memory for char-1')
+      expect(char2Memories).toHaveLength(1)
+      expect(char2Memories[0].content).toBe('memory for char-2')
+    })
+
+    it('should not return expired memories', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: 'expired memory',
+        importance: 'low',
+        createdDay: 1,
+        expiresDay: 1, // expires on day 1
+      })
+      await store.addMidTermMemory({
+        id: 'mem-2',
+        characterId: 'char-1',
+        content: 'active memory',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 3, // expires on day 3
+      })
+
+      // On day 2, mem-1 should be expired (expiresDay < currentDay)
+      const memories = await store.loadActiveMidTermMemories('char-1', 2)
+      expect(memories).toHaveLength(1)
+      expect(memories[0].content).toBe('active memory')
+    })
+
+    it('should return memories sorted by createdDay descending', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: 'older memory',
+        importance: 'medium',
+        createdDay: 1,
+        expiresDay: 5,
+      })
+      await store.addMidTermMemory({
+        id: 'mem-2',
+        characterId: 'char-1',
+        content: 'newer memory',
+        importance: 'high',
+        createdDay: 3,
+        expiresDay: 5,
+      })
+
+      const memories = await store.loadActiveMidTermMemories('char-1', 1)
+      expect(memories).toHaveLength(2)
+      expect(memories[0].content).toBe('newer memory')
+      expect(memories[1].content).toBe('older memory')
+    })
+
+    it('should delete expired memories', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: 'low importance',
+        importance: 'low',
+        createdDay: 1,
+        expiresDay: 1,
+      })
+      await store.addMidTermMemory({
+        id: 'mem-2',
+        characterId: 'char-1',
+        content: 'medium importance',
+        importance: 'medium',
+        createdDay: 1,
+        expiresDay: 2,
+      })
+      await store.addMidTermMemory({
+        id: 'mem-3',
+        characterId: 'char-1',
+        content: 'high importance',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 3,
+      })
+
+      // On day 3, mem-1 and mem-2 should be expired
+      const deleted = await store.deleteExpiredMidTermMemories(3)
+      expect(deleted).toBe(2)
+
+      // Only mem-3 should remain
+      const remaining = await store.loadActiveMidTermMemories('char-1', 3)
+      expect(remaining).toHaveLength(1)
+      expect(remaining[0].content).toBe('high importance')
+    })
+
+    it('should return 0 when no memories to delete', async () => {
+      const deleted = await store.deleteExpiredMidTermMemories(1)
+      expect(deleted).toBe(0)
+    })
+
+    it('should be cleared with clear()', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: 'test memory',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 5,
+      })
+
+      await store.clear()
+
+      const memories = await store.loadActiveMidTermMemories('char-1', 1)
+      expect(memories).toHaveLength(0)
+    })
+  })
+
   describe('hasData', () => {
     it('should return false when empty', async () => {
       const result = await store.hasData()

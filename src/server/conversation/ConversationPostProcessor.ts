@@ -1,6 +1,8 @@
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
-import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC } from '@/types'
+import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC, WorldTime } from '@/types'
 import type { SimCharacter } from '@/server/simulation/types'
+import type { MidTermMemory } from '@/types/behavior'
 import { llmGenerateObject } from '@/server/llm'
 
 const ConversationExtractionSchema = z.object({
@@ -9,6 +11,10 @@ const ConversationExtractionSchema = z.object({
   updatedFacts: z.array(z.string()).describe('NPCのfacts全量。更新がなければ既存をそのまま、新情報があれば追加して出力'),
   mood: z.enum(['happy', 'neutral', 'sad', 'angry', 'excited']).describe('会話後のNPCの気分'),
   topicsDiscussed: z.array(z.string()).describe('話題になったトピック'),
+  memories: z.array(z.object({
+    content: z.string().describe('行動に影響する情報（簡潔に）'),
+    importance: z.enum(['low', 'medium', 'high']).describe('重要度: low=些細な情報, medium=数日覚えておくべき情報, high=重要な約束や予定'),
+  })).describe('会話から得られた、キャラクターの行動に影響しうる記憶（約束、予定、新しい知識など）'),
 })
 
 export type ConversationExtraction = z.infer<typeof ConversationExtractionSchema>
@@ -16,11 +22,20 @@ export type ConversationExtraction = z.infer<typeof ConversationExtractionSchema
 export type NPCUpdateCallback = (npcId: string, updates: Partial<NPCDynamicState>) => void
 export type SummaryPersistCallback = (entry: ConversationSummaryEntry) => Promise<void>
 export type NPCStatePersistCallback = (npcId: string, state: NPCDynamicState) => Promise<void>
+export type MemoryPersistCallback = (memories: MidTermMemory[]) => Promise<void>
+
+// Importance → days until expiry mapping
+const IMPORTANCE_EXPIRY_DAYS: Record<string, number> = {
+  low: 0,     // 当日中
+  medium: 1,  // 翌日まで
+  high: 2,    // 2日後まで
+}
 
 export class ConversationPostProcessor {
   private onNPCUpdate: NPCUpdateCallback | null = null
   private onSummaryPersist: SummaryPersistCallback | null = null
   private onNPCStatePersist: NPCStatePersistCallback | null = null
+  private onMemoryPersist: MemoryPersistCallback | null = null
 
   setOnNPCUpdate(callback: NPCUpdateCallback): void {
     this.onNPCUpdate = callback
@@ -34,7 +49,11 @@ export class ConversationPostProcessor {
     this.onNPCStatePersist = callback
   }
 
-  async process(session: ConversationSession, npc: NPC, character: SimCharacter): Promise<ConversationExtraction | null> {
+  setOnMemoryPersist(callback: MemoryPersistCallback): void {
+    this.onMemoryPersist = callback
+  }
+
+  async process(session: ConversationSession, npc: NPC, character: SimCharacter, currentTime?: WorldTime): Promise<ConversationExtraction | null> {
     // Skip if no messages
     if (session.messages.length === 0) {
       return null
@@ -99,6 +118,22 @@ export class ConversationPostProcessor {
       await this.onNPCStatePersist(npc.id, fullState)
     }
 
+    // Persist mid-term memories
+    if (this.onMemoryPersist && currentTime && extraction.memories && extraction.memories.length > 0) {
+      const memories: MidTermMemory[] = extraction.memories.map((m, i) => ({
+        id: randomUUID(),
+        characterId: session.characterId,
+        content: m.content,
+        importance: m.importance,
+        createdDay: currentTime.day,
+        expiresDay: currentTime.day + (IMPORTANCE_EXPIRY_DAYS[m.importance] ?? 0),
+        sourceNpcId: npc.id,
+      }))
+
+      await this.onMemoryPersist(memories)
+      console.log(`[ConversationPostProcessor] Persisted ${memories.length} mid-term memories for ${character.name}`)
+    }
+
     return extraction
   }
 
@@ -140,6 +175,7 @@ export class ConversationPostProcessor {
     parts.push('- updatedFacts: NPCのfacts全量を出力。変更がなければ既存をそのまま出力し、新しい情報があれば追加して全量を出力してください')
     parts.push('- mood: 会話後のNPCの気分（happy/neutral/sad/angry/excited）')
     parts.push('- topicsDiscussed: 話題になったトピック一覧')
+    parts.push('- memories: キャラクターの今後の行動に影響しうる情報を抽出。例: 約束（「明日また来る」）、新知識（「あの店は水曜定休」）、予定の変更など。雑談や既知の情報は含めない。なければ空配列')
 
     return parts.join('\n')
   }
