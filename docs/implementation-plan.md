@@ -281,14 +281,15 @@
 
 ---
 
-### Step 22: ミニエピソード
+### ✅ Step 22: ミニエピソード
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 22-1 | `MiniEpisodeGenerator` インターフェース | ビルド通過 |
-| 22-2 | `StubMiniEpisodeGenerator`（常にnull） | スタブ動作 |
-| 22-3 | `LLMMiniEpisodeGenerator`（20%確率） | 時々エピソード生成 |
-| 22-4 | エピソードをログ/UIに表示 | 生成されたエピソードを確認 |
+| ✅ 22-1 | `MiniEpisodeGenerator` インターフェース + 型定義 | ビルド通過 |
+| ✅ 22-2 | `StubMiniEpisodeGenerator`（常にnull） | スタブ動作 |
+| ✅ 22-3 | `LLMMiniEpisodeGenerator`（50%確率、zodスキーマ） | 時々エピソード生成 |
+| ✅ 22-4 | 行動決定プロンプトへの反映（型・DB・プロンプト） | episode表示確認 |
+| ✅ 22-5 | エピソードをログ/UIに表示 | ActivityLogPanelで確認 |
 
 ---
 

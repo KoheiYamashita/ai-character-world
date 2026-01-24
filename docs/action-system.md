@@ -491,89 +491,101 @@ const ACTIONS: Record<ActionId, ActionDefinition> = {
 
 ### 概要
 
-アクション実行後、確率でミニエピソードを生成し、記憶を豊かにする。
+アクション完了後、設定された確率（デフォルト50%）でLLMがミニエピソード（小さな出来事）を生成し、キャラクターの記憶を豊かにする。生成されたエピソードは行動履歴に記録され、次回以降の行動決定・会話プロンプトに反映される。
+
+### 設定
+
+`public/data/world-config.json`:
+```json
+{
+  "miniEpisode": {
+    "probability": 0.5
+  }
+}
+```
+
+### スキップ対象アクション
+
+以下のアクションではエピソード生成をスキップする:
+- `talk` - 会話自体が記録されるため
+- `thinking` - システム内部アクションのため
+- `idle` - 特に行動していないため
 
 ### フロー
 
 ```
-アクション実行
+ActionExecutor.completeAction()
     ↓
-確率判定（20%）
+onRecordHistory → SimulationEngine.recordActionHistory()
+    ├── キャッシュ更新 + DB保存 + ログ配信（既存）
+    └── generateMiniEpisode() 非同期開始
+          ├── スキップ対象アクション判定
+          ├── actionExecutor.getCurrentFacility() ← action stateまだ残っている
+          ├── generator.generate(character, actionId, facility)
+          │     ├── 確率判定: return null（確率外）
+          │     └── 確率内: LLM呼び出し → MiniEpisodeResult
+          ├── ステータス変化適用（0-100クランプ）
+          ├── キャッシュの最新ActionHistoryEntryにepisode追記
+          ├── DB更新 (action_history.episode)
+          └── notifyLogSubscribersMiniEpisode() → SSE配信
     ↓
-┌─────────────────────────────────────────┐
-│ 80%: 通常                               │
-│ - ステータス変化: 固定値                 │
-│ - ミニエピソード: なし                   │
-└─────────────────────────────────────────┘
-┌─────────────────────────────────────────┐
-│ 20%: LLM生成                            │
-│ - ミニエピソード: LLMが生成              │
-│ - ステータス変化: LLMが決定（範囲内で）   │
-│ - 記憶に追加                            │
-└─────────────────────────────────────────┘
+action stateクリア → 次の行動決定
 ```
 
 ### インターフェース
 
+`src/server/episode/MiniEpisodeGenerator.ts`:
 ```typescript
 interface MiniEpisodeResult {
-  episode: string                    // "入浴剤を使ってリラックスした"
-  statChanges: Partial<CharacterStats>  // { mood: 5 }
+  episode: string       // "新メニューのパンケーキが美味しかった"
+  statChanges: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>
 }
 
 interface MiniEpisodeGenerator {
   generate(
     character: SimCharacter,
-    action: ActionDefinition,
+    actionId: ActionId,
     facility: FacilityInfo | null
   ): Promise<MiniEpisodeResult | null>
 }
 ```
 
-### LLM実装（将来）
+### LLM実装
 
-```typescript
-class LLMMiniEpisodeGenerator implements MiniEpisodeGenerator {
-  async generate(character, action, facility): Promise<MiniEpisodeResult | null> {
-    // 20%の確率でのみ生成
-    if (Math.random() > 0.2) return null
+`src/server/episode/LLMMiniEpisodeGenerator.ts`:
+- `world-config.json` の `miniEpisode.probability` で確率管理
+- `Math.random() > probability` なら即 `null` 返却
+- `llmGenerateObject` でエピソード生成（zodスキーマ）
+- 各ステータス変化は -10〜+10 の範囲にクランプ
+- プロンプト: キャラクター名・性格、アクション種別、施設タグ、現在ステータス
 
-    const result = await llm.generate({
-      schema: z.object({
-        episode: z.string(),
-        statChanges: z.object({
-          mood: z.number().min(-10).max(10).optional(),
-          energy: z.number().min(-10).max(10).optional(),
-          satiety: z.number().min(-10).max(10).optional(),
-          hygiene: z.number().min(-10).max(10).optional(),
-          bladder: z.number().min(-10).max(10).optional(),
-        }),
-      }),
-      prompt: `
-        キャラクター: ${character.name}
-        アクション: ${action.type}
-        場所: ${facility?.tags.join(', ') || '不明'}
-        現在のステータス: ${JSON.stringify(character.stats)}
+### スタブ実装
 
-        このアクション中に起きた小さな出来事を生成してください。
-        ポジティブでもネガティブでも構いません。
-      `
-    })
+`src/server/episode/StubMiniEpisodeGenerator.ts`:
+- LLM未設定時に使用
+- 常に `null` を返す（エピソード生成なし）
 
-    return result
-  }
-}
+### 行動決定・会話プロンプトへの反映
+
+`ActionHistoryEntry` に `episode?: string` フィールドが追加され、行動決定プロンプトと会話プロンプトの「今日の行動」セクションに表示される:
+
+```
+【今日の行動】
+- 08:00 eat → レストランA (30分) [朝食を食べに]
+  ✨ 新メニューのパンケーキが美味しかった
+- 09:30 work → オフィス (120分) [仕事の時間]
 ```
 
-### 初期実装（スタブ）
+### 永続化
 
-```typescript
-class StubMiniEpisodeGenerator implements MiniEpisodeGenerator {
-  async generate(character, action, facility): Promise<MiniEpisodeResult | null> {
-    // 初期実装では常にnullを返す（ミニエピソードなし）
-    return null
-  }
-}
+- `action_history` テーブルに `episode TEXT` カラム（マイグレーション自動適用）
+- `updateActionHistoryEpisode()` メソッドで非同期更新
+
+### UI表示
+
+ActivityLogPanelに `MiniEpisodeLogLine` コンポーネント:
+```
+[10:30] キャラ名 ✨ エピソード内容 (mood+5)
 ```
 
 ### ミニエピソード例

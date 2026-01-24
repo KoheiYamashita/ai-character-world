@@ -54,6 +54,7 @@ interface ActionHistoryRow {
   target: string | null
   duration_minutes: number | null
   reason: string | null
+  episode: string | null
   created_at: number
 }
 
@@ -193,6 +194,18 @@ export class SqliteStore implements StateStore {
         updated_at INTEGER NOT NULL
       );
     `)
+
+    // Migration: add episode column to action_history
+    this.migrateActionHistoryEpisode()
+  }
+
+  private migrateActionHistoryEpisode(): void {
+    const columns = this.db.pragma('table_info(action_history)') as Array<{ name: string }>
+    const hasEpisode = columns.some(c => c.name === 'episode')
+    if (!hasEpisode) {
+      this.db.prepare('ALTER TABLE action_history ADD COLUMN episode TEXT').run()
+      console.log('[SqliteStore] Migrated: added episode column to action_history')
+    }
   }
 
   async saveState(state: SerializedWorldState): Promise<void> {
@@ -533,7 +546,25 @@ export class SqliteStore implements StateStore {
       target: row.target ?? undefined,
       durationMinutes: row.duration_minutes ?? undefined,
       reason: row.reason ?? undefined,
+      episode: row.episode ?? undefined,
     }))
+  }
+
+  async updateActionHistoryEpisode(characterId: string, day: number, time: string, episode: string): Promise<void> {
+    const stmt = this.db.prepare(`
+      UPDATE action_history SET episode = @episode
+      WHERE id = (
+        SELECT id FROM action_history
+        WHERE character_id = @character_id AND day = @day AND time = @time
+        ORDER BY id DESC LIMIT 1
+      )
+    `)
+    stmt.run({
+      character_id: characterId,
+      day,
+      time,
+      episode,
+    })
   }
 
   // NPC Summary CRUD methods

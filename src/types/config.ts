@@ -137,6 +137,10 @@ export interface ActionConfig {
   turnIntervalMs?: number
 }
 
+export interface MiniEpisodeConfig {
+  probability: number  // ミニエピソード生成確率（0-1）
+}
+
 export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
@@ -150,4 +154,5 @@ export interface WorldConfig {
   time: TimeConfig
   error?: ErrorConfig
   actions?: Record<string, ActionConfig>
+  miniEpisode?: MiniEpisodeConfig
 }

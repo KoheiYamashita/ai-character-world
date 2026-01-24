@@ -90,6 +90,11 @@ src/
 │   │   ├── SqliteStore.ts             # SQLite実装
 │   │   └── MemoryStore.ts             # インメモリ（テスト用）
 │   │
+│   ├── episode/
+│   │   ├── MiniEpisodeGenerator.ts    # インターフェース + 型
+│   │   ├── StubMiniEpisodeGenerator.ts # スタブ（LLM未設定時）
+│   │   └── LLMMiniEpisodeGenerator.ts # LLMエピソード生成
+│   │
 │   └── llm/
 │       ├── client.ts                  # LLMモデル生成
 │       └── errorHandler.ts            # エラーハンドリング・リトライ

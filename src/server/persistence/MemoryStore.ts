@@ -164,6 +164,18 @@ export class MemoryStore implements StateStore {
     return JSON.parse(JSON.stringify(history))
   }
 
+  async updateActionHistoryEpisode(characterId: string, day: number, time: string, episode: string): Promise<void> {
+    const key = this.characterDayKey(characterId, day)
+    const history = this.actionHistory.get(key)
+    if (!history) return
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].time === time) {
+        history[i].episode = episode
+        break
+      }
+    }
+  }
+
   // NPC Summary methods
 
   async saveNPCSummary(entry: ConversationSummaryEntry): Promise<void> {

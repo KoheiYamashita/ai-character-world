@@ -636,6 +636,9 @@ export class LLMBehaviorDecider implements BehaviorDecider {
         if (a.reason) {
           line += ` [${a.reason}]`
         }
+        if (a.episode) {
+          line += `\n  ✨ ${a.episode}`
+        }
         return line
       })
       .join('\n')

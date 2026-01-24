@@ -343,6 +343,67 @@ describe('MemoryStore', () => {
       expect(day2).toHaveLength(1)
       expect(day2[0].actionId).toBe('sleep')
     })
+
+    it('should update episode on matching entry', async () => {
+      await store.addActionHistory({
+        characterId: 'char-1',
+        day: 1,
+        time: '08:00',
+        actionId: 'eat',
+      })
+      await store.addActionHistory({
+        characterId: 'char-1',
+        day: 1,
+        time: '10:00',
+        actionId: 'work',
+      })
+
+      await store.updateActionHistoryEpisode('char-1', 1, '08:00', 'おいしかった')
+
+      const history = await store.loadActionHistoryForDay('char-1', 1)
+      expect(history[0].episode).toBe('おいしかった')
+      expect(history[1].episode).toBeUndefined()
+    })
+
+    it('should update last matching entry when multiple have same time', async () => {
+      await store.addActionHistory({
+        characterId: 'char-1',
+        day: 1,
+        time: '08:00',
+        actionId: 'eat',
+      })
+      await store.addActionHistory({
+        characterId: 'char-1',
+        day: 1,
+        time: '08:00',
+        actionId: 'rest',
+      })
+
+      await store.updateActionHistoryEpisode('char-1', 1, '08:00', 'エピソード')
+
+      const history = await store.loadActionHistoryForDay('char-1', 1)
+      expect(history[0].episode).toBeUndefined() // first entry unchanged
+      expect(history[1].episode).toBe('エピソード') // last entry updated
+    })
+
+    it('should not update entries with non-matching time', async () => {
+      await store.addActionHistory({
+        characterId: 'char-1',
+        day: 1,
+        time: '08:00',
+        actionId: 'eat',
+      })
+
+      await store.updateActionHistoryEpisode('char-1', 1, '09:00', 'エピソード')
+
+      const history = await store.loadActionHistoryForDay('char-1', 1)
+      expect(history[0].episode).toBeUndefined()
+    })
+
+    it('should not crash when no entries exist', async () => {
+      await store.updateActionHistoryEpisode('char-1', 1, '08:00', 'エピソード')
+      // Should not throw
+    })
   })
 
   describe('mid-term memories', () => {

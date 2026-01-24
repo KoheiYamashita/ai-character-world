@@ -25,6 +25,7 @@ export interface ActionHistoryEntry {
   target?: string           // 対象（施設ID、NPC ID等）
   durationMinutes?: number  // 実行時間（分）
   reason?: string           // 行動理由（LLMが出力したもの）
+  episode?: string          // ミニエピソード（アクション後に生成された出来事）
 }
 
 /**

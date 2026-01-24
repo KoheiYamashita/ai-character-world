@@ -304,6 +304,79 @@ describe('SqliteStore', () => {
       const history = await store.loadActionHistoryForDay('c1', 99)
       expect(history).toEqual([])
     })
+
+    it('should load episode field when present', async () => {
+      await store.addActionHistory({
+        characterId: 'c1',
+        day: 1,
+        time: '10:00',
+        actionId: 'eat',
+      })
+      await store.updateActionHistoryEpisode('c1', 1, '10:00', 'おいしいパンケーキを食べた')
+      const history = await store.loadActionHistoryForDay('c1', 1)
+      expect(history[0].episode).toBe('おいしいパンケーキを食べた')
+    })
+
+    it('should return undefined episode when not set', async () => {
+      await store.addActionHistory({
+        characterId: 'c1',
+        day: 1,
+        time: '10:00',
+        actionId: 'rest',
+      })
+      const history = await store.loadActionHistoryForDay('c1', 1)
+      expect(history[0].episode).toBeUndefined()
+    })
+  })
+
+  describe('updateActionHistoryEpisode', () => {
+    it('should update episode of matching entry', async () => {
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '09:00', actionId: 'eat' })
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '10:00', actionId: 'work' })
+
+      await store.updateActionHistoryEpisode('c1', 1, '09:00', '新メニュー発見')
+
+      const history = await store.loadActionHistoryForDay('c1', 1)
+      expect(history[0].episode).toBe('新メニュー発見')
+      expect(history[1].episode).toBeUndefined()
+    })
+
+    it('should update only the latest entry when multiple entries have same time', async () => {
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '09:00', actionId: 'eat' })
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '09:00', actionId: 'rest' })
+
+      await store.updateActionHistoryEpisode('c1', 1, '09:00', 'エピソード')
+
+      const history = await store.loadActionHistoryForDay('c1', 1)
+      // The latest entry (rest) should have the episode
+      const withEpisode = history.filter(h => h.episode === 'エピソード')
+      expect(withEpisode).toHaveLength(1)
+      expect(withEpisode[0].actionId).toBe('rest')
+    })
+
+    it('should not affect other characters', async () => {
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '09:00', actionId: 'eat' })
+      await store.addActionHistory({ characterId: 'c2', day: 1, time: '09:00', actionId: 'eat' })
+
+      await store.updateActionHistoryEpisode('c1', 1, '09:00', 'c1のエピソード')
+
+      const c1History = await store.loadActionHistoryForDay('c1', 1)
+      const c2History = await store.loadActionHistoryForDay('c2', 1)
+      expect(c1History[0].episode).toBe('c1のエピソード')
+      expect(c2History[0].episode).toBeUndefined()
+    })
+
+    it('should not affect other days', async () => {
+      await store.addActionHistory({ characterId: 'c1', day: 1, time: '09:00', actionId: 'eat' })
+      await store.addActionHistory({ characterId: 'c1', day: 2, time: '09:00', actionId: 'eat' })
+
+      await store.updateActionHistoryEpisode('c1', 1, '09:00', 'day1のエピソード')
+
+      const day1 = await store.loadActionHistoryForDay('c1', 1)
+      const day2 = await store.loadActionHistoryForDay('c1', 2)
+      expect(day1[0].episode).toBe('day1のエピソード')
+      expect(day2[0].episode).toBeUndefined()
+    })
   })
 
   describe('clear', () => {

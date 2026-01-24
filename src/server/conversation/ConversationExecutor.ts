@@ -360,6 +360,7 @@ export class ConversationExecutor {
         let line = `- ${a.time} ${a.actionId}`
         if (a.target) line += ` → ${a.target}`
         if (a.reason) line += ` [${a.reason}]`
+        if (a.episode) line += `\n  ✨ ${a.episode}`
         return line
       }).join('\n'))
       parts.push('')

@@ -2798,4 +2798,186 @@ describe('SimulationEngine (integration)', () => {
       expect(cache.get('c2')).toHaveLength(1)
     })
   })
+
+  describe('miniEpisodeGenerator integration', () => {
+    it('should use StubMiniEpisodeGenerator by default', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const generator = (engine as any).miniEpisodeGenerator
+      expect(generator).toBeDefined()
+      // StubMiniEpisodeGenerator always returns null
+      const result = await generator.generate({} as never, 'eat', null)
+      expect(result).toBeNull()
+    })
+
+    it('should call generateMiniEpisode when recording action history', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Spy on generateMiniEpisode
+      const spy = vi.spyOn(engine as any, 'generateMiniEpisode').mockResolvedValue(undefined)
+
+      ;(engine as any).recordActionHistory({
+        characterId: 'c1',
+        actionId: 'eat',
+        facilityId: 'restaurant-1',
+        reason: 'お腹が空いた',
+      })
+
+      expect(spy).toHaveBeenCalledWith(
+        'c1',
+        'eat',
+        null, // facility (no map obstacles set up)
+        expect.any(String), // time
+        expect.any(Number), // day
+      )
+    })
+
+    it('should apply stat changes from mini episode result', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1', { mood: 50, energy: 60 })]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+
+      // Mock generator to return a result
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: 'いい出来事があった',
+          statChanges: { mood: 5, energy: -3 },
+        }),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      await (engine as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      const char = engine.getCharacter('c1')!
+      expect(char.mood).toBe(55) // 50 + 5
+      expect(char.energy).toBe(57) // 60 - 3
+    })
+
+    it('should clamp stat changes to 0-100 range', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1', { mood: 98 })]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: 'すごくいい出来事',
+          statChanges: { mood: 10 },
+        }),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      await (engine as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      const char = engine.getCharacter('c1')!
+      expect(char.mood).toBe(100) // clamped to 100
+    })
+
+    it('should update action history cache with episode', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Pre-populate cache with an entry
+      const cacheKey = (engine as any).characterDayCacheKey('c1', 1)
+      ;(engine as any).actionHistoryCache.set(cacheKey, [
+        { time: '10:00', actionId: 'eat', reason: 'hungry' },
+      ])
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: '新メニューを発見',
+          statChanges: {},
+        }),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      await (engine as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      const cache = (engine as any).actionHistoryCache.get(cacheKey)
+      expect(cache[0].episode).toBe('新メニューを発見')
+    })
+
+    it('should call stateStore.updateActionHistoryEpisode on success', async () => {
+      const mockStore = {
+        hasData: vi.fn().mockResolvedValue(false),
+        updateActionHistoryEpisode: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn(),
+      }
+      const e = new SimulationEngine({ tickRate: 20 }, mockStore as never)
+      const maps = { town: createTestMap('town') }
+      await e.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: 'テストエピソード',
+          statChanges: {},
+        }),
+      }
+      ;(e as any).miniEpisodeGenerator = mockGenerator
+
+      await (e as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      expect(mockStore.updateActionHistoryEpisode).toHaveBeenCalledWith('c1', 1, '10:00', 'テストエピソード')
+    })
+
+    it('should emit mini_episode log entry on success', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: 'ログエピソード',
+          statChanges: { mood: 3 },
+        }),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      const logEntries: any[] = []
+      engine.subscribeToLogs((entry) => logEntries.push(entry))
+
+      await (engine as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      expect(logEntries).toHaveLength(1)
+      expect(logEntries[0].type).toBe('mini_episode')
+      expect(logEntries[0].characterId).toBe('c1')
+      expect(logEntries[0].episode).toBe('ログエピソード')
+      expect(logEntries[0].statChanges).toEqual({ mood: 3 })
+      expect(logEntries[0].actionId).toBe('eat')
+    })
+
+    it('should not emit log or update when generator returns null', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue(null),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      const logEntries: any[] = []
+      engine.subscribeToLogs((entry) => logEntries.push(entry))
+
+      await (engine as any).generateMiniEpisode('c1', 'eat', null, '10:00', 1)
+
+      expect(logEntries).toHaveLength(0)
+    })
+
+    it('should not crash when character does not exist', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const mockGenerator = {
+        generate: vi.fn().mockResolvedValue({
+          episode: 'エピソード',
+          statChanges: { mood: 5 },
+        }),
+      }
+      ;(engine as any).miniEpisodeGenerator = mockGenerator
+
+      // Should not throw for non-existent character
+      await (engine as any).generateMiniEpisode('nonexistent', 'eat', null, '10:00', 1)
+      expect(mockGenerator.generate).not.toHaveBeenCalled()
+    })
+  })
 })

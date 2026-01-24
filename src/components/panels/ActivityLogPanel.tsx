@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useActivityLogStore } from '@/stores'
-import type { ActivityLogEntry, ActionLogEntry, ConversationLogEntry, ConversationMessageLogEntry } from '@/types'
+import type { ActivityLogEntry, ActionLogEntry, ConversationLogEntry, ConversationMessageLogEntry, MiniEpisodeLogEntry } from '@/types'
 
 const ACTION_LABELS: Record<string, string> = {
   eat: '食事',
@@ -68,6 +68,21 @@ function ConversationMessageLogLine({ entry }: { entry: ConversationMessageLogEn
   )
 }
 
+function MiniEpisodeLogLine({ entry }: { entry: MiniEpisodeLogEntry }) {
+  const statStr = Object.entries(entry.statChanges)
+    .map(([key, val]) => `${key}${val > 0 ? '+' : ''}${val}`)
+    .join(' ')
+
+  return (
+    <div className="text-sm text-slate-300 py-0.5 pl-4">
+      <span className="text-slate-500">[{entry.time}]</span>{' '}
+      <span className="text-blue-300 font-medium">{entry.characterName}</span>{' '}
+      <span className="text-yellow-300">✨ {entry.episode}</span>
+      {statStr && <span className="text-slate-500"> ({statStr})</span>}
+    </div>
+  )
+}
+
 function LogEntry({ entry }: { entry: ActivityLogEntry }) {
   switch (entry.type) {
     case 'action':
@@ -76,6 +91,8 @@ function LogEntry({ entry }: { entry: ActivityLogEntry }) {
       return <ConversationLogLine entry={entry} />
     case 'conversation_message':
       return <ConversationMessageLogLine entry={entry} />
+    case 'mini_episode':
+      return <MiniEpisodeLogLine entry={entry} />
   }
 }
 

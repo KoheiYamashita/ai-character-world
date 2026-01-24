@@ -103,6 +103,11 @@ export interface StateStore {
   loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]>
 
   /**
+   * Update the episode field of the most recent action history entry
+   */
+  updateActionHistoryEpisode(characterId: string, day: number, time: string, episode: string): Promise<void>
+
+  /**
    * Save an NPC conversation summary
    */
   saveNPCSummary(entry: ConversationSummaryEntry): Promise<void>

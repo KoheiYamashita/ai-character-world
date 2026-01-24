@@ -138,5 +138,8 @@
       "duration": 0,
       "effects": {}
     }
+  },
+  "miniEpisode": {
+    "probability": 0.5
   }
 }

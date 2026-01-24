@@ -1,4 +1,4 @@
-import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry } from '@/types'
+import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry, MiniEpisodeConfig } from '@/types'
 import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry, MidTermMemory, RecentConversation } from '@/types/behavior'
 import type {
   SimulationConfig,
@@ -18,6 +18,8 @@ import { ConversationManager } from '../conversation/ConversationManager'
 import { ConversationExecutor } from '../conversation/ConversationExecutor'
 import type { ConversationContext } from '../conversation/ConversationExecutor'
 import { ConversationPostProcessor } from '../conversation/ConversationPostProcessor'
+import type { MiniEpisodeGenerator } from '../episode/MiniEpisodeGenerator'
+import { StubMiniEpisodeGenerator } from '../episode/StubMiniEpisodeGenerator'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
 import { getActionsForTags } from '@/lib/facilityMapping'
@@ -67,6 +69,8 @@ export class SimulationEngine {
   private recentConversationsCache: Map<string, RecentConversation[]> = new Map()
   // Tracks which day the cache was populated for (used to detect day boundary on sleep)
   private recentConversationsCacheDay: Map<string, number> = new Map()
+  // Mini episode generator
+  private miniEpisodeGenerator: MiniEpisodeGenerator = new StubMiniEpisodeGenerator()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
   private pendingDecisions: Set<string> = new Set()
   // Track last day for day-change detection (schedule cache refresh)
@@ -1539,6 +1543,85 @@ export class SimulationEngine {
       reason: entry.reason,
       time: timeStr,
     })
+
+    // Trigger mini episode generation (async, non-blocking)
+    // Get facility info now (before action state is cleared)
+    const facility = this.actionExecutor.getCurrentFacility(entry.characterId)
+    this.generateMiniEpisode(entry.characterId, entry.actionId as ActionId, facility, timeStr, currentDay)
+      .catch(error => {
+        console.error('[SimulationEngine] Error in generateMiniEpisode:', error)
+      })
+  }
+
+  // Generate mini episode after action completion (async)
+  private async generateMiniEpisode(
+    characterId: string,
+    actionId: ActionId,
+    facility: import('@/types').FacilityInfo | null,
+    time: string,
+    day: number
+  ): Promise<void> {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return
+
+    const result = await this.miniEpisodeGenerator.generate(character, actionId, facility)
+    if (!result) return
+
+    // Apply stat changes (clamp each to 0-100)
+    if (Object.keys(result.statChanges).length > 0) {
+      const currentChar = this.worldState.getCharacter(characterId)
+      if (!currentChar) return
+
+      const statUpdates: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>> = {}
+      for (const [key, value] of Object.entries(result.statChanges)) {
+        const stat = key as keyof typeof statUpdates
+        statUpdates[stat] = Math.max(0, Math.min(100, currentChar[stat] + value))
+      }
+      this.worldState.updateCharacter(characterId, statUpdates)
+    }
+
+    // Update cache: add episode to the last matching entry
+    const cacheKey = this.characterDayCacheKey(characterId, day)
+    const cached = this.actionHistoryCache.get(cacheKey)
+    if (cached) {
+      for (let i = cached.length - 1; i >= 0; i--) {
+        if (cached[i].time === time) {
+          cached[i].episode = result.episode
+          break
+        }
+      }
+    }
+
+    // Update DB
+    if (this.stateStore) {
+      this.stateStore.updateActionHistoryEpisode(characterId, day, time, result.episode)
+        .catch(error => {
+          console.error('[SimulationEngine] Error updating episode in DB:', error)
+        })
+    }
+
+    // Notify log subscribers
+    this.notifyLogSubscribersMiniEpisode(characterId, actionId, result.episode, result.statChanges, time)
+  }
+
+  // Notify log subscribers with mini episode
+  private notifyLogSubscribersMiniEpisode(
+    characterId: string,
+    actionId: string,
+    episode: string,
+    statChanges: Record<string, number>,
+    time: string
+  ): void {
+    const character = this.worldState.getCharacter(characterId)
+    this.emitLogEntry({
+      type: 'mini_episode',
+      characterId,
+      characterName: character?.name ?? characterId,
+      time,
+      actionId,
+      episode,
+      statChanges,
+    })
   }
 
   // Get action history for a character (cache priority, fallback to empty)
@@ -1900,6 +1983,19 @@ export class SimulationEngine {
     }
     console.log(`[SimulationEngine] Action configs set`)
   }
+
+  // Set mini episode config (creates LLMMiniEpisodeGenerator if LLM is available)
+  async setMiniEpisodeConfig(config: MiniEpisodeConfig): Promise<void> {
+    const { isLLMAvailable } = await import('../llm')
+    if (!isLLMAvailable()) {
+      console.log(`[SimulationEngine] LLM not available, using StubMiniEpisodeGenerator`)
+      return
+    }
+
+    const { LLMMiniEpisodeGenerator } = await import('../episode/LLMMiniEpisodeGenerator')
+    this.miniEpisodeGenerator = new LLMMiniEpisodeGenerator(config.probability)
+    console.log(`[SimulationEngine] MiniEpisodeGenerator set (probability: ${config.probability})`)
+  }
 }
 
 // Singleton instance for the server
@@ -2057,6 +2153,11 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       // Set action configs for ActionExecutor and LLMBehaviorDecider
       if (config.actions) {
         engine.setActionConfigs(config.actions)
+      }
+
+      // Set mini episode config
+      if (config.miniEpisode) {
+        await engine.setMiniEpisodeConfig(config.miniEpisode)
       }
 
       // Load schedules, action history, and mid-term memories BEFORE starting engine

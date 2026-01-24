@@ -35,4 +35,14 @@ export interface ConversationMessageLogEntry {
   time: string
 }
 
-export type ActivityLogEntry = ActionLogEntry | ConversationLogEntry | ConversationMessageLogEntry
+export interface MiniEpisodeLogEntry {
+  type: 'mini_episode'
+  characterId: string
+  characterName: string
+  time: string
+  actionId: string
+  episode: string
+  statChanges: Record<string, number>
+}
+
+export type ActivityLogEntry = ActionLogEntry | ConversationLogEntry | ConversationMessageLogEntry | MiniEpisodeLogEntry
