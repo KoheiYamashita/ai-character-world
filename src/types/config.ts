@@ -133,6 +133,8 @@ export interface ActionConfig {
     mood?: number
     bladder?: number
   }
+  // talk アクション用: 各ターン間のインターバル（ms）
+  turnIntervalMs?: number
 }
 
 export interface WorldConfig {

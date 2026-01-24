@@ -1,5 +1,6 @@
 import { WorldCanvas } from '@/components/world/WorldCanvas'
 import { StatusPanel } from '@/components/panels/StatusPanel'
+import { ActivityLogPanel } from '@/components/panels/ActivityLogPanel'
 
 export default function Home() {
   return (
@@ -7,7 +8,10 @@ export default function Home() {
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-white mb-6">AI Character World</h1>
         <div className="flex gap-6">
-          <WorldCanvas />
+          <div className="flex flex-col gap-4">
+            <WorldCanvas />
+            <ActivityLogPanel />
+          </div>
           <StatusPanel />
         </div>
       </div>

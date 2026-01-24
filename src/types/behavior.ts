@@ -1,4 +1,4 @@
-import type { FacilityInfo, FacilityTag, WorldTime, ScheduleEntry, ActionId } from '@/types'
+import type { FacilityInfo, FacilityTag, WorldTime, ScheduleEntry, ActionId, ConversationGoal } from '@/types'
 import type { SimCharacter, SimNPC } from '@/server/simulation/types'
 
 /**
@@ -109,7 +109,7 @@ export interface BehaviorDecision {
   reason?: string                   // 決定理由（ログ用）
   // talk アクション用
   targetNpcId?: string              // 会話相手のNPC ID
-  conversationGoal?: string         // 会話の目的
+  conversationGoal?: ConversationGoal  // 会話の目的
   // 施設選択用（eat, bathe等）
   targetFacilityId?: string         // 選択した施設ID
   // スケジュール変更（LLMが提案）

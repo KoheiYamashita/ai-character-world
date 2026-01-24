@@ -13,6 +13,16 @@ export function createNPCFromConfig(
     currentNodeId: config.spawnNodeId,
     position: spawnPosition,
     direction: 'down',
+    // プロフィール
+    personality: config.personality,
+    tendencies: config.tendencies,
+    customPrompt: config.customPrompt,
+    facts: config.facts,
+    // 動的ステータス（初期値）
+    affinity: 0,
+    mood: 'neutral',
+    conversationCount: 0,
+    lastConversation: null,
   }
 }
 

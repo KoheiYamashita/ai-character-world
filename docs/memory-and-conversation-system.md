@@ -97,7 +97,6 @@ const response = await characterLLM.generate({
   schema: z.object({
     utterance: z.string(),
     goalAchieved: z.boolean(),
-    wantsToEndConversation: z.boolean(),
   }),
   prompt: `
     目的: ${goal}

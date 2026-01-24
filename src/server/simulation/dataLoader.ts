@@ -13,6 +13,7 @@ import type {
   NPC,
   ScheduleEntry,
 } from '@/types'
+import { createNPCFromConfig } from '@/lib/npcLoader'
 import type { TileToPixelConfig, NodeLabel, EntranceConfig } from '@/data/maps/grid'
 import { tileToPixelObstacle, tileToPixelEntrance } from '@/data/maps/grid'
 
@@ -387,23 +388,13 @@ export async function loadNPCsServer(config?: WorldConfig): Promise<NPC[]> {
     if (!map) continue
 
     for (const npcConfig of mapConfig.npcs) {
-      // Find the node where the NPC is placed
       const node = map.nodes.find((n) => n.id === npcConfig.spawnNodeId)
       if (!node) {
         console.warn(`[NPC] Node ${npcConfig.spawnNodeId} not found for NPC ${npcConfig.id}`)
         continue
       }
 
-      const npc: NPC = {
-        id: npcConfig.id,
-        name: npcConfig.name,
-        sprite: npcConfig.sprite,
-        mapId: mapConfig.id,
-        currentNodeId: npcConfig.spawnNodeId,
-        position: { x: node.x, y: node.y },
-        direction: 'down', // Default direction
-      }
-      npcs.push(npc)
+      npcs.push(createNPCFromConfig(npcConfig, mapConfig.id, { x: node.x, y: node.y }))
     }
   }
 

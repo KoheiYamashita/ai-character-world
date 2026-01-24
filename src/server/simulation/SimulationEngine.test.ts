@@ -9,6 +9,17 @@ vi.mock('../behavior/LLMBehaviorDecider', () => ({
   },
 }))
 
+// Mock ConversationExecutor to prevent async LLM calls in tests
+vi.mock('../conversation/ConversationExecutor', () => ({
+  ConversationExecutor: class {
+    setPostProcessor = vi.fn()
+    setOnConversationComplete = vi.fn()
+    setOnMessageEmit = vi.fn()
+    setTurnIntervalMs = vi.fn()
+    executeConversation = vi.fn().mockResolvedValue(undefined)
+  },
+}))
+
 import { SimulationEngine } from './SimulationEngine'
 import type { WorldMap, Character, TimeConfig, Obstacle, NPC } from '@/types'
 
@@ -71,6 +82,26 @@ function createTestCharacter(id: string, overrides: Partial<Character> = {}): Ch
     currentNodeId: 'town-0-0',
     position: { x: 100, y: 100 },
     direction: 'down',
+    ...overrides,
+  }
+}
+
+function createTestNPC(id: string, overrides: Partial<NPC> = {}): NPC {
+  return {
+    id,
+    name: `NPC ${id}`,
+    sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
+    mapId: 'town',
+    currentNodeId: 'town-0-0',
+    position: { x: 100, y: 100 },
+    direction: 'down',
+    personality: 'テスト性格',
+    tendencies: ['傾向1'],
+    facts: ['事実1'],
+    affinity: 0,
+    mood: 'neutral',
+    conversationCount: 0,
+    lastConversation: null,
     ...overrides,
   }
 }
@@ -871,15 +902,12 @@ describe('SimulationEngine (integration)', () => {
         currentNodeId: 'town-0-0',
         position: { x: 100, y: 100 },
       })]
-      const npc: NPC = {
-        id: 'npc1',
+      const npc = createTestNPC('npc1', {
         name: 'Cafe Staff',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
         currentNodeId: 'town-0-1', // Adjacent to town-0-0
         position: { x: 200, y: 100 },
         direction: 'left',
-      }
+      })
       await engine.initialize(maps, chars, 'town', undefined, [npc], testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
 
@@ -906,15 +934,12 @@ describe('SimulationEngine (integration)', () => {
         currentNodeId: 'town-0-0',
         position: { x: 100, y: 100 },
       })]
-      const npc: NPC = {
-        id: 'npc1',
+      const npc = createTestNPC('npc1', {
         name: 'Cafe Staff',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
         currentNodeId: 'town-2-2', // Not adjacent to town-0-0
         position: { x: 300, y: 300 },
         direction: 'left',
-      }
+      })
       await engine.initialize(maps, chars, 'town', undefined, [npc], testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
 
@@ -944,6 +969,7 @@ describe('SimulationEngine (integration)', () => {
         hasData: vi.fn().mockResolvedValue(false),
         saveState: vi.fn().mockResolvedValue(undefined),
         saveSchedule: vi.fn().mockResolvedValue(undefined),
+        addActionHistory: vi.fn().mockResolvedValue(undefined),
         close: vi.fn(),
       }
       const e = new SimulationEngine({ tickRate: 20 }, mockStore as never)
@@ -1016,6 +1042,120 @@ describe('SimulationEngine (integration)', () => {
       const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string}>>
       const entries = Array.from(cache.values()).flat()
       expect(entries.some(e => e.actionId === 'toilet')).toBe(true)
+    })
+
+    it('should record move in action history when navigation succeeds', async () => {
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-0-1'] },
+        { id: 'town-0-1', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['town-0-0', 'town-0-2'] },
+        { id: 'town-0-2', x: 300, y: 100, type: 'waypoint' as const, connectedTo: ['town-0-1'] },
+      ]
+      const maps = { town: createTestMap('town', { nodes: townNodes }) }
+      const chars = [createTestCharacter('c1')]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Mock LLM to return a move decision
+      const decider = (engine as any).behaviorDecider
+      decider.decide.mockResolvedValueOnce({
+        type: 'move',
+        targetNodeId: 'town-0-2',
+        reason: '散歩したい',
+      })
+
+      const char = engine.getCharacter('c1')!
+      ;(engine as any).makeBehaviorDecision(char, { hour: 10, minute: 0, day: 1 })
+
+      await vi.waitFor(() => {
+        const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string, target?: string, reason?: string}>>
+        const entries = Array.from(cache.values()).flat()
+        expect(entries.some(e => e.actionId === 'move' && e.target === 'town-0-2' && e.reason === '散歩したい')).toBe(true)
+      })
+    })
+
+    it('should record idle in action history', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1')]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Mock LLM to return idle
+      const decider = (engine as any).behaviorDecider
+      decider.decide.mockResolvedValueOnce({
+        type: 'idle',
+        reason: '何もすることがない',
+      })
+
+      const char = engine.getCharacter('c1')!
+      ;(engine as any).makeBehaviorDecision(char, { hour: 10, minute: 0, day: 1 })
+
+      await vi.waitFor(() => {
+        const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string, reason?: string}>>
+        const entries = Array.from(cache.values()).flat()
+        expect(entries.some(e => e.actionId === 'idle' && e.reason === '何もすることがない')).toBe(true)
+      })
+    })
+
+    it('should not record duplicate consecutive idle entries', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1')]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Mock LLM to return idle twice
+      const decider = (engine as any).behaviorDecider
+      decider.decide
+        .mockResolvedValueOnce({ type: 'idle', reason: '最初のidle' })
+        .mockResolvedValueOnce({ type: 'idle', reason: '2回目のidle' })
+
+      const char = engine.getCharacter('c1')!
+      ;(engine as any).makeBehaviorDecision(char, { hour: 10, minute: 0, day: 1 })
+
+      await vi.waitFor(() => {
+        const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string}>>
+        const entries = Array.from(cache.values()).flat()
+        expect(entries.some(e => e.actionId === 'idle')).toBe(true)
+      })
+
+      // Trigger second idle decision
+      const char2 = engine.getCharacter('c1')!
+      ;(engine as any).makeBehaviorDecision(char2, { hour: 10, minute: 1, day: 1 })
+
+      await vi.waitFor(() => {
+        const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string}>>
+        const entries = Array.from(cache.values()).flat()
+        // Should still have only one idle entry (deduplication)
+        expect(entries.filter(e => e.actionId === 'idle')).toHaveLength(1)
+      })
+    })
+
+    it('should record talk in action history when conversation completes', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1')]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Set up character with a talk action in progress
+      const char = engine.getCharacter('c1')!
+      char.currentAction = {
+        actionId: 'talk',
+        startTime: Date.now(),
+        targetEndTime: Date.now() + 300000,
+        targetNpcId: 'npc1',
+        reason: 'NPCと話したい',
+      }
+
+      // Get the onConversationComplete callback from the mock
+      const executor = (engine as any).conversationExecutor
+      const callback = executor.setOnConversationComplete.mock.calls[0][0]
+
+      // Trigger conversation complete
+      callback('c1')
+
+      // Check action history
+      const cache = (engine as any).actionHistoryCache as Map<string, Array<{actionId: string, target?: string, reason?: string}>>
+      const entries = Array.from(cache.values()).flat()
+      expect(entries.some(e => e.actionId === 'talk' && e.target === 'npc1' && e.reason === 'NPCと話したい')).toBe(true)
     })
 
     it('should clear action history cache for specific day', () => {
@@ -1357,15 +1497,11 @@ describe('SimulationEngine (integration)', () => {
       const maps = { town: createTestMap('town') }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town')
 
-      const npc: NPC = {
-        id: 'npc1',
+      const npc = createTestNPC('npc1', {
         name: 'Shop NPC',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
         currentNodeId: 'town-1-1',
         position: { x: 200, y: 200 },
-        direction: 'down',
-      }
+      })
       const blockedNodes = new Map([['town', new Set(['town-1-1'])]])
 
       // Re-initialize with NPC config (simulates restore flow)
@@ -1882,12 +2018,11 @@ describe('SimulationEngine (integration)', () => {
   describe('handleTalkAction (direct)', () => {
     it('should reject talk when NPC is on different map', async () => {
       const maps = { town: createTestMap('town'), cafe: createTestMap('cafe') }
-      const npc: NPC = {
-        id: 'npc1', name: 'Cafe Staff',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
+      const npc = createTestNPC('npc1', {
+        name: 'Cafe Staff',
         mapId: 'cafe', // Different map
-        currentNodeId: 'cafe-0-0', position: { x: 100, y: 100 }, direction: 'down',
-      }
+        currentNodeId: 'cafe-0-0',
+      })
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, [npc], testTimeConfig)
 
       const char = engine.getCharacter('c1')!
@@ -1901,13 +2036,11 @@ describe('SimulationEngine (integration)', () => {
 
     it('should navigate to NPC and set pending action when not adjacent', async () => {
       const maps = { town: createTestMap('town') }
-      const npc: NPC = {
-        id: 'npc1', name: 'Shopkeeper',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
+      const npc = createTestNPC('npc1', {
+        name: 'Shopkeeper',
         currentNodeId: 'town-2-2', // Not adjacent to town-0-0
-        position: { x: 300, y: 300 }, direction: 'down',
-      }
+        position: { x: 300, y: 300 },
+      })
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, [npc], testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
 
@@ -1922,13 +2055,12 @@ describe('SimulationEngine (integration)', () => {
 
     it('should start talk immediately when adjacent to NPC', async () => {
       const maps = { town: createTestMap('town') }
-      const npc: NPC = {
-        id: 'npc1', name: 'Friend',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
+      const npc = createTestNPC('npc1', {
+        name: 'Friend',
         currentNodeId: 'town-0-1', // Adjacent to town-0-0
-        position: { x: 200, y: 100 }, direction: 'left',
-      }
+        position: { x: 200, y: 100 },
+        direction: 'left',
+      })
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, [npc], testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
 
@@ -2078,11 +2210,11 @@ describe('SimulationEngine (integration)', () => {
         facility: { tags: ['toilet'] },
         tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
       }
-      const npc: NPC = {
-        id: 'npc1', name: 'Bartender',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town', currentNodeId: 'town-0-1', position: { x: 200, y: 100 }, direction: 'down',
-      }
+      const npc = createTestNPC('npc1', {
+        name: 'Bartender',
+        currentNodeId: 'town-0-1',
+        position: { x: 200, y: 100 },
+      })
       const maps = { town: createTestMap('town', { obstacles: [toiletObstacle] }) }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, [npc], testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)

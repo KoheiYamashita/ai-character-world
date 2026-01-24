@@ -1,4 +1,4 @@
-import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig } from '@/types'
+import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry } from '@/types'
 import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry } from '@/types/behavior'
 import type {
   SimulationConfig,
@@ -14,12 +14,16 @@ import type { ActionId } from './actions/definitions'
 import type { StateStore } from '../persistence/StateStore'
 import type { BehaviorDecider } from '../behavior/BehaviorDecider'
 import { LLMBehaviorDecider } from '../behavior/LLMBehaviorDecider'
+import { ConversationManager } from '../conversation/ConversationManager'
+import { ConversationExecutor } from '../conversation/ConversationExecutor'
+import { ConversationPostProcessor } from '../conversation/ConversationPostProcessor'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
 import { getActionsForTags } from '@/lib/facilityMapping'
 import { getDirection } from '@/lib/movement'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
+export type LogEventCallback = (entry: ActivityLogEntry) => void
 
 const DEFAULT_TIMEZONE = 'Asia/Tokyo'
 
@@ -30,9 +34,15 @@ export class SimulationEngine {
   private worldState: WorldStateManager
   private characterSimulator: CharacterSimulator
   private actionExecutor: ActionExecutor
+  private conversationManager: ConversationManager
+  private conversationExecutor: ConversationExecutor
+  private conversationPostProcessor: ConversationPostProcessor
   private behaviorDecider: BehaviorDecider
+  // Full NPC data (with personality, facts, etc.) for conversation LLM
+  private fullNPCs: Map<string, NPC> = new Map()
   private config: SimulationConfig
   private subscribers: Set<StateChangeCallback> = new Set()
+  private logSubscribers: Set<LogEventCallback> = new Set()
   private tickInterval: ReturnType<typeof setInterval> | null = null
   private lastTickTime: number = 0
   private isRunning: boolean = false
@@ -40,6 +50,7 @@ export class SimulationEngine {
   private timeConfig: TimeConfig | null = null
   private lastDecayTime: number = 0
   private serverStartTime: number = Date.now()
+  private serverStartMidnight: number = 0
   private cachedFormatter: Intl.DateTimeFormat | null = null
   private cachedTimezone: string | null = null
   private stateStore: StateStore | null = null
@@ -70,12 +81,56 @@ export class SimulationEngine {
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
+    this.conversationManager = new ConversationManager(this.worldState)
+    this.conversationExecutor = new ConversationExecutor(this.conversationManager)
+    this.conversationPostProcessor = new ConversationPostProcessor()
     this.behaviorDecider = new LLMBehaviorDecider()
     this.stateStore = stateStore ?? null
+
+    // Set up PostProcessor callbacks and inject into executor
+    this.conversationPostProcessor.setOnNPCUpdate((npcId, updates) => {
+      this.updateFullNPC(npcId, updates)
+    })
+    this.conversationPostProcessor.setOnSummaryPersist(async (entry) => {
+      // Add day and time for activity log queries
+      const currentTime = this.worldState.getTime()
+      entry.day = currentTime.day
+      entry.time = this.formatTimeString(currentTime)
+      if (this.stateStore) await this.stateStore.saveNPCSummary(entry)
+      // Notify log subscribers
+      this.notifyLogSubscribersConversation(entry)
+    })
+    this.conversationPostProcessor.setOnNPCStatePersist(async (npcId, state) => {
+      if (this.stateStore) await this.stateStore.saveNPCState(npcId, state)
+    })
+    this.conversationExecutor.setPostProcessor(this.conversationPostProcessor)
+
+    // Set message emit callback for realtime log delivery
+    this.conversationExecutor.setOnMessageEmit((characterId, npcId, speaker, speakerName, utterance) => {
+      this.notifyLogSubscribersMessage(characterId, npcId, speaker, speakerName, utterance)
+    })
+
+    // Set conversation complete callback
+    this.conversationExecutor.setOnConversationComplete((characterId) => {
+      // Record talk action before clearing state
+      const action = this.worldState.getCharacter(characterId)?.currentAction
+      if (action?.actionId === 'talk') {
+        this.recordActionHistory({
+          characterId,
+          actionId: 'talk',
+          targetNpcId: action.targetNpcId,
+          reason: action.reason,
+        })
+      }
+      // Clear action state and trigger next behavior decision
+      this.actionExecutor.forceCompleteAction(characterId)
+      this.onActionComplete(characterId)
+    })
 
     // Set action completion callback for behavior decision trigger
     this.actionExecutor.setOnActionComplete((characterId, actionId) => {
       console.log(`[SimulationEngine] Action complete callback: ${characterId} finished ${actionId}`)
+      // Note: talk action is completed by ConversationExecutor, not by timer
       this.onActionComplete(characterId)
     })
 
@@ -242,8 +297,9 @@ export class SimulationEngine {
   ): void {
     this.timeConfig = timeConfig ?? null
 
-    // Initialize formatter cache and sync time
+    // Initialize formatter cache, recompute midnight, and sync time
     this.updateFormatterCache()
+    this.serverStartMidnight = this.computeServerStartMidnight()
     const realTime = this.getCurrentRealTime()
     this.worldState.setTime(realTime)
     this.lastDecayTime = Date.now()
@@ -256,11 +312,37 @@ export class SimulationEngine {
       console.log(`[SimulationEngine] Loaded NPC blocked nodes for ${npcBlockedNodes.size} maps`)
     }
 
-    // Add NPCs to world state
+    // Add NPCs to world state and store full NPC data
     if (npcs && npcs.length > 0) {
       this.worldState.initializeNPCs(npcs)
+      this.fullNPCs.clear()
+      for (const npc of npcs) {
+        this.fullNPCs.set(npc.id, npc)
+      }
       console.log(`[SimulationEngine] Loaded ${npcs.length} NPCs`)
     }
+  }
+
+  // Update NPC dynamic state in-memory
+  private updateFullNPC(npcId: string, updates: Partial<NPCDynamicState>): void {
+    const npc = this.fullNPCs.get(npcId)
+    if (!npc) return
+    if (updates.affinity !== undefined) npc.affinity = updates.affinity
+    if (updates.mood !== undefined) npc.mood = updates.mood
+    if (updates.facts !== undefined) npc.facts = updates.facts
+    if (updates.conversationCount !== undefined) npc.conversationCount = updates.conversationCount
+    if (updates.lastConversation !== undefined) npc.lastConversation = updates.lastConversation
+  }
+
+  // Restore NPC dynamic state from persistent storage
+  restoreNPCState(npcId: string, state: NPCDynamicState): void {
+    const npc = this.fullNPCs.get(npcId)
+    if (!npc) return
+    npc.facts = state.facts
+    npc.affinity = state.affinity
+    npc.mood = state.mood
+    npc.conversationCount = state.conversationCount
+    npc.lastConversation = state.lastConversation
   }
 
   // Main tick function
@@ -364,6 +446,18 @@ export class SimulationEngine {
     }
   }
 
+  // Compute midnight (0:00) of server start date in configured timezone
+  private computeServerStartMidnight(): number {
+    if (!this.cachedFormatter) {
+      this.updateFormatterCache()
+    }
+    const startDate = new Date(this.serverStartTime)
+    const parts = this.cachedFormatter!.formatToParts(startDate)
+    const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0)
+    const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0)
+    return this.serverStartTime - (hour * 60 + minute) * 60 * 1000
+  }
+
   private getCurrentRealTime(): WorldTime {
     const now = new Date()
 
@@ -376,9 +470,9 @@ export class SimulationEngine {
     const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0)
     const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0)
 
-    // Calculate days since server start
+    // Calculate days since midnight of server start date (timezone-aware)
     const msPerDay = 24 * 60 * 60 * 1000
-    const day = Math.floor((now.getTime() - this.serverStartTime) / msPerDay) + 1
+    const day = Math.floor((now.getTime() - this.serverStartMidnight) / msPerDay) + 1
 
     return { hour, minute, day }
   }
@@ -448,7 +542,7 @@ export class SimulationEngine {
   // Check if character is idle (not executing action, conversation, or movement)
   private isCharacterIdle(character: SimCharacter): boolean {
     return !character.currentAction &&
-           !character.conversation?.isActive &&
+           character.conversation?.status !== 'active' &&
            !character.navigation.isMoving
   }
 
@@ -669,7 +763,14 @@ export class SimulationEngine {
         } else {
           console.log(`[SimulationEngine] ${character.name} move decision has no target`)
         }
-        if (!moveSuccess) {
+        if (moveSuccess) {
+          this.recordActionHistory({
+            characterId: character.id,
+            actionId: 'move',
+            reason: decision.reason,
+            target: decision.targetMapId ?? decision.targetNodeId,
+          })
+        } else {
           this.scheduleNextDecision(character.id, 1000)
         }
         break
@@ -681,6 +782,16 @@ export class SimulationEngine {
         this.worldState.updateCharacter(character.id, {
           displayEmoji: isInterrupt ? '😰' : '😶',
         })
+        // Record idle only if last entry is not already idle (prevents spam from 2s retry)
+        const history = this.getActionHistoryForCharacter(character.id)
+        const lastEntry = history[history.length - 1]
+        if (!lastEntry || lastEntry.actionId !== 'idle') {
+          this.recordActionHistory({
+            characterId: character.id,
+            actionId: 'idle',
+            reason: decision.reason,
+          })
+        }
         // Longer retry for interrupt (emergency with no solution)
         this.scheduleNextDecision(character.id, isInterrupt ? 5000 : 2000)
         break
@@ -758,7 +869,7 @@ export class SimulationEngine {
       if (character.currentAction) continue
 
       // Character has arrived - execute pending action
-      const { actionId, facilityId, targetNpcId, reason, durationMinutes } = character.pendingAction
+      const { actionId, facilityId, targetNpcId, reason, durationMinutes, conversationGoal } = character.pendingAction
 
       // Clear pending action first
       this.worldState.updateCharacter(character.id, { pendingAction: null })
@@ -769,6 +880,10 @@ export class SimulationEngine {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         if (targetNpcId) {
           this.faceEachOtherForTalk(character.id, targetNpcId)
+          if (actionId === 'talk') {
+            const goal = conversationGoal ?? { goal: reason ?? '会話する', successCriteria: '' }
+            this.startConversationWithExecutor(character.id, targetNpcId, goal)
+          }
           const npc = this.worldState.getNPC(targetNpcId)
           console.log(`[SimulationEngine] ${character.name} arrived and started action: ${actionId}${durationStr} with ${npc?.name ?? targetNpcId} (${reason})`)
         } else {
@@ -790,7 +905,7 @@ export class SimulationEngine {
 
     // Handle talk action with NPC target
     if (actionId === 'talk' && targetNpcId) {
-      this.handleTalkAction(character, targetNpcId, reason)
+      this.handleTalkAction(character, targetNpcId, reason, decision.conversationGoal)
       return
     }
 
@@ -799,7 +914,7 @@ export class SimulationEngine {
   }
 
   // Handle talk action: move to NPC if not adjacent, then start talk
-  private handleTalkAction(character: SimCharacter, targetNpcId: string, reason?: string): void {
+  private handleTalkAction(character: SimCharacter, targetNpcId: string, reason?: string, conversationGoal?: ConversationGoal): void {
     const npc = this.worldState.getNPC(targetNpcId)
     if (!npc) {
       console.log(`[SimulationEngine] ${character.name} target NPC ${targetNpcId} not found`)
@@ -837,6 +952,8 @@ export class SimulationEngine {
       const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId, undefined, reason)
       if (success) {
         this.faceEachOtherForTalk(character.id, targetNpcId)
+        const goal = conversationGoal ?? { goal: reason ?? '会話する', successCriteria: '' }
+        this.startConversationWithExecutor(character.id, targetNpcId, goal)
         console.log(`[SimulationEngine] ${character.name} started talk with ${npc.name} (${reason})`)
       } else {
         console.log(`[SimulationEngine] ${character.name} failed to start talk with ${npc.name}`)
@@ -864,6 +981,7 @@ export class SimulationEngine {
       targetNpcId,
       facilityMapId: character.currentMapId,
       reason,
+      conversationGoal,
     }
 
     this.worldState.updateCharacter(character.id, { pendingAction })
@@ -890,6 +1008,44 @@ export class SimulationEngine {
 
     const opposites = { up: 'down', down: 'up', left: 'right', right: 'left' } as const
     this.worldState.updateNPCDirection(npcId, opposites[charToNpcDirection])
+  }
+
+  // Start conversation session and execute conversation loop
+  private startConversationWithExecutor(characterId: string, npcId: string, goal: ConversationGoal): void {
+    const session = this.conversationManager.startConversation(characterId, npcId, goal)
+    if (!session) {
+      console.log(`[SimulationEngine] Failed to start conversation for ${characterId}`)
+      // Force complete the talk action since conversation couldn't start
+      this.actionExecutor.forceCompleteAction(characterId)
+      this.onActionComplete(characterId)
+      return
+    }
+
+    const character = this.worldState.getCharacter(characterId)
+    const npc = this.fullNPCs.get(npcId)
+    if (!character || !npc) {
+      console.log(`[SimulationEngine] Character or NPC not found for conversation`)
+      this.conversationManager.endConversation(characterId, false)
+      this.actionExecutor.forceCompleteAction(characterId)
+      this.onActionComplete(characterId)
+      return
+    }
+
+    // Build conversation context
+    const context = {
+      recentConversations: [] as import('@/types/behavior').RecentConversation[],
+      midTermMemories: [] as import('@/types/behavior').MidTermMemory[],
+      todayActions: this.getActionHistoryForCharacter(characterId),
+      schedule: this.getScheduleForCharacter(characterId),
+      currentTime: this.worldState.getTime(),
+      nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+    }
+
+    // Start async conversation loop (fire and forget)
+    this.conversationExecutor.executeConversation(character, npc, session, context)
+      .catch(error => {
+        console.error(`[SimulationEngine] Conversation execution error:`, error)
+      })
   }
 
   // Handle facility-based action: move to facility if not inside, then execute
@@ -1281,24 +1437,20 @@ export class SimulationEngine {
     }
   }
 
-  // Record action history (called from ActionExecutor callback)
+  // Record action history (called from ActionExecutor callback and directly for move/idle/talk)
   private recordActionHistory(entry: {
     characterId: string
-    actionId: ActionId
+    actionId: string
     facilityId?: string
     targetNpcId?: string
+    target?: string
     durationMinutes?: number
     reason?: string
   }): void {
     const currentTime = this.worldState.getTime()
     const currentDay = currentTime.day
-    const timeStr = `${String(currentTime.hour).padStart(2, '0')}:${String(currentTime.minute).padStart(2, '0')}`
-
-    // Determine target (facility or NPC)
-    const target = entry.facilityId ?? entry.targetNpcId
-
-    // Get reason from entry (passed from ActionExecutor via ActionState)
-    const reason = entry.reason
+    const timeStr = this.formatTimeString(currentTime)
+    const target = entry.target ?? entry.facilityId ?? entry.targetNpcId
 
     // Update cache
     const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
@@ -1308,7 +1460,7 @@ export class SimulationEngine {
       actionId: entry.actionId,
       target,
       durationMinutes: entry.durationMinutes,
-      reason,
+      reason: entry.reason,
     })
     this.actionHistoryCache.set(cacheKey, cached)
 
@@ -1321,13 +1473,23 @@ export class SimulationEngine {
         actionId: entry.actionId,
         target,
         durationMinutes: entry.durationMinutes,
-        reason,
+        reason: entry.reason,
       }).catch(error => {
         console.error(`[SimulationEngine] Error saving action history:`, error)
       })
     }
 
     console.log(`[SimulationEngine] Recorded action history: ${entry.characterId} ${timeStr} ${entry.actionId}${target ? ` → ${target}` : ''}`)
+
+    // Notify log subscribers
+    this.notifyLogSubscribersAction({
+      characterId: entry.characterId,
+      actionId: entry.actionId,
+      target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+      time: timeStr,
+    })
   }
 
   // Get action history for a character (cache priority, fallback to empty)
@@ -1358,6 +1520,65 @@ export class SimulationEngine {
     }
   }
 
+  // Get today's logs from cache and DB (for initial load)
+  async getTodayLogs(): Promise<ActivityLogEntry[]> {
+    const currentDay = this.worldState.getTime().day
+    const logs: ActivityLogEntry[] = []
+
+    // Collect action logs from cache
+    for (const [key, entries] of this.actionHistoryCache) {
+      if (!key.endsWith(`-${currentDay}`)) continue
+      const characterId = key.slice(0, key.lastIndexOf('-'))
+      const character = this.worldState.getCharacter(characterId)
+      for (const entry of entries) {
+        logs.push({
+          type: 'action',
+          characterId,
+          characterName: character?.name ?? characterId,
+          time: entry.time,
+          actionId: entry.actionId,
+          target: entry.target,
+          durationMinutes: entry.durationMinutes,
+          reason: entry.reason,
+        })
+      }
+    }
+
+    // Collect conversation logs from DB
+    if (this.stateStore) {
+      try {
+        const summaries = await this.stateStore.loadNPCSummariesForDay(currentDay)
+        for (const s of summaries) {
+          const character = this.worldState.getCharacter(s.characterId)
+          logs.push({
+            type: 'conversation',
+            characterId: s.characterId,
+            characterName: character?.name ?? s.characterId,
+            time: s.time ?? '',
+            npcId: s.npcId,
+            npcName: s.npcName,
+            summary: s.summary,
+            topics: s.topics,
+            goalAchieved: s.goalAchieved,
+            affinityChange: s.affinityChange,
+            npcMood: s.mood,
+          })
+        }
+      } catch (error) {
+        console.error('[SimulationEngine] Error loading NPC summaries for today:', error)
+      }
+    }
+
+    // Sort by time
+    logs.sort((a, b) => a.time.localeCompare(b.time))
+    return logs
+  }
+
+  // Format WorldTime as "HH:MM" string
+  private formatTimeString(time: WorldTime): string {
+    return `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`
+  }
+
   // Initialize lastDay from current time (called after engine start)
   initializeLastDay(): void {
     this.lastDay = this.worldState.getTime().day
@@ -1370,6 +1591,85 @@ export class SimulationEngine {
     return () => {
       this.subscribers.delete(callback)
     }
+  }
+
+  // Subscribe to log events
+  subscribeToLogs(callback: LogEventCallback): () => void {
+    this.logSubscribers.add(callback)
+    return () => {
+      this.logSubscribers.delete(callback)
+    }
+  }
+
+  // Dispatch a log entry to all log subscribers
+  private emitLogEntry(logEntry: ActivityLogEntry): void {
+    if (this.logSubscribers.size === 0) return
+    for (const callback of this.logSubscribers) {
+      try { callback(logEntry) } catch { /* ignore */ }
+    }
+  }
+
+  // Notify log subscribers with action log entry
+  private notifyLogSubscribersAction(entry: {
+    characterId: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+    time: string
+  }): void {
+    const character = this.worldState.getCharacter(entry.characterId)
+    this.emitLogEntry({
+      type: 'action',
+      characterId: entry.characterId,
+      characterName: character?.name ?? entry.characterId,
+      time: entry.time,
+      actionId: entry.actionId,
+      target: entry.target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+    })
+  }
+
+  // Notify log subscribers with conversation summary
+  private notifyLogSubscribersConversation(entry: ConversationSummaryEntry): void {
+    const character = this.worldState.getCharacter(entry.characterId)
+    this.emitLogEntry({
+      type: 'conversation',
+      characterId: entry.characterId,
+      characterName: character?.name ?? entry.characterId,
+      time: entry.time ?? '',
+      npcId: entry.npcId,
+      npcName: entry.npcName,
+      summary: entry.summary,
+      topics: entry.topics,
+      goalAchieved: entry.goalAchieved,
+      affinityChange: entry.affinityChange,
+      npcMood: entry.mood,
+    })
+  }
+
+  // Notify log subscribers with conversation message (realtime only)
+  private notifyLogSubscribersMessage(
+    characterId: string,
+    npcId: string,
+    speaker: 'character' | 'npc',
+    speakerName: string,
+    utterance: string
+  ): void {
+    const character = this.worldState.getCharacter(characterId)
+    const npc = this.fullNPCs.get(npcId)
+    this.emitLogEntry({
+      type: 'conversation_message',
+      characterId,
+      characterName: character?.name ?? characterId,
+      npcId,
+      npcName: npc?.name ?? npcId,
+      speaker,
+      speakerName,
+      utterance,
+      time: this.formatTimeString(this.worldState.getTime()),
+    })
   }
 
   // Notify all subscribers of state change
@@ -1442,6 +1742,7 @@ export class SimulationEngine {
   // Set server start time (for restoration from persistence)
   setServerStartTime(time: number): void {
     this.serverStartTime = time
+    this.serverStartMidnight = this.computeServerStartMidnight()
   }
 
   // Get action executor (for external action control)
@@ -1479,6 +1780,11 @@ export class SimulationEngine {
     // Cast to access setActionConfigs on LLMBehaviorDecider
     if ('setActionConfigs' in this.behaviorDecider) {
       (this.behaviorDecider as LLMBehaviorDecider).setActionConfigs(configs)
+    }
+    // Set turnIntervalMs for ConversationExecutor from talk config
+    const talkConfig = configs['talk']
+    if (talkConfig?.turnIntervalMs !== undefined) {
+      this.conversationExecutor.setTurnIntervalMs(talkConfig.turnIntervalMs)
     }
     console.log(`[SimulationEngine] Action configs set`)
   }
@@ -1625,6 +1931,15 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         // Save server start time on fresh start
         await stateStore.saveServerStartTime(engine.getServerStartTime())
         console.log(`${logPrefix} Initialized with fresh state`)
+      }
+
+      // Restore NPC dynamic states from DB
+      const npcStates = await stateStore.loadAllNPCStates()
+      if (npcStates.size > 0) {
+        for (const [npcId, state] of npcStates) {
+          engine.restoreNPCState(npcId, state)
+        }
+        console.log(`${logPrefix} Restored ${npcStates.size} NPC dynamic states`)
       }
 
       // Set action configs for ActionExecutor and LLMBehaviorDecider

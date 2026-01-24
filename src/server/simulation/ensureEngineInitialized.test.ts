@@ -24,6 +24,11 @@ const mockStoreInstance = {
   deleteSchedule: vi.fn().mockResolvedValue(undefined),
   deleteAllSchedulesForCharacter: vi.fn().mockResolvedValue(undefined),
   addActionHistory: vi.fn().mockResolvedValue(undefined),
+  saveNPCSummary: vi.fn().mockResolvedValue(undefined),
+  loadRecentNPCSummaries: vi.fn().mockResolvedValue([]),
+  saveNPCState: vi.fn().mockResolvedValue(undefined),
+  loadNPCState: vi.fn().mockResolvedValue(null),
+  loadAllNPCStates: vi.fn().mockResolvedValue(new Map()),
 }
 
 const mockLoadWorldDataServer = vi.fn()

@@ -6,6 +6,8 @@ import type {
   ActionState,
   Position,
   Direction,
+  ConversationSession,
+  ConversationGoal,
 } from '@/types'
 import type { ActionId } from './actions/definitions'
 
@@ -17,14 +19,7 @@ export interface PendingAction {
   facilityMapId: string
   reason?: string
   durationMinutes?: number  // 可変時間アクション用
-}
-
-// Conversation state for character-NPC dialogue
-export interface ConversationState {
-  isActive: boolean
-  npcId: string
-  startTime: number
-  duration: number // ms
+  conversationGoal?: ConversationGoal  // talk アクション用会話目的
 }
 
 // Server-side character state (extends client Character with navigation)
@@ -33,8 +28,8 @@ export interface SimCharacter extends Character {
   navigation: SimNavigationState
   // Cross-map navigation state
   crossMapNavigation: SimCrossMapNavState | null
-  // Conversation state
-  conversation: ConversationState | null
+  // Conversation session (managed by ConversationManager)
+  conversation: ConversationSession | null
   // Current action being performed
   currentAction: ActionState | null
   // Emoji to display above character's head (set by action/conversation)
@@ -186,8 +181,6 @@ export interface SimulationConfig {
   idleTimeMax: number // ms
   entranceProbability: number // 0-1
   crossMapProbability: number // 0-1
-  conversationProbability: number // 0-1 (probability of starting a conversation)
-  conversationDuration: number // ms (how long conversation lasts)
 }
 
 export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
@@ -197,7 +190,5 @@ export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   idleTimeMax: 1500,
   entranceProbability: 0.1,
   crossMapProbability: 0.5,
-  conversationProbability: 0.3,
-  conversationDuration: 5000,
 }
 

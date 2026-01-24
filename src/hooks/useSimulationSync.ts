@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useCharacterStore, useWorldStore, useNPCStore } from '@/stores'
+import { useCharacterStore, useWorldStore, useNPCStore, useActivityLogStore } from '@/stores'
 import type { SerializedWorldState, SimCharacter, SimNPC } from '@/server/simulation/types'
-import type { Character } from '@/types'
+import type { Character, ActivityLogEntry } from '@/types'
 
 interface SimulationSyncState {
   isConnected: boolean
@@ -85,6 +85,9 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
     setCurrentMap(worldState.currentMapId)
     setTime(worldState.time)
 
+    // Check for day change and clear activity logs if needed
+    useActivityLogStore.getState().clearIfDayChanged(worldState.time.day)
+
     // Update characters
     const characterIds = Object.keys(worldState.characters)
     for (const [id, simChar] of Object.entries(worldState.characters)) {
@@ -139,10 +142,12 @@ export function useSimulationSync(options: UseSimulationSyncOptions = {}) {
   // Handle SSE message
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
-      const message = JSON.parse(event.data) as { type: string; data: SerializedWorldState }
+      const message = JSON.parse(event.data) as { type: string; data: SerializedWorldState | ActivityLogEntry }
 
       if (message.type === 'state') {
-        syncStateToStores(message.data)
+        syncStateToStores(message.data as SerializedWorldState)
+      } else if (message.type === 'log') {
+        useActivityLogStore.getState().addEntry(message.data as ActivityLogEntry)
       }
     } catch (error) {
       console.error('[SimulationSync] Failed to parse SSE message:', error)

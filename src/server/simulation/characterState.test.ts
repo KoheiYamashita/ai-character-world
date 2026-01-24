@@ -62,10 +62,16 @@ describe('characterState', () => {
     it('should return false when character is in conversation', () => {
       const char = createTestCharacter({
         conversation: {
-          isActive: true,
+          id: 'conv-1',
+          characterId: 'test',
           npcId: 'npc-1',
+          goal: { goal: 'test', successCriteria: '' },
+          messages: [],
+          currentTurn: 0,
+          maxTurns: 10,
           startTime: Date.now(),
-          duration: 5000,
+          status: 'active',
+          goalAchieved: false,
         },
       })
       expect(isCharacterIdle(char)).toBe(false)
@@ -88,10 +94,16 @@ describe('characterState', () => {
     it('should return true when conversation exists but is not active', () => {
       const char = createTestCharacter({
         conversation: {
-          isActive: false,
+          id: 'conv-1',
+          characterId: 'test',
           npcId: 'npc-1',
+          goal: { goal: 'test', successCriteria: '' },
+          messages: [],
+          currentTurn: 0,
+          maxTurns: 10,
           startTime: Date.now(),
-          duration: 5000,
+          status: 'completed',
+          goalAchieved: true,
         },
       })
       expect(isCharacterIdle(char)).toBe(true)
@@ -141,10 +153,16 @@ describe('characterState', () => {
     it('should return true when conversation is active', () => {
       const char = createTestCharacter({
         conversation: {
-          isActive: true,
+          id: 'conv-1',
+          characterId: 'test',
           npcId: 'npc-1',
+          goal: { goal: 'test', successCriteria: '' },
+          messages: [],
+          currentTurn: 0,
+          maxTurns: 10,
           startTime: Date.now(),
-          duration: 5000,
+          status: 'active',
+          goalAchieved: false,
         },
       })
       expect(isCharacterInConversation(char)).toBe(true)
@@ -158,10 +176,16 @@ describe('characterState', () => {
     it('should return false when conversation is not active', () => {
       const char = createTestCharacter({
         conversation: {
-          isActive: false,
+          id: 'conv-1',
+          characterId: 'test',
           npcId: 'npc-1',
+          goal: { goal: 'test', successCriteria: '' },
+          messages: [],
+          currentTurn: 0,
+          maxTurns: 10,
           startTime: Date.now(),
-          duration: 5000,
+          status: 'completed',
+          goalAchieved: true,
         },
       })
       expect(isCharacterInConversation(char)).toBe(false)

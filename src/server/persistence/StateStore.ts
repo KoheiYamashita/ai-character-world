@@ -1,5 +1,5 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
 import type { ActionHistoryEntry } from '@/types/behavior'
 
 /**
@@ -101,6 +101,36 @@ export interface StateStore {
    * Load action history for a character on a specific day
    */
   loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]>
+
+  /**
+   * Save an NPC conversation summary
+   */
+  saveNPCSummary(entry: ConversationSummaryEntry): Promise<void>
+
+  /**
+   * Load recent NPC conversation summaries
+   */
+  loadRecentNPCSummaries(characterId: string, npcId: string, limit?: number): Promise<ConversationSummaryEntry[]>
+
+  /**
+   * Load NPC conversation summaries for a specific day
+   */
+  loadNPCSummariesForDay(day: number): Promise<ConversationSummaryEntry[]>
+
+  /**
+   * Save NPC dynamic state
+   */
+  saveNPCState(npcId: string, state: NPCDynamicState): Promise<void>
+
+  /**
+   * Load NPC dynamic state
+   */
+  loadNPCState(npcId: string): Promise<NPCDynamicState | null>
+
+  /**
+   * Load all NPC dynamic states
+   */
+  loadAllNPCStates(): Promise<Map<string, NPCDynamicState>>
 
   /**
    * Check if store has been initialized with data

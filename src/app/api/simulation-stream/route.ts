@@ -2,6 +2,7 @@ import {
   ensureEngineInitialized,
   type SerializedWorldState,
 } from '@/server/simulation'
+import type { ActivityLogEntry } from '@/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,8 @@ export async function GET() {
   }
 
   const encoder = new TextEncoder()
-  let unsubscribe: (() => void) | null = null
+  let unsubscribeState: (() => void) | null = null
+  let unsubscribeLogs: (() => void) | null = null
 
   const stream = new ReadableStream({
     start(controller) {
@@ -27,7 +29,7 @@ export async function GET() {
       controller.enqueue(encoder.encode(initialMessage))
 
       // Subscribe to state changes
-      unsubscribe = engine.subscribe((state: SerializedWorldState) => {
+      unsubscribeState = engine.subscribe((state: SerializedWorldState) => {
         try {
           const message = `data: ${JSON.stringify({ type: 'state', data: state })}\n\n`
           controller.enqueue(encoder.encode(message))
@@ -37,13 +39,27 @@ export async function GET() {
         }
       })
 
+      // Subscribe to log events
+      unsubscribeLogs = engine.subscribeToLogs((entry: ActivityLogEntry) => {
+        try {
+          const message = `data: ${JSON.stringify({ type: 'log', data: entry })}\n\n`
+          controller.enqueue(encoder.encode(message))
+        } catch {
+          console.log('[SSE] Error sending log, client likely disconnected')
+        }
+      })
+
       console.log(`[SSE] Client connected. Total subscribers: ${engine.getSubscriberCount()}`)
     },
 
     cancel() {
-      if (unsubscribe) {
-        unsubscribe()
-        unsubscribe = null
+      if (unsubscribeState) {
+        unsubscribeState()
+        unsubscribeState = null
+      }
+      if (unsubscribeLogs) {
+        unsubscribeLogs()
+        unsubscribeLogs = null
       }
       console.log('[SSE] Client disconnected')
     },

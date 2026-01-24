@@ -60,6 +60,7 @@ export function StatusPanel(): React.ReactNode {
   const currentMap = mapsLoaded ? getMaps()[currentMapId] : null
   const serverChar = activeCharacter ? serverCharacters[activeCharacter.id] : null
   const currentAction = serverChar?.currentAction
+  const conversation = serverChar?.conversation
 
   return (
     <div className="w-80 space-y-4">
@@ -147,18 +148,42 @@ export function StatusPanel(): React.ReactNode {
               <p className="font-medium text-lg">
                 {ACTION_LABELS[currentAction.actionId] || currentAction.actionId}
               </p>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">終了時刻</span>
-                <span className="font-mono">
-                  {formatEndTime(currentAction.targetEndTime)}
-                </span>
-              </div>
+              {currentAction.actionId !== 'talk' && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">終了時刻</span>
+                  <span className="font-mono">
+                    {formatEndTime(currentAction.targetEndTime)}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-muted-foreground">行動なし</p>
           )}
         </CardContent>
       </Card>
+
+      {conversation && conversation.status === 'active' && conversation.messages.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">会話</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {conversation.messages.map((msg, i) => (
+                <div key={i} className="text-sm">
+                  <span className="font-semibold">
+                    {msg.speakerName}:
+                  </span>{' '}
+                  <span className="text-muted-foreground">
+                    {msg.utterance}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
 import type { ActionHistoryEntry } from '@/types/behavior'
 
 /**
@@ -15,6 +15,8 @@ export class MemoryStore implements StateStore {
   private currentMapId: string | null = null
   private schedules: Map<string, DailySchedule> = new Map() // key: `${characterId}:${day}`
   private actionHistory: Map<string, ActionHistoryEntry[]> = new Map() // key: `${characterId}:${day}`
+  private npcSummaries: ConversationSummaryEntry[] = []
+  private npcStates: Map<string, NPCDynamicState> = new Map()
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -161,6 +163,48 @@ export class MemoryStore implements StateStore {
     return JSON.parse(JSON.stringify(history))
   }
 
+  // NPC Summary methods
+
+  async saveNPCSummary(entry: ConversationSummaryEntry): Promise<void> {
+    this.npcSummaries.push({ ...entry })
+  }
+
+  async loadRecentNPCSummaries(characterId: string, npcId: string, limit: number = 5): Promise<ConversationSummaryEntry[]> {
+    return this.npcSummaries
+      .filter(e => e.characterId === characterId && e.npcId === npcId)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit)
+  }
+
+  async loadNPCSummariesForDay(day: number): Promise<ConversationSummaryEntry[]> {
+    return this.npcSummaries
+      .filter(e => e.day === day)
+      .sort((a, b) => {
+        if (a.time && b.time) return a.time.localeCompare(b.time)
+        return a.timestamp - b.timestamp
+      })
+  }
+
+  // NPC State methods
+
+  async saveNPCState(npcId: string, state: NPCDynamicState): Promise<void> {
+    this.npcStates.set(npcId, { ...state, facts: [...state.facts] })
+  }
+
+  async loadNPCState(npcId: string): Promise<NPCDynamicState | null> {
+    const state = this.npcStates.get(npcId)
+    if (!state) return null
+    return { ...state, facts: [...state.facts] }
+  }
+
+  async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
+    const result = new Map<string, NPCDynamicState>()
+    for (const [id, state] of this.npcStates) {
+      result.set(id, { ...state, facts: [...state.facts] })
+    }
+    return result
+  }
+
   async hasData(): Promise<boolean> {
     return this.state !== null || this.characters.size > 0
   }
@@ -172,6 +216,8 @@ export class MemoryStore implements StateStore {
     this.currentMapId = null
     this.schedules.clear()
     this.actionHistory.clear()
+    this.npcSummaries = []
+    this.npcStates.clear()
   }
 
   async close(): Promise<void> {

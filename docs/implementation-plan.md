@@ -212,48 +212,48 @@
 
 ---
 
-### Step 16: NPC拡張（facts/affinity追加）
+### ✅ Step 16: NPC拡張（facts/affinity追加）
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 16-1 | `src/types/npc.ts` に `personality`, `tendencies`, `customPrompt`, `facts` 追加 | ビルド通過 |
-| 16-2 | `NPC` に `affinity`, `mood`, `conversationCount`, `lastConversation` 追加 | ビルド通過 |
-| 16-3 | `public/data/maps.json` のNPC定義に新フィールド追加 | JSON読み込み |
-| 16-4 | ローダー更新 | NPC拡張データ読み込み |
+| ✅ 16-1 | `src/types/npc.ts` に `personality`, `tendencies`, `customPrompt`, `facts` 追加 | ビルド通過 |
+| ✅ 16-2 | `NPC` に `affinity`, `mood`, `conversationCount`, `lastConversation` 追加 | ビルド通過 |
+| ✅ 16-3 | `public/data/maps.json` のNPC定義に新フィールド追加 | JSON読み込み |
+| ✅ 16-4 | ローダー更新 | NPC拡張データ読み込み |
 
 ※ NPC固定配置（spawnNodeId）は実装済み
 
 ---
 
-### Step 17: 会話システム基盤
+### ✅ Step 17: 会話システム基盤
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 17-1 | `ConversationGoal` 型定義 | ビルド通過 |
-| 17-2 | 会話開始判定（NPC近くで talk アクション） | 会話開始イベント発火 |
-| 17-3 | 会話状態管理（ログ、ターン数） | 会話進行状態を保持 |
+| ✅ 17-1 | `ConversationGoal` 型定義 | ビルド通過 |
+| ✅ 17-2 | 会話開始判定（NPC近くで talk アクション） | 会話開始イベント発火 |
+| ✅ 17-3 | 会話状態管理（ログ、ターン数） | 会話進行状態を保持 |
 
 ---
 
-### Step 18: 会話LLM実装
+### ✅ Step 18: 会話LLM実装
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 18-1 | キャラクターLLM（目的達成判定付き） | キャラクター発話生成 |
-| 18-2 | NPC LLM（facts参照） | NPC発話生成 |
-| 18-3 | 会話ループ（交互発話、10ターン上限） | 会話が交互に進む |
-| 18-4 | 会話UIに表示 | フロントで会話内容を表示 |
+| ✅ 18-1 | キャラクターLLM（目的達成判定付き） | キャラクター発話生成 |
+| ✅ 18-2 | NPC LLM（facts参照） | NPC発話生成 |
+| ✅ 18-3 | 会話ループ（交互発話、10ターン上限） | 会話が交互に進む |
+| ✅ 18-4 | 会話UIに表示 | フロントで会話内容を表示 |
 
 ---
 
-### Step 19: 会話終了処理
+### ✅ Step 19: 会話終了処理
 
 | # | タスク | 動作確認 |
 |---|--------|----------|
-| 19-1 | サマリー生成（LLM） | 会話サマリー生成 |
-| 19-2 | `npc_summaries` テーブル作成・保存 | DBに保存 |
-| 19-3 | facts抽出・NPC更新 | NPC.factsに新情報追加 |
-| 19-4 | affinity/mood更新 | NPC好感度が変化 |
+| ✅ 19-1 | サマリー生成（LLM） | 会話サマリー生成 |
+| ✅ 19-2 | `npc_summaries` テーブル作成・保存 | DBに保存 |
+| ✅ 19-3 | facts抽出・NPC更新 | NPC.factsに新情報追加 |
+| ✅ 19-4 | affinity/mood更新 | NPC好感度が変化 |
 
 ---
 

@@ -62,6 +62,13 @@ function createTestNPC(id: string, mapId: string): NPC {
     currentNodeId: 'node-0-0',
     position: { x: 100, y: 100 },
     direction: 'down',
+    personality: 'テスト性格',
+    tendencies: ['傾向1'],
+    facts: ['事実1'],
+    affinity: 0,
+    mood: 'neutral',
+    conversationCount: 0,
+    lastConversation: null,
   }
 }
 

@@ -129,8 +129,9 @@
     },
     "talk": {
       "fixed": true,
-      "duration": 5,
-      "effects": { "mood": 20 }
+      "duration": 0,
+      "effects": { "mood": 20 },
+      "turnIntervalMs": 60000
     },
     "thinking": {
       "fixed": true,

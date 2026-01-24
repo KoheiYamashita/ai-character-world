@@ -1,21 +1,14 @@
-import type { Position, WorldMap, PathNode, RouteSegment, Direction } from '@/types'
-import type { SimCharacter, SimulationConfig, SimCrossMapNavState, ConversationState } from './types'
+import type { Position, WorldMap, PathNode, RouteSegment } from '@/types'
+import type { SimCharacter, SimulationConfig, SimCrossMapNavState } from './types'
 import type { WorldStateManager } from './WorldState'
 import { findPathAvoidingNodes } from '@/lib/pathfinding'
 import { lerpPosition, getDirection, getDistance } from '@/lib/movement'
 import { planCrossMapRoute, hasMoreSegments } from '@/lib/crossMapNavigation'
 
-// Track conversation destinations (which NPC the character is heading to)
-interface ConversationDestination {
-  npcId: string
-  targetNodeId: string // Adjacent node to NPC
-}
-
 export class CharacterSimulator {
   private worldState: WorldStateManager
   private config: SimulationConfig
   private transitionStates: Map<string, TransitionSimState> = new Map()
-  private conversationDestinations: Map<string, ConversationDestination> = new Map()
   private onNavigationComplete: ((characterId: string) => void) | null = null
   // Track navigation state from previous tick for completion detection
   private wasNavigatingLastTick: Set<string> = new Set()
@@ -31,7 +24,7 @@ export class CharacterSimulator {
   }
 
   // Update all characters for one tick
-  tick(deltaTime: number, currentTime: number): void {
+  tick(deltaTime: number, _currentTime: number): void {
     const characters = this.worldState.getAllCharacters()
 
     for (const character of characters) {
@@ -46,12 +39,9 @@ export class CharacterSimulator {
         continue
       }
 
-      // Check for conversation timeout
-      if (character.conversation?.isActive) {
-        if (currentTime >= character.conversation.startTime + character.conversation.duration) {
-          this.endConversation(character.id)
-        }
-        continue // Skip movement while in conversation
+      // Skip movement while in active conversation
+      if (character.conversation?.status === 'active') {
+        continue
       }
 
       // Handle movement (idle state handled by BehaviorDecider in future)
@@ -87,7 +77,7 @@ export class CharacterSimulator {
       if (!currentlyNavigating.has(characterId)) {
         const character = this.worldState.getCharacter(characterId)
         // Only trigger if truly idle (not started action or conversation)
-        if (character && !character.currentAction && !character.conversation?.isActive) {
+        if (character && !character.currentAction && character.conversation?.status !== 'active') {
           if (this.onNavigationComplete) {
             this.onNavigationComplete(characterId)
           }
@@ -144,14 +134,6 @@ export class CharacterSimulator {
       currentNodeId: finalNodeId,
     })
     this.worldState.completeNavigation(character.id)
-
-    // Check for conversation arrival
-    const conversationDest = this.conversationDestinations.get(character.id)
-    if (conversationDest && finalNodeId === conversationDest.targetNodeId) {
-      this.startConversation(character.id, conversationDest.npcId)
-      this.conversationDestinations.delete(character.id)
-      return
-    }
 
     // Check cross-map navigation
     const crossNav = this.worldState.getCrossMapNavigation(character.id)
@@ -385,66 +367,6 @@ export class CharacterSimulator {
     }
   }
 
-  // Conversation methods
-
-  // Start a conversation between character and NPC
-  private startConversation(characterId: string, npcId: string): void {
-    const character = this.worldState.getCharacter(characterId)
-    const npc = this.worldState.getNPC(npcId)
-    if (!character || !npc) return
-
-    // Make character and NPC face each other
-    const charToNpcDirection = getDirection(character.position, npc.position)
-    this.worldState.updateCharacterDirection(characterId, charToNpcDirection)
-    this.worldState.updateNPCDirection(npcId, this.getOppositeDirection(charToNpcDirection))
-
-    // Set NPC conversation state
-    this.worldState.setNPCConversationState(npcId, true)
-
-    // Set character conversation state
-    const conversationState: ConversationState = {
-      isActive: true,
-      npcId,
-      startTime: Date.now(),
-      duration: this.config.conversationDuration,
-    }
-
-    this.worldState.updateCharacter(characterId, {
-      conversation: conversationState,
-      displayEmoji: '💬',  // Show conversation emoji
-    })
-  }
-
-  // End a conversation
-  private endConversation(characterId: string): void {
-    const character = this.worldState.getCharacter(characterId)
-    if (!character?.conversation) return
-
-    const npcId = character.conversation.npcId
-    const npc = this.worldState.getNPC(npcId)
-
-    // Clear NPC conversation state
-    if (npc) {
-      this.worldState.setNPCConversationState(npcId, false)
-    }
-
-    // Clear character conversation state and emoji
-    this.worldState.updateCharacter(characterId, {
-      conversation: null,
-      displayEmoji: undefined,  // Clear conversation emoji
-    })
-  }
-
-  // Get opposite direction
-  private getOppositeDirection(direction: Direction): Direction {
-    const opposites: Record<Direction, Direction> = {
-      up: 'down',
-      down: 'up',
-      left: 'right',
-      right: 'left',
-    }
-    return opposites[direction]
-  }
 }
 
 interface TransitionSimState {

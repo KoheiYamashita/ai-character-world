@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { CharacterSimulator } from './CharacterSimulator'
 import { WorldStateManager } from './WorldState'
 import type { SimCharacter, SimulationConfig } from './types'
-import type { WorldMap, PathNode, NPC } from '@/types'
+import type { WorldMap, PathNode } from '@/types'
 
 // --- Test helpers ---
 
@@ -76,6 +76,7 @@ function createTestCharacter(id: string, overrides: Partial<SimCharacter> = {}):
   }
 }
 
+
 const defaultConfig: SimulationConfig = {
   tickRate: 20,
   movementSpeed: 100,
@@ -83,8 +84,6 @@ const defaultConfig: SimulationConfig = {
   idleTimeMax: 1500,
   entranceProbability: 0.1,
   crossMapProbability: 0.5,
-  conversationProbability: 0.3,
-  conversationDuration: 5000,
 }
 
 describe('CharacterSimulator (integration with real WorldStateManager)', () => {
@@ -126,10 +125,16 @@ describe('CharacterSimulator (integration with real WorldStateManager)', () => {
       worldState.initialize(maps, 'town')
       const char = createTestCharacter('c1', {
         conversation: {
-          isActive: true,
+          id: 'conv-test',
+          characterId: 'c1',
           npcId: 'npc1',
-          startTime: Date.now() + 10000, // Far in future
-          duration: 5000,
+          goal: { goal: 'test', successCriteria: '' },
+          messages: [],
+          currentTurn: 0,
+          maxTurns: 10,
+          startTime: Date.now(),
+          status: 'active',
+          goalAchieved: false,
         },
         navigation: {
           isMoving: true,
@@ -146,26 +151,6 @@ describe('CharacterSimulator (integration with real WorldStateManager)', () => {
 
       const updated = worldState.getCharacter('c1')!
       expect(updated.position).toEqual({ x: 100, y: 100 })
-    })
-
-    it('should end conversation on timeout', () => {
-      const maps = { town: createTestMap('town') }
-      worldState.initialize(maps, 'town')
-      const char = createTestCharacter('c1', {
-        conversation: {
-          isActive: true,
-          npcId: 'npc1',
-          startTime: 1000,
-          duration: 5000,
-        },
-      })
-      worldState.addCharacter(char)
-
-      // currentTime > startTime + duration → conversation ends
-      simulator.tick(0.05, 7000)
-
-      const updated = worldState.getCharacter('c1')!
-      expect(updated.conversation).toBeNull()
     })
   })
 
@@ -765,127 +750,6 @@ describe('CharacterSimulator (integration with real WorldStateManager)', () => {
       // Since the segment is already complete, the cross-map nav state is still active
       // but startCrossMapSegment needs to be triggered
       expect(crossNav?.isActive).toBe(true)
-    })
-  })
-
-  describe('conversation', () => {
-    it('should start conversation when arriving at conversation destination', () => {
-      const maps = { town: createTestMap('town') }
-      worldState.initialize(maps, 'town')
-
-      // Add NPC at node town-0-2 (x:300, y:100)
-      const npc: NPC = {
-        id: 'npc1',
-        name: 'Test NPC',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
-        currentNodeId: 'town-0-2',
-        position: { x: 300, y: 100 },
-        direction: 'left',
-      }
-      worldState.addNPC(npc)
-
-      // Add character at town-0-0 (x:100, y:100)
-      worldState.addCharacter(createTestCharacter('c1'))
-
-      // Set conversation destination to adjacent node (town-0-1)
-      ;(simulator as any).conversationDestinations.set('c1', {
-        npcId: 'npc1',
-        targetNodeId: 'town-0-1',
-      })
-
-      // Navigate to adjacent node of NPC (town-0-1: x:200, y:100)
-      simulator.navigateToNode('c1', 'town-0-1')
-
-      // Arrive at destination (100px at 100px/s = 1s)
-      simulator.tick(1.1, Date.now())
-
-      // Should have started conversation
-      const char = worldState.getCharacter('c1')!
-      expect(char.conversation?.isActive).toBe(true)
-      expect(char.conversation?.npcId).toBe('npc1')
-      expect(char.displayEmoji).toBe('💬')
-
-      // Character should face NPC (NPC is to the right: 300 vs 200)
-      expect(char.direction).toBe('right')
-
-      // NPC should face character (opposite direction)
-      const updatedNpc = worldState.getNPC('npc1')!
-      expect(updatedNpc.direction).toBe('left')
-      expect(updatedNpc.isInConversation).toBe(true)
-    })
-
-    it('should end conversation and clear NPC state on timeout', () => {
-      const maps = { town: createTestMap('town') }
-      worldState.initialize(maps, 'town')
-
-      // Add NPC
-      const npc: NPC = {
-        id: 'npc1',
-        name: 'Test NPC',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
-        currentNodeId: 'town-0-1',
-        position: { x: 200, y: 100 },
-        direction: 'down',
-      }
-      worldState.addNPC(npc)
-
-      // Set NPC as in conversation
-      worldState.setNPCConversationState('npc1', true)
-
-      // Add character already in conversation
-      const char = createTestCharacter('c1', {
-        conversation: {
-          isActive: true,
-          npcId: 'npc1',
-          startTime: 1000,
-          duration: 5000,
-        },
-        displayEmoji: '💬',
-      })
-      worldState.addCharacter(char)
-
-      // Tick with time past conversation end
-      simulator.tick(0.05, 7000)
-
-      // Character conversation should be cleared
-      const updated = worldState.getCharacter('c1')!
-      expect(updated.conversation).toBeNull()
-      expect(updated.displayEmoji).toBeUndefined()
-
-      // NPC conversation state should be cleared
-      const updatedNpc = worldState.getNPC('npc1')!
-      expect(updatedNpc.isInConversation).toBe(false)
-    })
-
-    it('should handle conversation destination clearing after arrival', () => {
-      const maps = { town: createTestMap('town') }
-      worldState.initialize(maps, 'town')
-
-      const npc: NPC = {
-        id: 'npc1',
-        name: 'Test NPC',
-        sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-        mapId: 'town',
-        currentNodeId: 'town-0-2',
-        position: { x: 300, y: 100 },
-        direction: 'left',
-      }
-      worldState.addNPC(npc)
-      worldState.addCharacter(createTestCharacter('c1'))
-
-      ;(simulator as any).conversationDestinations.set('c1', {
-        npcId: 'npc1',
-        targetNodeId: 'town-0-1',
-      })
-
-      simulator.navigateToNode('c1', 'town-0-1')
-      simulator.tick(1.1, Date.now())
-
-      // Conversation destination should be cleared after arrival
-      const destinations = (simulator as any).conversationDestinations as Map<string, unknown>
-      expect(destinations.has('c1')).toBe(false)
     })
   })
 

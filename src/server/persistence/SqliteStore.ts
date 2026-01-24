@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import type { StateStore } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry } from '@/types'
+import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState } from '@/types'
 import type { ActionHistoryEntry } from '@/types/behavior'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -143,6 +143,41 @@ export class SqliteStore implements StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_action_history_character_day
         ON action_history(character_id, day);
+
+      -- NPC conversation summaries
+      CREATE TABLE IF NOT EXISTS npc_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        npc_id TEXT NOT NULL,
+        npc_name TEXT NOT NULL,
+        goal TEXT,
+        summary TEXT NOT NULL,
+        topics TEXT NOT NULL,
+        goal_achieved INTEGER NOT NULL DEFAULT 0,
+        timestamp INTEGER NOT NULL,
+        day INTEGER,
+        time TEXT,
+        affinity_change INTEGER,
+        mood TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_npc_summaries_char_npc
+        ON npc_summaries(character_id, npc_id, timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_npc_summaries_day
+        ON npc_summaries(day);
+
+      -- NPC dynamic states
+      CREATE TABLE IF NOT EXISTS npc_states (
+        npc_id TEXT PRIMARY KEY,
+        affinity INTEGER NOT NULL DEFAULT 0,
+        mood TEXT NOT NULL DEFAULT 'neutral',
+        facts TEXT NOT NULL DEFAULT '[]',
+        conversation_count INTEGER NOT NULL DEFAULT 0,
+        last_conversation INTEGER,
+        updated_at INTEGER NOT NULL
+      );
     `)
   }
 
@@ -487,6 +522,167 @@ export class SqliteStore implements StateStore {
     }))
   }
 
+  // NPC Summary CRUD methods
+
+  async saveNPCSummary(entry: ConversationSummaryEntry): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO npc_summaries (character_id, npc_id, npc_name, goal, summary, topics, goal_achieved, timestamp, day, time, affinity_change, mood, created_at)
+      VALUES (@character_id, @npc_id, @npc_name, @goal, @summary, @topics, @goal_achieved, @timestamp, @day, @time, @affinity_change, @mood, @created_at)
+    `)
+
+    stmt.run({
+      character_id: entry.characterId,
+      npc_id: entry.npcId,
+      npc_name: entry.npcName,
+      goal: entry.goal ?? null,
+      summary: entry.summary,
+      topics: JSON.stringify(entry.topics),
+      goal_achieved: entry.goalAchieved ? 1 : 0,
+      timestamp: entry.timestamp,
+      day: entry.day ?? null,
+      time: entry.time ?? null,
+      affinity_change: entry.affinityChange ?? null,
+      mood: entry.mood ?? null,
+      created_at: Date.now(),
+    })
+  }
+
+  async loadRecentNPCSummaries(characterId: string, npcId: string, limit: number = 5): Promise<ConversationSummaryEntry[]> {
+    const stmt = this.db.prepare(
+      'SELECT * FROM npc_summaries WHERE character_id = ? AND npc_id = ? ORDER BY timestamp DESC LIMIT ?'
+    )
+    const rows = stmt.all(characterId, npcId, limit) as Array<{
+      character_id: string
+      npc_id: string
+      npc_name: string
+      goal: string | null
+      summary: string
+      topics: string
+      goal_achieved: number
+      timestamp: number
+      day: number | null
+      time: string | null
+      affinity_change: number | null
+      mood: string | null
+    }>
+
+    return rows.map(row => ({
+      characterId: row.character_id,
+      npcId: row.npc_id,
+      npcName: row.npc_name,
+      goal: row.goal ?? undefined,
+      summary: row.summary,
+      topics: JSON.parse(row.topics) as string[],
+      goalAchieved: row.goal_achieved === 1,
+      timestamp: row.timestamp,
+      day: row.day ?? undefined,
+      time: row.time ?? undefined,
+      affinityChange: row.affinity_change ?? undefined,
+      mood: row.mood ?? undefined,
+    }))
+  }
+
+  async loadNPCSummariesForDay(day: number): Promise<ConversationSummaryEntry[]> {
+    const stmt = this.db.prepare(
+      'SELECT * FROM npc_summaries WHERE day = ? ORDER BY time, timestamp'
+    )
+    const rows = stmt.all(day) as Array<{
+      character_id: string
+      npc_id: string
+      npc_name: string
+      goal: string | null
+      summary: string
+      topics: string
+      goal_achieved: number
+      timestamp: number
+      day: number | null
+      time: string | null
+      affinity_change: number | null
+      mood: string | null
+    }>
+
+    return rows.map(row => ({
+      characterId: row.character_id,
+      npcId: row.npc_id,
+      npcName: row.npc_name,
+      goal: row.goal ?? undefined,
+      summary: row.summary,
+      topics: JSON.parse(row.topics) as string[],
+      goalAchieved: row.goal_achieved === 1,
+      timestamp: row.timestamp,
+      day: row.day ?? undefined,
+      time: row.time ?? undefined,
+      affinityChange: row.affinity_change ?? undefined,
+      mood: row.mood ?? undefined,
+    }))
+  }
+
+  // NPC State CRUD methods
+
+  async saveNPCState(npcId: string, state: NPCDynamicState): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO npc_states (npc_id, affinity, mood, facts, conversation_count, last_conversation, updated_at)
+      VALUES (@npc_id, @affinity, @mood, @facts, @conversation_count, @last_conversation, @updated_at)
+    `)
+
+    stmt.run({
+      npc_id: npcId,
+      affinity: state.affinity,
+      mood: state.mood,
+      facts: JSON.stringify(state.facts),
+      conversation_count: state.conversationCount,
+      last_conversation: state.lastConversation,
+      updated_at: Date.now(),
+    })
+  }
+
+  async loadNPCState(npcId: string): Promise<NPCDynamicState | null> {
+    const stmt = this.db.prepare('SELECT * FROM npc_states WHERE npc_id = ?')
+    const row = stmt.get(npcId) as {
+      npc_id: string
+      affinity: number
+      mood: string
+      facts: string
+      conversation_count: number
+      last_conversation: number | null
+      updated_at: number
+    } | undefined
+
+    if (!row) return null
+
+    return {
+      affinity: row.affinity,
+      mood: row.mood,
+      facts: JSON.parse(row.facts) as string[],
+      conversationCount: row.conversation_count,
+      lastConversation: row.last_conversation,
+    }
+  }
+
+  async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
+    const stmt = this.db.prepare('SELECT * FROM npc_states')
+    const rows = stmt.all() as Array<{
+      npc_id: string
+      affinity: number
+      mood: string
+      facts: string
+      conversation_count: number
+      last_conversation: number | null
+    }>
+
+    const result = new Map<string, NPCDynamicState>()
+    for (const row of rows) {
+      result.set(row.npc_id, {
+        affinity: row.affinity,
+        mood: row.mood,
+        facts: JSON.parse(row.facts) as string[],
+        conversationCount: row.conversation_count,
+        lastConversation: row.last_conversation,
+      })
+    }
+    return result
+  }
+
   async hasData(): Promise<boolean> {
     const stmt = this.db.prepare('SELECT COUNT(*) as count FROM character_states')
     const result = stmt.get() as { count: number }
@@ -500,6 +696,8 @@ export class SqliteStore implements StateStore {
       DELETE FROM server_state;
       DELETE FROM schedules;
       DELETE FROM action_history;
+      DELETE FROM npc_summaries;
+      DELETE FROM npc_states;
     `)
   }
 

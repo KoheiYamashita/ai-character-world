@@ -279,11 +279,20 @@ describe('dataLoader', () => {
   })
 
   describe('loadNPCsServer', () => {
-    it('should load NPCs with node positions', async () => {
+    it('should load NPCs with node positions and profile fields', async () => {
       const mapsWithNPCs = {
         maps: [{
           ...mockMapsData.maps[0],
-          npcs: [{ id: 'npc1', name: 'TestNPC', sprite: { sheetUrl: 'npc.png' }, spawnNodeId: 'town-1-1' }],
+          npcs: [{
+            id: 'npc1',
+            name: 'TestNPC',
+            sprite: { sheetUrl: 'npc.png' },
+            spawnNodeId: 'town-1-1',
+            personality: '明るく社交的',
+            tendencies: ['話好き', '親切'],
+            facts: ['花屋で働いている'],
+            customPrompt: 'テスト用プロンプト',
+          }],
         }],
       }
       vi.mocked(fs.promises.readFile)
@@ -299,6 +308,16 @@ describe('dataLoader', () => {
       expect(npcs[0].direction).toBe('down')
       expect(npcs[0].position.x).toBeGreaterThan(0)
       expect(npcs[0].position.y).toBeGreaterThan(0)
+      // プロフィールフィールド
+      expect(npcs[0].personality).toBe('明るく社交的')
+      expect(npcs[0].tendencies).toEqual(['話好き', '親切'])
+      expect(npcs[0].facts).toEqual(['花屋で働いている'])
+      expect(npcs[0].customPrompt).toBe('テスト用プロンプト')
+      // 動的ステータス初期値
+      expect(npcs[0].affinity).toBe(0)
+      expect(npcs[0].mood).toBe('neutral')
+      expect(npcs[0].conversationCount).toBe(0)
+      expect(npcs[0].lastConversation).toBeNull()
     })
 
     it('should skip NPCs with non-existent spawn node', async () => {

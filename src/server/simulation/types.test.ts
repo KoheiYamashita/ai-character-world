@@ -192,6 +192,13 @@ describe('simulation types', () => {
         currentNodeId: 'node-0-0',
         position: { x: 100, y: 200 },
         direction: 'right',
+        personality: 'テスト性格',
+        tendencies: ['傾向1'],
+        facts: ['事実1'],
+        affinity: 0,
+        mood: 'neutral',
+        conversationCount: 0,
+        lastConversation: null,
       }
 
       const simNPC = createSimNPC(npc)
@@ -213,6 +220,13 @@ describe('simulation types', () => {
         currentNodeId: 'node',
         position: { x: 100, y: 100 },
         direction: 'down',
+        personality: 'テスト性格',
+        tendencies: ['傾向1'],
+        facts: ['事実1'],
+        affinity: 0,
+        mood: 'neutral',
+        conversationCount: 0,
+        lastConversation: null,
       }
 
       const simNPC = createSimNPC(npc)

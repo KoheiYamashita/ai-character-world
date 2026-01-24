@@ -245,8 +245,8 @@ export class ActionExecutor {
     const action = character.currentAction
     if (!action) return
 
-    // thinking アクションは手動完了のみ（duration: 0 だが自動完了しない）
-    if (action.actionId === 'thinking') return
+    // thinking, talk アクションは手動完了のみ（duration: 0 だが自動完了しない）
+    if (action.actionId === 'thinking' || action.actionId === 'talk') return
 
     // 終了時刻に達したら完了
     if (currentTime >= action.targetEndTime) {

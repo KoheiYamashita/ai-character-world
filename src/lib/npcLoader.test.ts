@@ -12,22 +12,25 @@ describe('npcLoader', () => {
   })
 
   describe('createNPCFromConfig', () => {
-    it('should create NPC from config', () => {
-      const config: NPCConfigJson = {
-        id: 'npc-1',
-        name: 'Test NPC',
-        sprite: {
-          sheetUrl: 'npc.png',
-          frameWidth: 96,
-          frameHeight: 96,
-          cols: 3,
-          rows: 4,
-          rowMapping: { down: 0, left: 1, right: 2, up: 3 },
-        },
-        spawnNodeId: 'node-0-0',
-      }
+    const baseConfig: NPCConfigJson = {
+      id: 'npc-1',
+      name: 'Test NPC',
+      sprite: {
+        sheetUrl: 'npc.png',
+        frameWidth: 96,
+        frameHeight: 96,
+        cols: 3,
+        rows: 4,
+        rowMapping: { down: 0, left: 1, right: 2, up: 3 },
+      },
+      spawnNodeId: 'node-0-0',
+      personality: '明るく社交的',
+      tendencies: ['話好き', '親切'],
+      facts: ['花屋で働いている', '猫が好き'],
+    }
 
-      const npc = createNPCFromConfig(config, 'test-map', { x: 100, y: 200 })
+    it('should create NPC from config', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 100, y: 200 })
 
       expect(npc.id).toBe('npc-1')
       expect(npc.name).toBe('Test NPC')
@@ -39,8 +42,7 @@ describe('npcLoader', () => {
 
     it('should preserve sprite config', () => {
       const config: NPCConfigJson = {
-        id: 'npc-1',
-        name: 'Test NPC',
+        ...baseConfig,
         sprite: {
           sheetUrl: 'custom-npc.png',
           frameWidth: 48,
@@ -49,7 +51,6 @@ describe('npcLoader', () => {
           rows: 4,
           rowMapping: { down: 0, left: 1, right: 2, up: 3 },
         },
-        spawnNodeId: 'node-0-0',
       }
 
       const npc = createNPCFromConfig(config, 'map', { x: 0, y: 0 })
@@ -57,9 +58,52 @@ describe('npcLoader', () => {
       expect(npc.sprite?.sheetUrl).toBe('custom-npc.png')
       expect(npc.sprite?.frameWidth).toBe(48)
     })
+
+    it('should include personality from config', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
+      expect(npc.personality).toBe('明るく社交的')
+    })
+
+    it('should include tendencies from config', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
+      expect(npc.tendencies).toEqual(['話好き', '親切'])
+    })
+
+    it('should include customPrompt if provided', () => {
+      const config: NPCConfigJson = {
+        ...baseConfig,
+        customPrompt: '特別な対応をする',
+      }
+      const npc = createNPCFromConfig(config, 'test-map', { x: 0, y: 0 })
+      expect(npc.customPrompt).toBe('特別な対応をする')
+    })
+
+    it('should leave customPrompt undefined if not provided', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
+      expect(npc.customPrompt).toBeUndefined()
+    })
+
+    it('should include facts from config', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
+      expect(npc.facts).toEqual(['花屋で働いている', '猫が好き'])
+    })
+
+    it('should initialize dynamic status fields to defaults', () => {
+      const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
+      expect(npc.affinity).toBe(0)
+      expect(npc.mood).toBe('neutral')
+      expect(npc.conversationCount).toBe(0)
+      expect(npc.lastConversation).toBeNull()
+    })
   })
 
   describe('loadNPCsFromMapConfig', () => {
+    const defaultNPCFields = {
+      personality: 'テスト性格',
+      tendencies: ['傾向1'],
+      facts: ['事実1'],
+    }
+
     it('should load NPCs from map config', () => {
       const map: WorldMap = {
         id: 'test-map',
@@ -80,12 +124,14 @@ describe('npcLoader', () => {
           name: 'NPC 1',
           sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
+          ...defaultNPCFields,
         },
         {
           id: 'npc-2',
           name: 'NPC 2',
           sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-1-1',
+          ...defaultNPCFields,
         },
       ]
 
@@ -117,12 +163,14 @@ describe('npcLoader', () => {
           name: 'NPC 1',
           sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
+          ...defaultNPCFields,
         },
         {
           id: 'npc-2',
           name: 'NPC 2',
           sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'non-existent-node',
+          ...defaultNPCFields,
         },
       ]
 
@@ -142,6 +190,7 @@ describe('npcLoader', () => {
           name: 'NPC 1',
           sprite: { sheetUrl: 'npc.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
           spawnNodeId: 'node-0-0',
+          ...defaultNPCFields,
         },
       ]
 
@@ -171,27 +220,4 @@ describe('npcLoader', () => {
     })
   })
 
-  // =====================
-  // docs/memory-and-conversation-system.md:166-175 NPCProfile仕様
-  // Step 16で実装予定 (implementation-plan.md)
-  // =====================
-
-  describe('NPC extended fields (Step 16 - not yet implemented)', () => {
-    it.todo('should include personality if provided (docs/memory-and-conversation-system.md:170)')
-
-    it.todo('should include tendencies if provided (docs/memory-and-conversation-system.md:171)')
-
-    it.todo('should include customPrompt if provided (docs/memory-and-conversation-system.md:172)')
-
-    it.todo('should include facts if provided (docs/memory-and-conversation-system.md:173)')
-
-    // docs/memory-and-conversation-system.md:50-55 NPC status fields
-    it.todo('should initialize affinity to 0 (docs/memory-and-conversation-system.md:52)')
-
-    it.todo('should initialize mood to neutral (docs/memory-and-conversation-system.md:53)')
-
-    it.todo('should initialize conversationCount to 0 (docs/memory-and-conversation-system.md:54)')
-
-    it.todo('should initialize lastConversation to null (docs/memory-and-conversation-system.md:55)')
-  })
 })

@@ -39,11 +39,17 @@ const ALLOWED_ACTIONS = ['eat', 'sleep', 'toilet', 'bathe', 'rest', 'talk', 'wor
  * LLMからのアクション決定出力スキーマ
  * Note: OpenAI Structured Output では全フィールドが required 必須。
  */
+const ConversationGoalSchema = z.object({
+  goal: z.string().describe('会話の具体的な目的（例: 「おすすめの料理を聞く」「最近の街の様子を聞く」「体調を気遣う」）'),
+  successCriteria: z.string().describe('目的達成の具体的な判定基準（例: 「おすすめを1つ以上教えてもらえた」「街の近況を1つ以上聞けた」「体調について返答があった」）'),
+})
+
 const ActionDecisionSchema = z.object({
   action: z.enum(ALLOWED_ACTIONS).describe('アクション種別'),
   target: z.string().nullable().describe('対象のID（施設ID、NPC ID、マップIDのいずれか。不要ならnull）'),
   reason: z.string().describe('この行動を選んだ理由'),
   durationMinutes: z.number().nullable().describe('実行時間（分）。可変時間アクション（eat, sleep, toilet, bathe, rest, work）の場合に指定。talk, move, idle, thinkingはnull'),
+  conversationGoal: ConversationGoalSchema.nullable().describe('会話の目的と達成条件（talkの場合に必須。それ以外はnull）'),
   scheduleUpdate: ScheduleUpdateSchema.nullable().describe('スケジュール変更（不要ならnull）'),
 })
 
@@ -320,7 +326,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     llmDecision: LLMActionDecision,
     context: BehaviorContext
   ): BehaviorDecision {
-    const { action, target, reason, scheduleUpdate, durationMinutes } = llmDecision
+    const { action, target, reason, scheduleUpdate, durationMinutes, conversationGoal } = llmDecision
     const convertedScheduleUpdate = this.convertScheduleUpdate(scheduleUpdate)
     const duration = durationMinutes ?? undefined
 
@@ -389,6 +395,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       // talk アクションの場合、targetがあればNPC IDとして設定
       if (action === 'talk' && target) {
         result.targetNpcId = target
+        result.conversationGoal = conversationGoal ?? { goal: reason, successCriteria: '' }
       }
       // 施設アクションの場合、targetがあれば施設IDとして設定
       else if (target) {
@@ -594,7 +601,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push('- スケジュールも考慮してください')
     parts.push('- 現在マップで実行可能なアクションを優先してください')
     parts.push('- 施設を利用する場合（eat, sleep, bathe, rest等）はアクションを選択し、targetに施設IDを指定')
-    parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定')
+    parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定。conversationGoalには1回の会話で達成可能な具体的目的を設定すること（例: 「おすすめの料理を聞く」「最近の出来事を聞く」）。「会話する」「話す」のような曖昧な目的は避けること')
     parts.push('- 別のマップに移動したい場合は「move」を選択し、targetにマップIDを指定')
     parts.push('- 特にすることがなければ「idle」を選択（targetはnull）')
     parts.push('')

@@ -515,7 +515,7 @@ export default function PixiAppSync(): React.ReactNode {
 
       // Update NPC head icons (for conversation partner)
       const conversation = serverChar?.conversation
-      if (conversation?.isActive) {
+      if (conversation?.status === 'active') {
         const npcId = conversation.npcId
         const npcSprite = npcSpritesRef.current.get(npcId)
         const npcIconId = `npc-${npcId}`
@@ -600,7 +600,7 @@ export default function PixiAppSync(): React.ReactNode {
   }
 
   return (
-    <div className="relative">
+    <div className="relative w-fit">
       <div
         ref={containerRef}
         className="rounded-lg overflow-hidden shadow-xl bg-slate-800"

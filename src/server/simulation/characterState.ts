@@ -14,7 +14,7 @@ import type { SimCharacter } from './types'
 export function isCharacterIdle(character: SimCharacter): boolean {
   return (
     !character.currentAction &&
-    !character.conversation?.isActive &&
+    character.conversation?.status !== 'active' &&
     !character.navigation.isMoving
   )
 }
@@ -37,7 +37,7 @@ export function isCharacterPerformingAction(character: SimCharacter): boolean {
  * キャラクターが会話中かどうかを判定
  */
 export function isCharacterInConversation(character: SimCharacter): boolean {
-  return character.conversation?.isActive === true
+  return character.conversation?.status === 'active'
 }
 
 /**
