@@ -1,6 +1,6 @@
-import type { StateStore } from './StateStore'
+import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 
 /**
@@ -8,6 +8,10 @@ import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
  * Data is not persisted across server restarts.
  * Useful for development and testing.
  */
+interface InMemoryActiveAction extends ActiveActionEntry {
+  status: 'in_progress' | 'completed'
+}
+
 export class MemoryStore implements StateStore {
   private state: SerializedWorldState | null = null
   private characters: Map<string, SimCharacter> = new Map()
@@ -18,6 +22,8 @@ export class MemoryStore implements StateStore {
   private npcSummaries: ConversationSummaryEntry[] = []
   private npcStates: Map<string, NPCDynamicState> = new Map()
   private midTermMemories: MidTermMemory[] = []
+  private activeActions: Map<number, InMemoryActiveAction> = new Map() // key: rowId
+  private nextRowId: number = 1
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -176,6 +182,75 @@ export class MemoryStore implements StateStore {
     }
   }
 
+  // New action persistence methods (for in-progress action tracking)
+
+  async startActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+    startTimeReal: number
+  }): Promise<number> {
+    const rowId = this.nextRowId++
+    const activeAction: InMemoryActiveAction = {
+      rowId,
+      characterId: entry.characterId,
+      day: entry.day,
+      time: entry.time,
+      actionId: entry.actionId,
+      target: entry.target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+      startTimeReal: entry.startTimeReal,
+      lastUpdateTime: Date.now(),
+      status: 'in_progress',
+    }
+    this.activeActions.set(rowId, activeAction)
+    return rowId
+  }
+
+  async updateActiveActionProgress(
+    rowId: number,
+    statsSnapshot: CharacterStats
+  ): Promise<void> {
+    const action = this.activeActions.get(rowId)
+    if (!action || action.status !== 'in_progress') return
+    action.statsSnapshot = statsSnapshot
+    action.lastUpdateTime = Date.now()
+  }
+
+  async completeActionHistory(
+    rowId: number,
+    endTime: string,
+    episode?: string
+  ): Promise<void> {
+    const action = this.activeActions.get(rowId)
+    if (!action) return
+
+    action.status = 'completed'
+
+    // Add to actionHistory cache
+    const key = this.characterDayKey(action.characterId, action.day)
+    const existing = this.actionHistory.get(key) ?? []
+    existing.push({
+      time: endTime,
+      actionId: action.actionId,
+      target: action.target,
+      durationMinutes: action.durationMinutes,
+      reason: action.reason,
+      episode,
+    })
+    this.actionHistory.set(key, existing)
+  }
+
+  async loadActiveActions(): Promise<ActiveActionEntry[]> {
+    return Array.from(this.activeActions.values())
+      .filter(action => action.status === 'in_progress')
+  }
+
   // NPC Summary methods
 
   async saveNPCSummary(entry: ConversationSummaryEntry): Promise<void> {
@@ -250,6 +325,8 @@ export class MemoryStore implements StateStore {
     this.npcSummaries = []
     this.npcStates.clear()
     this.midTermMemories = []
+    this.activeActions.clear()
+    this.nextRowId = 1
   }
 
   async close(): Promise<void> {

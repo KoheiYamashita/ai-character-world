@@ -2811,14 +2811,15 @@ describe('SimulationEngine (integration)', () => {
       expect(result).toBeNull()
     })
 
-    it('should call generateMiniEpisode when recording action history', async () => {
+    it('should call generateMiniEpisode when completing action history', async () => {
       const maps = { town: createTestMap('town') }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
 
       // Spy on generateMiniEpisode
       const spy = vi.spyOn(engine as any, 'generateMiniEpisode').mockResolvedValue(undefined)
 
-      ;(engine as any).recordActionHistory({
+      // completeActionHistoryRecord generates mini episodes (not recordActionHistory)
+      ;(engine as any).completeActionHistoryRecord({
         characterId: 'c1',
         actionId: 'eat',
         facilityId: 'restaurant-1',

@@ -9,7 +9,18 @@ import { parseNodeIdToGridCoord } from '@/lib/gridUtils'
 /** Callback type for action completion events */
 export type ActionCompleteCallback = (characterId: string, actionId: ActionId) => void
 
-/** Callback type for recording action history */
+/** Callback type for action start events */
+export type ActionStartCallback = (entry: {
+  characterId: string
+  actionId: ActionId
+  facilityId?: string
+  targetNpcId?: string
+  durationMinutes?: number
+  reason?: string
+  startTimeReal: number  // Date.now() at action start
+}) => void
+
+/** Callback type for recording action history (legacy: completion only) */
 export type ActionHistoryCallback = (entry: {
   characterId: string
   actionId: ActionId
@@ -28,6 +39,7 @@ export type ActionHistoryCallback = (entry: {
 export class ActionExecutor {
   private worldState: WorldStateManager
   private onActionComplete?: ActionCompleteCallback
+  private onActionStart?: ActionStartCallback
   private onRecordHistory?: ActionHistoryCallback
   private actionConfigs: Record<string, ActionConfig> = {}
 
@@ -75,6 +87,11 @@ export class ActionExecutor {
   /** Set callback for action completion events */
   setOnActionComplete(callback: ActionCompleteCallback): void {
     this.onActionComplete = callback
+  }
+
+  /** Set callback for action start events */
+  setOnActionStart(callback: ActionStartCallback): void {
+    this.onActionStart = callback
   }
 
   /** Set callback for recording action history */
@@ -155,6 +172,20 @@ export class ActionExecutor {
       ? `${actualDurationMinutes}min`
       : `${durationMs / 1000}s`
     console.log(`[ActionExecutor] ${character.name} started action: ${actionId} (duration: ${durationStr}, emoji: ${actionDef.emoji ?? 'none'})`)
+
+    // Notify action start callback (skip thinking action - it's internal)
+    if (this.onActionStart && actionId !== 'thinking') {
+      this.onActionStart({
+        characterId,
+        actionId,
+        facilityId: facilityId ?? facility?.owner,
+        targetNpcId,
+        durationMinutes: actualDurationMinutes,
+        reason,
+        startTimeReal: now,
+      })
+    }
+
     return true
   }
 

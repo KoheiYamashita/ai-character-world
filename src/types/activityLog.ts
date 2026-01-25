@@ -7,6 +7,11 @@ export interface ActionLogEntry {
   target?: string
   durationMinutes?: number
   reason?: string
+  /**
+   * Action status: 'started' or 'completed'.
+   * When undefined, treated as 'completed' (backward compatibility).
+   */
+  status?: 'started' | 'completed'
 }
 
 export interface ConversationLogEntry {

@@ -1,6 +1,23 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
+
+/**
+ * Active action entry (for restoring in-progress actions on restart)
+ */
+export interface ActiveActionEntry {
+  rowId: number
+  characterId: string
+  day: number
+  time: string
+  actionId: string
+  target?: string
+  durationMinutes?: number
+  reason?: string
+  startTimeReal: number        // 開始実時刻 (Date.now())
+  lastUpdateTime: number       // 最終更新時刻
+  statsSnapshot?: CharacterStats  // 更新時点のステータス
+}
 
 /**
  * Abstract interface for state persistence.
@@ -85,7 +102,7 @@ export interface StateStore {
   deleteAllSchedulesForCharacter(characterId: string): Promise<void>
 
   /**
-   * Add an action history entry
+   * Add an action history entry (legacy: completed action)
    */
   addActionHistory(entry: {
     characterId: string
@@ -96,6 +113,43 @@ export interface StateStore {
     durationMinutes?: number
     reason?: string
   }): Promise<void>
+
+  /**
+   * Start an action (INSERT with status='in_progress')
+   * Returns the row ID for subsequent updates
+   */
+  startActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+    startTimeReal: number
+  }): Promise<number>
+
+  /**
+   * Update active action progress (30秒ごとの中間更新)
+   */
+  updateActiveActionProgress(
+    rowId: number,
+    statsSnapshot: CharacterStats
+  ): Promise<void>
+
+  /**
+   * Complete an action (UPDATE status='completed')
+   */
+  completeActionHistory(
+    rowId: number,
+    endTime: string,
+    episode?: string
+  ): Promise<void>
+
+  /**
+   * Load all in-progress actions (for restart recovery)
+   */
+  loadActiveActions(): Promise<ActiveActionEntry[]>
 
   /**
    * Load action history for a character on a specific day

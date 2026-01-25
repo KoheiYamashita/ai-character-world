@@ -73,6 +73,8 @@ export class SimulationEngine {
   private miniEpisodeGenerator: MiniEpisodeGenerator = new StubMiniEpisodeGenerator()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
   private pendingDecisions: Set<string> = new Set()
+  // Track active action rowIds for DB persistence (characterId -> rowId)
+  private activeActionRowIds: Map<string, number> = new Map()
   // Track last day for day-change detection (schedule cache refresh)
   private lastDay: number = 1
   // Status interrupt threshold (design: 10%)
@@ -187,9 +189,14 @@ export class SimulationEngine {
       this.onNavigationComplete(characterId)
     })
 
-    // Set action history recording callback
+    // Set action history recording callback (for completion)
     this.actionExecutor.setOnRecordHistory((entry) => {
-      this.recordActionHistory(entry)
+      this.completeActionHistoryRecord(entry)
+    })
+
+    // Set action start callback (for new action persistence system)
+    this.actionExecutor.setOnActionStart((entry) => {
+      this.startActionHistoryRecord(entry)
     })
   }
 
@@ -456,6 +463,10 @@ export class SimulationEngine {
     if (this.stateStore && now - this.lastSaveTime >= SAVE_INTERVAL_MS) {
       this.saveState().catch(err => {
         console.error('[SimulationEngine] Error saving state:', err)
+      })
+      // Update active action progress (stats snapshot)
+      this.updateActiveActionsProgress().catch(err => {
+        console.error('[SimulationEngine] Error updating active actions:', err)
       })
       // Delete expired mid-term memories and reload cache
       this.cleanupAndReloadMidTermMemories(realTime.day).catch(err => {
@@ -1490,7 +1501,7 @@ export class SimulationEngine {
     }
   }
 
-  // Record action history (called from ActionExecutor callback and directly for move/idle/talk)
+  // Record action history (for instant actions: move, idle, talk summary)
   private recordActionHistory(entry: {
     characterId: string
     actionId: string
@@ -1505,7 +1516,7 @@ export class SimulationEngine {
     const timeStr = this.formatTimeString(currentTime)
     const target = entry.target ?? entry.facilityId ?? entry.targetNpcId
 
-    // Update cache
+    // Update cache (completed action)
     const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
     const cached = this.actionHistoryCache.get(cacheKey) ?? []
     cached.push({
@@ -1517,7 +1528,7 @@ export class SimulationEngine {
     })
     this.actionHistoryCache.set(cacheKey, cached)
 
-    // Persist to DB (async, non-blocking)
+    // Persist to DB (async, non-blocking) - these are instant actions, use legacy API
     if (this.stateStore) {
       this.stateStore.addActionHistory({
         characterId: entry.characterId,
@@ -1534,7 +1545,7 @@ export class SimulationEngine {
 
     console.log(`[SimulationEngine] Recorded action history: ${entry.characterId} ${timeStr} ${entry.actionId}${target ? ` → ${target}` : ''}`)
 
-    // Notify log subscribers
+    // Notify log subscribers (completed status for instant actions)
     this.notifyLogSubscribersAction({
       characterId: entry.characterId,
       actionId: entry.actionId,
@@ -1542,10 +1553,123 @@ export class SimulationEngine {
       durationMinutes: entry.durationMinutes,
       reason: entry.reason,
       time: timeStr,
+      status: 'completed',
+    })
+  }
+
+  // Start action history record (for timed actions: eat, sleep, work, etc.)
+  private startActionHistoryRecord(entry: {
+    characterId: string
+    actionId: string
+    facilityId?: string
+    targetNpcId?: string
+    durationMinutes?: number
+    reason?: string
+    startTimeReal: number
+  }): void {
+    const currentTime = this.worldState.getTime()
+    const currentDay = currentTime.day
+    const timeStr = this.formatTimeString(currentTime)
+    const target = entry.facilityId ?? entry.targetNpcId
+
+    // Persist to DB (async, non-blocking)
+    if (this.stateStore) {
+      this.stateStore.startActionHistory({
+        characterId: entry.characterId,
+        day: currentDay,
+        time: timeStr,
+        actionId: entry.actionId,
+        target,
+        durationMinutes: entry.durationMinutes,
+        reason: entry.reason,
+        startTimeReal: entry.startTimeReal,
+      }).then(rowId => {
+        // Store rowId for later completion
+        this.activeActionRowIds.set(entry.characterId, rowId)
+        console.log(`[SimulationEngine] Action started (rowId=${rowId}): ${entry.characterId} ${timeStr} ${entry.actionId}`)
+      }).catch(error => {
+        console.error(`[SimulationEngine] Error starting action history:`, error)
+      })
+    }
+
+    // Notify log subscribers (started status)
+    this.notifyLogSubscribersAction({
+      characterId: entry.characterId,
+      actionId: entry.actionId,
+      target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+      time: timeStr,
+      status: 'started',
+    })
+  }
+
+  // Complete action history record (for timed actions)
+  private completeActionHistoryRecord(entry: {
+    characterId: string
+    actionId: string
+    facilityId?: string
+    targetNpcId?: string
+    durationMinutes?: number
+    reason?: string
+  }): void {
+    const currentTime = this.worldState.getTime()
+    const currentDay = currentTime.day
+    const timeStr = this.formatTimeString(currentTime)
+    const target = entry.facilityId ?? entry.targetNpcId
+
+    // Update cache (completed action)
+    const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
+    const cached = this.actionHistoryCache.get(cacheKey) ?? []
+    cached.push({
+      time: timeStr,
+      actionId: entry.actionId,
+      target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+    })
+    this.actionHistoryCache.set(cacheKey, cached)
+
+    // Complete in DB using stored rowId
+    const rowId = this.activeActionRowIds.get(entry.characterId)
+    if (rowId && this.stateStore) {
+      this.stateStore.completeActionHistory(rowId, timeStr)
+        .then(() => {
+          this.activeActionRowIds.delete(entry.characterId)
+          console.log(`[SimulationEngine] Action completed (rowId=${rowId}): ${entry.characterId} ${timeStr} ${entry.actionId}`)
+        })
+        .catch(error => {
+          console.error(`[SimulationEngine] Error completing action history:`, error)
+        })
+    } else {
+      // Fallback: if no rowId (e.g., restored action), use legacy API
+      if (this.stateStore) {
+        this.stateStore.addActionHistory({
+          characterId: entry.characterId,
+          day: currentDay,
+          time: timeStr,
+          actionId: entry.actionId,
+          target,
+          durationMinutes: entry.durationMinutes,
+          reason: entry.reason,
+        }).catch(error => {
+          console.error(`[SimulationEngine] Error saving action history (fallback):`, error)
+        })
+      }
+    }
+
+    // Notify log subscribers (completed status)
+    this.notifyLogSubscribersAction({
+      characterId: entry.characterId,
+      actionId: entry.actionId,
+      target,
+      durationMinutes: entry.durationMinutes,
+      reason: entry.reason,
+      time: timeStr,
+      status: 'completed',
     })
 
     // Trigger mini episode generation (async, non-blocking)
-    // Get facility info now (before action state is cleared)
     const facility = this.actionExecutor.getCurrentFacility(entry.characterId)
     this.generateMiniEpisode(entry.characterId, entry.actionId as ActionId, facility, timeStr, currentDay)
       .catch(error => {
@@ -1674,6 +1798,31 @@ export class SimulationEngine {
     }
   }
 
+  // Update active action progress in DB (30秒ごと)
+  private async updateActiveActionsProgress(): Promise<void> {
+    if (!this.stateStore) return
+
+    for (const [characterId, rowId] of this.activeActionRowIds) {
+      const character = this.worldState.getCharacter(characterId)
+      if (!character) continue
+
+      const statsSnapshot = {
+        satiety: character.satiety,
+        energy: character.energy,
+        hygiene: character.hygiene,
+        mood: character.mood,
+        bladder: character.bladder,
+        money: character.money,
+      }
+
+      try {
+        await this.stateStore.updateActiveActionProgress(rowId, statsSnapshot)
+      } catch (error) {
+        console.error(`[SimulationEngine] Error updating active action progress for ${characterId}:`, error)
+      }
+    }
+  }
+
   // Delete expired mid-term memories and reload cache
   private async cleanupAndReloadMidTermMemories(currentDay: number): Promise<void> {
     if (!this.stateStore) return
@@ -1685,6 +1834,66 @@ export class SimulationEngine {
 
     // Reload cache from DB (reflects deletions)
     await this.loadMidTermMemoriesCache()
+  }
+
+  // Restore active actions from DB (called on startup)
+  async restoreActiveActions(): Promise<void> {
+    if (!this.stateStore) return
+
+    const activeActions = await this.stateStore.loadActiveActions()
+    const now = Date.now()
+
+    for (const entry of activeActions) {
+      const character = this.worldState.getCharacter(entry.characterId)
+      if (!character) {
+        // Character doesn't exist anymore, complete the action
+        await this.stateStore.completeActionHistory(entry.rowId, entry.time, undefined)
+        console.log(`[SimulationEngine] Orphan active action completed: rowId=${entry.rowId}`)
+        continue
+      }
+
+      // Calculate target end time based on duration
+      const durationMs = (entry.durationMinutes ?? 0) * 60 * 1000
+      const targetEndTime = entry.startTimeReal + durationMs
+
+      if (now >= targetEndTime) {
+        // Action should have ended - complete it
+        const currentTime = this.worldState.getTime()
+        const endTimeStr = this.formatTimeString(currentTime)
+        await this.stateStore.completeActionHistory(entry.rowId, endTimeStr, undefined)
+        console.log(`[SimulationEngine] Expired active action completed: ${character.name} ${entry.actionId} (rowId=${entry.rowId})`)
+
+        // Notify log subscribers (completed status)
+        this.notifyLogSubscribersAction({
+          characterId: entry.characterId,
+          actionId: entry.actionId,
+          target: entry.target,
+          durationMinutes: entry.durationMinutes,
+          reason: entry.reason,
+          time: endTimeStr,
+          status: 'completed',
+        })
+      } else {
+        // Action still in progress - restore it
+        const actionState = {
+          actionId: entry.actionId as ActionId,
+          startTime: entry.startTimeReal,
+          targetEndTime,
+          facilityId: entry.target,
+          durationMinutes: entry.durationMinutes,
+          reason: entry.reason,
+        }
+
+        this.worldState.updateCharacter(entry.characterId, {
+          currentAction: actionState,
+        })
+        this.activeActionRowIds.set(entry.characterId, entry.rowId)
+
+        const remainingMs = targetEndTime - now
+        const remainingMin = Math.ceil(remainingMs / 60000)
+        console.log(`[SimulationEngine] Restored active action: ${character.name} ${entry.actionId} (${remainingMin}min remaining, rowId=${entry.rowId})`)
+      }
+    }
   }
 
   // Load recent conversations from DB for current day
@@ -1812,6 +2021,7 @@ export class SimulationEngine {
     durationMinutes?: number
     reason?: string
     time: string
+    status?: 'started' | 'completed'
   }): void {
     const character = this.worldState.getCharacter(entry.characterId)
     this.emitLogEntry({
@@ -1823,6 +2033,7 @@ export class SimulationEngine {
       target: entry.target,
       durationMinutes: entry.durationMinutes,
       reason: entry.reason,
+      status: entry.status,
     })
   }
 
@@ -2168,6 +2379,9 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       await engine.loadMidTermMemoriesCache()
       await engine.loadRecentConversationsCache()
       engine.initializeLastDay()
+
+      // Restore active actions from DB (actions in progress when server stopped)
+      await engine.restoreActiveActions()
 
       engine.start()
       console.log(`${logPrefix} Simulation engine started`)

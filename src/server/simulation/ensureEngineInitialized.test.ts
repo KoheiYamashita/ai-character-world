@@ -33,6 +33,12 @@ const mockStoreInstance = {
   addMidTermMemory: vi.fn().mockResolvedValue(undefined),
   loadActiveMidTermMemories: vi.fn().mockResolvedValue([]),
   deleteExpiredMidTermMemories: vi.fn().mockResolvedValue(0),
+  // New action persistence methods
+  startActionHistory: vi.fn().mockResolvedValue(1),
+  updateActiveActionProgress: vi.fn().mockResolvedValue(undefined),
+  completeActionHistory: vi.fn().mockResolvedValue(undefined),
+  loadActiveActions: vi.fn().mockResolvedValue([]),
+  updateActionHistoryEpisode: vi.fn().mockResolvedValue(undefined),
 }
 
 const mockLoadWorldDataServer = vi.fn()

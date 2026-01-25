@@ -13,6 +13,8 @@ const ACTION_LABELS: Record<string, string> = {
   toilet: 'トイレ',
   talk: '会話',
   thinking: '思考中',
+  move: '移動',
+  idle: '待機',
 }
 
 function getActionLabel(actionId: string): string {
@@ -20,13 +22,37 @@ function getActionLabel(actionId: string): string {
 }
 
 function ActionLogLine({ entry }: { entry: ActionLogEntry }) {
+  const isStarted = entry.status === 'started'
+  const actionLabel = getActionLabel(entry.actionId)
+
+  if (isStarted) {
+    // 開始表示: [10:00] 花子 - ▶ 食事開始 @ レストラン (予定30分): お腹が空いたから
+    return (
+      <div className="text-sm text-slate-300 py-0.5">
+        <span className="text-slate-500">[{entry.time}]</span>{' '}
+        <span className="text-blue-300 font-medium">{entry.characterName}</span>{' '}
+        <span className="text-green-400">▶</span>{' '}
+        <span className="text-slate-400">{actionLabel}開始</span>
+        {entry.target && <span className="text-slate-500"> @ {entry.target}</span>}
+        {entry.durationMinutes !== undefined && (
+          <span className="text-slate-500"> (予定{entry.durationMinutes}分)</span>
+        )}
+        {entry.reason && <span className="text-slate-500">: {entry.reason}</span>}
+      </div>
+    )
+  }
+
+  // 完了表示（デフォルト）: [10:30] 花子 - ✓ 食事完了 @ レストラン (30分)
   return (
     <div className="text-sm text-slate-300 py-0.5">
       <span className="text-slate-500">[{entry.time}]</span>{' '}
       <span className="text-blue-300 font-medium">{entry.characterName}</span>{' '}
-      <span className="text-slate-400">- {getActionLabel(entry.actionId)}</span>
+      <span className="text-slate-400">✓</span>{' '}
+      <span className="text-slate-400">{actionLabel}完了</span>
       {entry.target && <span className="text-slate-500"> @ {entry.target}</span>}
-      {entry.reason && <span className="text-slate-500">: {entry.reason}</span>}
+      {entry.durationMinutes !== undefined && (
+        <span className="text-slate-500"> ({entry.durationMinutes}分)</span>
+      )}
     </div>
   )
 }

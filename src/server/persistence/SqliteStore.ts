@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
-import type { StateStore } from './StateStore'
+import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState } from '@/types'
+import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -56,6 +56,12 @@ interface ActionHistoryRow {
   reason: string | null
   episode: string | null
   created_at: number
+  // New columns for action persistence
+  status: string  // 'in_progress' | 'completed'
+  start_time_real: number | null  // 開始実時刻
+  end_time: string | null  // 完了時刻
+  last_update_time: number | null  // 最終更新時刻
+  stats_snapshot: string | null  // JSON: CharacterStats
 }
 
 /**
@@ -206,6 +212,50 @@ export class SqliteStore implements StateStore {
       this.db.prepare('ALTER TABLE action_history ADD COLUMN episode TEXT').run()
       console.log('[SqliteStore] Migrated: added episode column to action_history')
     }
+    // Chain to next migration
+    this.migrateActionHistoryPersistence()
+  }
+
+  private migrateActionHistoryPersistence(): void {
+    const columns = this.db.pragma('table_info(action_history)') as Array<{ name: string }>
+    const columnNames = new Set(columns.map(c => c.name))
+
+    // Add status column with default 'completed' (existing records are completed)
+    if (!columnNames.has('status')) {
+      this.db.prepare("ALTER TABLE action_history ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'").run()
+      console.log('[SqliteStore] Migrated: added status column to action_history')
+    }
+
+    // Add start_time_real column
+    if (!columnNames.has('start_time_real')) {
+      this.db.prepare('ALTER TABLE action_history ADD COLUMN start_time_real INTEGER').run()
+      console.log('[SqliteStore] Migrated: added start_time_real column to action_history')
+    }
+
+    // Add end_time column
+    if (!columnNames.has('end_time')) {
+      this.db.prepare('ALTER TABLE action_history ADD COLUMN end_time TEXT').run()
+      console.log('[SqliteStore] Migrated: added end_time column to action_history')
+    }
+
+    // Add last_update_time column
+    if (!columnNames.has('last_update_time')) {
+      this.db.prepare('ALTER TABLE action_history ADD COLUMN last_update_time INTEGER').run()
+      console.log('[SqliteStore] Migrated: added last_update_time column to action_history')
+    }
+
+    // Add stats_snapshot column
+    if (!columnNames.has('stats_snapshot')) {
+      this.db.prepare('ALTER TABLE action_history ADD COLUMN stats_snapshot TEXT').run()
+      console.log('[SqliteStore] Migrated: added stats_snapshot column to action_history')
+    }
+
+    // Create partial unique index for in-progress actions (one per character)
+    this.db.prepare(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_active_action
+        ON action_history(character_id)
+        WHERE status = 'in_progress'
+    `).run()
   }
 
   async saveState(state: SerializedWorldState): Promise<void> {
@@ -565,6 +615,102 @@ export class SqliteStore implements StateStore {
       time,
       episode,
     })
+  }
+
+  // New action persistence methods
+
+  async startActionHistory(entry: {
+    characterId: string
+    day: number
+    time: string
+    actionId: string
+    target?: string
+    durationMinutes?: number
+    reason?: string
+    startTimeReal: number
+  }): Promise<number> {
+    const now = Date.now()
+    const stmt = this.db.prepare(`
+      INSERT INTO action_history (
+        character_id, day, time, action_id, target, duration_minutes, reason,
+        status, start_time_real, last_update_time, created_at
+      ) VALUES (
+        @character_id, @day, @time, @action_id, @target, @duration_minutes, @reason,
+        'in_progress', @start_time_real, @last_update_time, @created_at
+      )
+    `)
+
+    const result = stmt.run({
+      character_id: entry.characterId,
+      day: entry.day,
+      time: entry.time,
+      action_id: entry.actionId,
+      target: entry.target ?? null,
+      duration_minutes: entry.durationMinutes ?? null,
+      reason: entry.reason ?? null,
+      start_time_real: entry.startTimeReal,
+      last_update_time: now,
+      created_at: now,
+    })
+
+    return Number(result.lastInsertRowid)
+  }
+
+  async updateActiveActionProgress(
+    rowId: number,
+    statsSnapshot: CharacterStats
+  ): Promise<void> {
+    const stmt = this.db.prepare(`
+      UPDATE action_history
+      SET stats_snapshot = @stats_snapshot, last_update_time = @last_update_time
+      WHERE id = @row_id AND status = 'in_progress'
+    `)
+
+    stmt.run({
+      row_id: rowId,
+      stats_snapshot: JSON.stringify(statsSnapshot),
+      last_update_time: Date.now(),
+    })
+  }
+
+  async completeActionHistory(
+    rowId: number,
+    endTime: string,
+    episode?: string
+  ): Promise<void> {
+    const stmt = this.db.prepare(`
+      UPDATE action_history
+      SET status = 'completed', end_time = @end_time, episode = @episode, last_update_time = @last_update_time
+      WHERE id = @row_id
+    `)
+
+    stmt.run({
+      row_id: rowId,
+      end_time: endTime,
+      episode: episode ?? null,
+      last_update_time: Date.now(),
+    })
+  }
+
+  async loadActiveActions(): Promise<ActiveActionEntry[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM action_history WHERE status = 'in_progress'
+    `)
+    const rows = stmt.all() as ActionHistoryRow[]
+
+    return rows.map(row => ({
+      rowId: row.id,
+      characterId: row.character_id,
+      day: row.day,
+      time: row.time,
+      actionId: row.action_id,
+      target: row.target ?? undefined,
+      durationMinutes: row.duration_minutes ?? undefined,
+      reason: row.reason ?? undefined,
+      startTimeReal: row.start_time_real ?? row.created_at,
+      lastUpdateTime: row.last_update_time ?? row.created_at,
+      statsSnapshot: row.stats_snapshot ? JSON.parse(row.stats_snapshot) as CharacterStats : undefined,
+    }))
   }
 
   // NPC Summary CRUD methods
