@@ -27,6 +27,7 @@ export default function PixiAppSync(): React.ReactNode {
   const { isConnected, isConnecting, error, serverCharacters, serverNPCs } = useSimulationSync()
 
   // PixiJS refs
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<Application | null>(null)
   const characterSpriteRef = useRef<AnimatedSprite | null>(null)
@@ -56,6 +57,8 @@ export default function PixiAppSync(): React.ReactNode {
   const [localMapsLoaded, setLocalMapsLoaded] = useState(false)
   const [npcsLoaded, setNpcsLoaded] = useState(false)
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 })
+  const [mapBaseSize, setMapBaseSize] = useState({ width: 800, height: 600 })
 
   // Config ref
   const configRef = useRef<WorldConfig | null>(null)
@@ -90,7 +93,7 @@ export default function PixiAppSync(): React.ReactNode {
 
         const initialMap = loadedMaps[config.initialState.mapId]
         if (initialMap) {
-          setCanvasSize({ width: initialMap.width, height: initialMap.height })
+          setMapBaseSize({ width: initialMap.width, height: initialMap.height })
         }
 
         setLocalMapsLoaded(true)
@@ -147,7 +150,7 @@ export default function PixiAppSync(): React.ReactNode {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localMapsLoaded])
 
-  // Initialize PixiJS
+  // Initialize PixiJS (only once when maps are loaded)
   useEffect(() => {
     const config = configRef.current
     if (!containerRef.current || initializingRef.current || appRef.current || !localMapsLoaded || !config) return
@@ -159,9 +162,10 @@ export default function PixiAppSync(): React.ReactNode {
 
     async function initApp(): Promise<void> {
       try {
+        // Initialize with base map size, will be resized by ResizeObserver
         await app.init({
-          width: canvasSize.width,
-          height: canvasSize.height,
+          width: mapBaseSize.width,
+          height: mapBaseSize.height,
           backgroundColor: bgColor,
           antialias: true,
         })
@@ -191,25 +195,59 @@ export default function PixiAppSync(): React.ReactNode {
       initializingRef.current = false
       setIsReady(false)
     }
-  }, [localMapsLoaded, canvasSize.width, canvasSize.height])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localMapsLoaded])
 
-  // Update canvas size when map changes
+  // Update map base size when map changes
   useEffect(() => {
     if (!localMapsLoaded) return
 
     const map = getMaps()[currentMapId]
     if (map) {
-      setCanvasSize({ width: map.width, height: map.height })
+      setMapBaseSize({ width: map.width, height: map.height })
     }
   }, [currentMapId, localMapsLoaded])
 
-  // Resize canvas when map size changes
+  // Monitor wrapper size and calculate canvas size with scale (height-based)
+  useEffect(() => {
+    if (!wrapperRef.current) return
+
+    const updateSize = () => {
+      const wrapper = wrapperRef.current
+      if (!wrapper) return
+
+      const wrapperHeight = wrapper.clientHeight
+
+      if (wrapperHeight > 0) {
+        // Scale based on height only - width follows aspect ratio
+        const scale = wrapperHeight / mapBaseSize.height
+
+        // Set canvas size to scaled map size
+        setCanvasSize({
+          width: Math.floor(mapBaseSize.width * scale),
+          height: Math.floor(mapBaseSize.height * scale),
+        })
+      }
+    }
+
+    const resizeObserver = new ResizeObserver(updateSize)
+    resizeObserver.observe(wrapperRef.current)
+    updateSize()
+
+    return () => resizeObserver.disconnect()
+  }, [mapBaseSize.width, mapBaseSize.height])
+
+  // Resize canvas and apply scale when size changes
   useEffect(() => {
     if (!appRef.current || !isReady) return
 
     const app = appRef.current
     app.renderer.resize(canvasSize.width, canvasSize.height)
-  }, [canvasSize.width, canvasSize.height, isReady])
+
+    // Apply scale to stage
+    const scale = canvasSize.width / mapBaseSize.width
+    app.stage.scale.set(scale)
+  }, [canvasSize.width, canvasSize.height, mapBaseSize.width, isReady])
 
   // Load spritesheet
   const spriteSheetUrl = activeCharacter?.sprite.sheetUrl
@@ -600,10 +638,10 @@ export default function PixiAppSync(): React.ReactNode {
   }
 
   return (
-    <div className="relative w-fit">
+    <div ref={wrapperRef} className="relative h-full shrink-0">
       <div
         ref={containerRef}
-        className="rounded-lg overflow-hidden shadow-xl bg-slate-800"
+        className="overflow-hidden bg-slate-800"
         style={{ width: canvasSize.width, height: canvasSize.height }}
       />
       {renderConnectionStatus()}

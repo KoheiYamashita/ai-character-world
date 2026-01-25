@@ -138,9 +138,10 @@ export class ActionExecutor {
     const actionDef = ACTIONS[actionId]!
     const actionConfig = this.actionConfigs[actionId]
 
-    // コストの支払い（施設にcostが設定されていれば支払う）
+    // コストの支払い（施設を必要とするアクションで、施設にcostが設定されていれば支払う）
     const facility = this.getCurrentFacility(characterId)
-    if (facility?.cost !== undefined && facility.cost > 0) {
+    const requiresFacility = actionDef.requirements.facilityTags && actionDef.requirements.facilityTags.length > 0
+    if (requiresFacility && facility?.cost !== undefined && facility.cost > 0) {
       this.worldState.updateCharacter(characterId, {
         money: character.money - facility.cost,
       })

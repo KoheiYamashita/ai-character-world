@@ -160,14 +160,14 @@ export function ActivityLogPanel() {
   )
 
   return (
-    <div className="bg-slate-800 rounded-lg border border-slate-700">
-      <div className="px-3 py-2 border-b border-slate-700">
-        <h3 className="text-sm font-medium text-slate-300">Activity Log</h3>
+    <div className="bg-slate-800 border-t border-slate-700 flex-1 flex flex-col min-h-0">
+      <div className="px-3 py-1 border-b border-slate-700 flex items-center shrink-0">
+        <h3 className="text-xs font-medium text-slate-400">Activity Log</h3>
       </div>
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="max-h-64 overflow-y-auto px-3 py-1 font-mono text-xs"
+        className="flex-1 overflow-y-auto px-3 py-1 font-mono text-xs"
       >
         {visibleEntries.length === 0 ? (
           <div className="text-slate-500 py-2 text-center">No activity yet</div>
