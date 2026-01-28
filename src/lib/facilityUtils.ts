@@ -1,4 +1,5 @@
-import type { PathNode, Obstacle, FacilityInfo, FacilityTag } from '@/types'
+import type { PathNode, Obstacle, FacilityInfo } from '@/types'
+import type { ActionId } from '@/types/action'
 import { isNodeInsideZone } from '@/data/maps/grid'
 import { parseNodeIdToGridCoord } from '@/lib/gridUtils'
 
@@ -69,37 +70,37 @@ export function findBuildingFacilityNearNode(
 }
 
 /**
- * Check if a facility has a specific tag.
+ * Check if a facility supports a specific action.
  */
-export function hasFacilityTag(
+export function facilitySupportsAction(
   facility: FacilityInfo | null | undefined,
-  tag: FacilityTag
+  actionId: ActionId
 ): boolean {
   if (!facility) return false
-  return facility.tags.includes(tag)
+  return facility.actionIds.includes(actionId)
 }
 
 /**
- * Find all obstacles with a specific facility tag.
+ * Find all obstacles that support a specific action.
  */
-export function findObstaclesWithFacilityTag(
+export function findObstaclesWithAction(
   obstacles: Obstacle[],
-  tag: FacilityTag
+  actionId: ActionId
 ): Obstacle[] {
   return obstacles.filter(
-    (obs) => obs.facility && obs.facility.tags.includes(tag)
+    (obs) => obs.facility && obs.facility.actionIds.includes(actionId)
   )
 }
 
 /**
- * Find all facilities in a map that match any of the given tags.
+ * Find all obstacles that support any of the given actions.
  */
-export function findObstaclesWithAnyFacilityTag(
+export function findObstaclesWithAnyAction(
   obstacles: Obstacle[],
-  tags: FacilityTag[]
+  actionIds: ActionId[]
 ): Obstacle[] {
   return obstacles.filter(
-    (obs) => obs.facility && obs.facility.tags.some((t) => tags.includes(t))
+    (obs) => obs.facility && obs.facility.actionIds.some((id) => actionIds.includes(id))
   )
 }
 

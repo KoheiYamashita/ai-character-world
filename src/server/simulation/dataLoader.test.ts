@@ -71,7 +71,7 @@ const mockCharactersData = {
       id: 'char1',
       name: 'Test Character',
       sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-      defaultStats: { money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80 },
+      defaultStats: { money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80, fitness: 80 },
     },
   ],
 }

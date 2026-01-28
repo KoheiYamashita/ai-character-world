@@ -1,5 +1,15 @@
-import type { FacilityInfo, FacilityTag, WorldTime, ScheduleEntry, ActionId, ConversationGoal } from '@/types'
-import type { SimCharacter, SimNPC } from '@/server/simulation/types'
+import type { FacilityInfo, WorldTime, ScheduleEntry, ActionId, ConversationGoal } from '@/types'
+import type { SimCharacter } from '@/server/simulation/types'
+
+/**
+ * クールダウン情報付きNPC（LLMプロンプト表示用）
+ */
+export interface NPCWithCooldown {
+  id: string
+  name: string
+  /** クールダウン中の場合、次回会話可能な時刻（"HH:MM"形式）。会話可能なら undefined */
+  nextAvailableTime?: string
+}
 
 /**
  * 施設情報（LLMに提示用）
@@ -8,12 +18,11 @@ import type { SimCharacter, SimNPC } from '@/server/simulation/types'
 export interface NearbyFacility {
   id: string
   label: string
-  tags: FacilityTag[]
+  actionIds: ActionId[]      // この施設で実行可能なアクション
   cost?: number              // 利用料金
   quality?: number           // 品質
   distance: number           // 距離（マップホップ数）、0=現在マップ、1以上=他マップ
   mapId: string              // 施設があるマップID
-  availableActions?: string[] // この施設で実行可能なアクション（例: ['sleep'], ['eat']）
 }
 
 /**
@@ -81,9 +90,8 @@ export interface NearbyMap {
 export interface CurrentMapFacility {
   id: string
   label: string
-  tags: FacilityTag[]
+  actionIds: ActionId[]  // この施設で実行可能なアクション
   cost?: number
-  availableActions: string[]  // この施設で実行可能なアクション
 }
 
 /**
@@ -95,7 +103,7 @@ export interface BehaviorContext {
   currentFacility: FacilityInfo | null
   schedule: ScheduleEntry[] | null  // 当日のスケジュール
   availableActions: ActionId[]      // 現在実行可能なアクション
-  nearbyNPCs: SimNPC[]              // 周囲のNPC（マップ内）
+  nearbyNPCs: NPCWithCooldown[]     // 周囲のNPC（マップ内、クールダウン情報付き）
   // 拡張フィールド（LLMBehaviorDecider用）
   currentMapFacilities?: CurrentMapFacility[] // 現在マップの施設（アクション表示用）
   nearbyFacilities?: NearbyFacility[]         // 他マップの施設（移動が必要）

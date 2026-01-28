@@ -7,7 +7,14 @@ import type { ActivityLogEntry } from '@/types'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+const isEditorMode = process.env.EDITOR_MODE === 'true'
+
 export async function GET() {
+  // エディタモードではシミュレーションを無効化
+  if (isEditorMode) {
+    return new Response('Simulation disabled in editor mode', { status: 503 })
+  }
+
   let engine
   try {
     engine = await ensureEngineInitialized('[SSE]')

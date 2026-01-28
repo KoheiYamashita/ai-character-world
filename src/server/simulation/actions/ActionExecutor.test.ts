@@ -147,7 +147,7 @@ describe('ActionExecutor', () => {
   describe('startAction', () => {
     beforeEach(() => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -200,7 +200,7 @@ describe('ActionExecutor', () => {
     it('should deduct facility cost', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('restaurant', 0, 0, {
-          tags: ['restaurant'],
+          actionIds: ['eat'],
           cost: 500,
         }),
       ])
@@ -220,7 +220,7 @@ describe('ActionExecutor', () => {
   describe('cancelAction', () => {
     beforeEach(() => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -248,7 +248,7 @@ describe('ActionExecutor', () => {
   describe('isExecutingAction', () => {
     beforeEach(() => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -269,7 +269,7 @@ describe('ActionExecutor', () => {
   describe('forceCompleteAction', () => {
     beforeEach(() => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -293,7 +293,7 @@ describe('ActionExecutor', () => {
   describe('tick', () => {
     beforeEach(() => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
+        createZoneWithFacility('bathroom', 0, 0, { actionIds: ['toilet', 'thinking'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -372,7 +372,7 @@ describe('ActionExecutor', () => {
 
     it('should fail when already executing', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -391,7 +391,7 @@ describe('ActionExecutor', () => {
 
     it('should allow when ignoreCurrentAction is true', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -422,7 +422,7 @@ describe('ActionExecutor', () => {
     it('should fail when facility is owned by someone else', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('kitchen', 0, 0, {
-          tags: ['kitchen'],
+          actionIds: ['eat', 'cook'],
           owner: 'someone-else',
         }),
       ])
@@ -439,7 +439,7 @@ describe('ActionExecutor', () => {
     it('should fail when not enough money for facility cost', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('restaurant', 0, 0, {
-          tags: ['restaurant'],
+          actionIds: ['eat'],
           cost: 2000,
         }),
       ])
@@ -458,8 +458,8 @@ describe('ActionExecutor', () => {
   describe('getAvailableActions', () => {
     it('should return actions character can execute', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
-        createZoneWithFacility('bedroom', 0, 4, { tags: ['bedroom'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
+        createZoneWithFacility('bedroom', 0, 4, { actionIds: ['sleep'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -475,7 +475,7 @@ describe('ActionExecutor', () => {
 
     it('should allow actions when thinking', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -497,7 +497,7 @@ describe('ActionExecutor', () => {
     it('should return facility for current position', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('kitchen', 0, 0, {
-          tags: ['kitchen'],
+          actionIds: ['eat', 'cook'],
           owner: 'char-1',
         }),
       ])
@@ -509,7 +509,7 @@ describe('ActionExecutor', () => {
       const facility = executor.getCurrentFacility('char-1')
 
       expect(facility).not.toBeNull()
-      expect(facility?.tags).toContain('kitchen')
+      expect(facility?.actionIds).toContain('eat')
     })
 
     it('should return null when not at facility', () => {
@@ -531,7 +531,7 @@ describe('ActionExecutor', () => {
     it('should fail when character has no employment', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'writer',
             title: 'ライター',
@@ -554,7 +554,7 @@ describe('ActionExecutor', () => {
     it('should fail when job ID does not match employment', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'chef',
             title: 'シェフ',
@@ -582,7 +582,7 @@ describe('ActionExecutor', () => {
     it('should succeed when within work hours', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'writer',
             title: 'ライター',
@@ -610,7 +610,7 @@ describe('ActionExecutor', () => {
     it('should fail when outside work hours', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'writer',
             title: 'ライター',
@@ -639,7 +639,7 @@ describe('ActionExecutor', () => {
     it('should handle overnight shifts correctly', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'nightworker',
             title: '夜勤',
@@ -675,7 +675,7 @@ describe('ActionExecutor', () => {
     it('should add hourly wage to money after work completion', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: {
             jobId: 'writer',
             title: 'ライター',
@@ -706,15 +706,19 @@ describe('ActionExecutor', () => {
       executor.tick(targetEndTime + 1000)
 
       const updatedChar = worldState.getCharacter('char-1')
-      // 1500円/時 × 1時間 = 1500円増加
-      expect(updatedChar?.money).toBe(2500)
+      // perMinute 方式に変更: 完了時にはお金は加算されない（SimulationEngine.applyStatusDecay で処理）
+      // ActionExecutor.tick では給料は支払われない
+      expect(updatedChar?.money).toBe(1000) // 初期値のまま
+
+      // 代わりに getActivePerMinuteEffects で money が含まれることを確認
+      // （アクションが完了しているのでここでは確認できないが、別テストで確認済み）
     })
   })
 
   describe('getActivePerMinuteEffects', () => {
     it('should return perMinute effects for variable action', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -732,7 +736,7 @@ describe('ActionExecutor', () => {
 
     it('should return perMinute effects for toilet (variable-time action)', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('bathroom', 0, 0, { tags: ['toilet'], owner: 'char-1' }),
+        createZoneWithFacility('bathroom', 0, 0, { actionIds: ['toilet'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -749,7 +753,7 @@ describe('ActionExecutor', () => {
 
     it('should return null for fixed-time action', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('park', 0, 0, { tags: ['public'] }),
+        createZoneWithFacility('park', 0, 0, { actionIds: ['rest'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -777,7 +781,7 @@ describe('ActionExecutor', () => {
     // completeAction では適用されない
     it('should NOT apply perMinute effects on completion (applied in real-time by SimulationEngine)', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -800,7 +804,7 @@ describe('ActionExecutor', () => {
 
     it('should still apply fixed effects for fixed-time actions', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('park', 0, 0, { tags: ['public'] }),
+        createZoneWithFacility('park', 0, 0, { actionIds: ['rest'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -824,7 +828,7 @@ describe('ActionExecutor', () => {
   describe('getCurrentFacility', () => {
     it('should return facility info when character is inside zone', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('kitchen', 0, 0, { tags: ['kitchen'], owner: 'char-1' }),
+        createZoneWithFacility('kitchen', 0, 0, { actionIds: ['eat', 'cook'], owner: 'char-1' }),
       ])
       worldState.initialize({ 'test-map': map })
       // Character at test-2-2 → row=2, col=2 → inside zone (tileRow=0, tileWidth=4: row > 0 && row < 4)
@@ -832,7 +836,7 @@ describe('ActionExecutor', () => {
 
       const facility = executor.getCurrentFacility('char-1')
       expect(facility).not.toBeNull()
-      expect(facility?.tags).toContain('kitchen')
+      expect(facility?.actionIds).toContain('eat')
     })
 
     it('should return null when character does not exist', () => {
@@ -850,7 +854,7 @@ describe('ActionExecutor', () => {
   describe('getAvailableActions', () => {
     it('should return actions available on the map', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+        createZoneWithFacility('toilet-room', 0, 0, { actionIds: ['toilet'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1'))
@@ -863,7 +867,7 @@ describe('ActionExecutor', () => {
 
     it('should respect ignoreCurrentAction for thinking character', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+        createZoneWithFacility('toilet-room', 0, 0, { actionIds: ['toilet'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -877,7 +881,7 @@ describe('ActionExecutor', () => {
 
     it('should not return actions when character has non-thinking action', () => {
       const map = createTestMap('test-map', [
-        createZoneWithFacility('toilet-room', 0, 0, { tags: ['toilet'] }),
+        createZoneWithFacility('toilet-room', 0, 0, { actionIds: ['toilet'] }),
       ])
       worldState.initialize({ 'test-map': map })
       worldState.addCharacter(createTestCharacter('char-1', {
@@ -894,7 +898,7 @@ describe('ActionExecutor', () => {
     it('should reject work action without employment', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace-1', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: { jobId: 'barista', title: 'バリスタ', hourlyWage: 1200, workHours: { start: 9, end: 17 } },
         }),
       ])
@@ -922,10 +926,10 @@ describe('ActionExecutor', () => {
   })
 
   describe('completeAction with hourly wage', () => {
-    it('should pay hourly wage on work action completion', () => {
+    it('should NOT pay hourly wage on completion (perMinute handles it)', () => {
       const map = createTestMap('test-map', [
         createZoneWithFacility('workspace-1', 0, 0, {
-          tags: ['workspace'],
+          actionIds: ['work'],
           job: { jobId: 'barista', title: 'バリスタ', hourlyWage: 1200, workHours: { start: 0, end: 24 } },
         }),
       ])
@@ -948,9 +952,36 @@ describe('ActionExecutor', () => {
       executor.tick(char.currentAction!.targetEndTime + 1000)
 
       const updatedChar = worldState.getCharacter('char-1')!
-      // Should have earned money (2 hours * 1200 = 2400 approximately)
-      expect(updatedChar.money).toBeGreaterThan(500)
+      // perMinute 方式に変更: 完了時にはお金は加算されない（SimulationEngine.applyStatusDecay で処理）
+      expect(updatedChar.money).toBe(500) // 初期値のまま
       expect(updatedChar.currentAction).toBeNull()
+    })
+
+    it('should include money in perMinute effects for work action', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('workspace-1', 0, 0, {
+          actionIds: ['work'],
+          job: { jobId: 'barista', title: 'バリスタ', hourlyWage: 1200, workHours: { start: 0, end: 24 } },
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.setTime({ hour: 10, minute: 0, day: 1 })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        currentNodeId: 'test-2-2',
+        money: 500,
+        employment: { jobId: 'barista', workplaces: [{ workplaceLabel: 'ワークスペース', mapId: 'test-map' }] },
+      }))
+      executor.setActionConfigs({
+        work: { durationRange: { min: 60, max: 480, default: 120 }, perMinute: { energy: -0.33 } },
+      } as Record<string, ActionConfig>)
+
+      executor.startAction('char-1', 'work')
+
+      // work アクション実行中に getActivePerMinuteEffects を呼ぶと money が含まれる
+      const perMinute = executor.getActivePerMinuteEffects('char-1')
+      expect(perMinute).not.toBeNull()
+      expect(perMinute?.money).toBe(1200 / 60) // 時給1200円 → 分給20円
+      expect(perMinute?.energy).toBe(-0.33) // 元のperMinute効果も含まれる
     })
   })
 })

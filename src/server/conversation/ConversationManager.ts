@@ -1,5 +1,6 @@
 import type { ConversationSession, ConversationGoal, ConversationMessage } from '@/types'
 import type { WorldStateManager } from '../simulation/WorldState'
+import { getActionEmoji } from '@/lib/uiLabels'
 
 export type ConversationEventCallback = (session: ConversationSession) => void
 
@@ -61,7 +62,7 @@ export class ConversationManager {
     // Update character state
     this.worldState.updateCharacter(characterId, {
       conversation: session,
-      displayEmoji: '💬',
+      displayEmoji: getActionEmoji('talk'),
     })
 
     this.activeSessions.set(characterId, session)

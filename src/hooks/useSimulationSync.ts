@@ -44,6 +44,7 @@ function simCharacterToCharacter(simChar: SimCharacter): Character {
     hygiene: simChar.hygiene,
     mood: simChar.mood,
     bladder: simChar.bladder,
+    fitness: simChar.fitness,
     currentMapId: simChar.currentMapId,
     currentNodeId: simChar.currentNodeId,
     position: simChar.position,

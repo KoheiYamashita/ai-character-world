@@ -328,6 +328,7 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
     hygiene: charConfig.defaultStats.hygiene,
     mood: charConfig.defaultStats.mood,
     bladder: charConfig.defaultStats.bladder,
+    fitness: charConfig.defaultStats.fitness,
     currentMapId: cfg.initialState.mapId,
     currentNodeId: initialMap?.spawnNodeId ?? '',
     position: spawnNode

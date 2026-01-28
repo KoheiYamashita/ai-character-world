@@ -13,7 +13,8 @@
       "energyPerMinute": 0.05,
       "hygienePerMinute": 0.03,
       "moodPerMinute": 0.02,
-      "bladderPerMinute": 0.15
+      "bladderPerMinute": 0.15,
+      "fitnessPerMinute": 0.05
     }
   },
   "movement": {
@@ -137,6 +138,110 @@
       "fixed": true,
       "duration": 0,
       "effects": {}
+    },
+    "exercise": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "fitness": 1.5, "energy": -0.25, "mood": 0.2 }
+    },
+    "read": {
+      "durationRange": { "min": 15, "max": 120, "default": 30 },
+      "perMinute": { "mood": 0.3, "energy": 0.1 }
+    },
+    "game": {
+      "durationRange": { "min": 30, "max": 180, "default": 60 },
+      "perMinute": { "mood": 0.5, "energy": -0.1 }
+    },
+    "drink_alcohol": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": 0.6, "energy": -0.15 }
+    },
+    "watch": {
+      "durationRange": { "min": 30, "max": 180, "default": 60 },
+      "perMinute": { "mood": 0.4, "energy": 0.05 }
+    },
+    "shopping": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "mood": 0.3 }
+    },
+    "study": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": -0.1, "energy": -0.2 }
+    },
+    "meditate": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "mood": 0.8, "energy": 0.3 }
+    },
+    "nap": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "energy": 0.8 }
+    },
+    "draw": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": 0.5, "energy": -0.1 }
+    },
+    "play_music": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": 0.6, "energy": -0.15 }
+    },
+    "cook": {
+      "durationRange": { "min": 30, "max": 90, "default": 45 },
+      "perMinute": { "mood": 0.4, "satiety": 0.3 }
+    },
+    "garden": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": 0.4, "fitness": 0.3, "energy": -0.2 }
+    },
+    "jog": {
+      "durationRange": { "min": 20, "max": 60, "default": 30 },
+      "perMinute": { "fitness": 1.0, "energy": -0.3, "mood": 0.3 }
+    },
+    "swim": {
+      "durationRange": { "min": 30, "max": 90, "default": 60 },
+      "perMinute": { "fitness": 1.2, "energy": -0.35, "hygiene": 0.2 }
+    },
+    "walk": {
+      "durationRange": { "min": 15, "max": 60, "default": 30 },
+      "perMinute": { "mood": 0.3, "energy": -0.05, "fitness": 0.2 }
+    },
+    "fish": {
+      "durationRange": { "min": 60, "max": 240, "default": 120 },
+      "perMinute": { "mood": 0.4, "energy": 0.1 }
+    },
+    "karaoke": {
+      "durationRange": { "min": 60, "max": 180, "default": 90 },
+      "perMinute": { "mood": 0.7, "energy": -0.2 }
+    },
+    "cinema": {
+      "durationRange": { "min": 90, "max": 150, "default": 120 },
+      "perMinute": { "mood": 0.5, "energy": 0.1 }
+    },
+    "arcade": {
+      "durationRange": { "min": 30, "max": 120, "default": 60 },
+      "perMinute": { "mood": 0.6, "energy": -0.15 }
+    },
+    "bowling": {
+      "durationRange": { "min": 60, "max": 120, "default": 90 },
+      "perMinute": { "mood": 0.5, "fitness": 0.4, "energy": -0.2 }
+    },
+    "coffee": {
+      "durationRange": { "min": 10, "max": 30, "default": 15 },
+      "perMinute": { "energy": 1.0, "mood": 0.2 }
+    },
+    "snack": {
+      "durationRange": { "min": 5, "max": 15, "default": 10 },
+      "perMinute": { "satiety": 2.0, "mood": 0.1 }
+    },
+    "massage": {
+      "durationRange": { "min": 30, "max": 90, "default": 60 },
+      "perMinute": { "mood": 0.8, "energy": 0.4, "fitness": 0.2 }
+    },
+    "haircut": {
+      "durationRange": { "min": 30, "max": 60, "default": 45 },
+      "perMinute": { "mood": 0.5, "hygiene": 0.5 }
+    },
+    "clean": {
+      "durationRange": { "min": 30, "max": 90, "default": 45 },
+      "perMinute": { "mood": 0.2, "energy": -0.2 }
     }
   },
   "miniEpisode": {

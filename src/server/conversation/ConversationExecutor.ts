@@ -240,7 +240,7 @@ export class ConversationExecutor {
       const result = await llmGenerateObject(
         prompt,
         CharacterUtteranceSchema,
-        { system: `あなたは${character.name}として会話してください。自然な日本語で話してください。` }
+        { system: `あなたは${character.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
       )
 
       return {
@@ -272,7 +272,7 @@ export class ConversationExecutor {
       const result = await llmGenerateObject(
         prompt,
         NPCUtteranceSchema,
-        { system: `あなたは${npc.name}として会話してください。自然な日本語で話してください。` }
+        { system: `あなたは${npc.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
       )
 
       return result.utterance
@@ -404,10 +404,11 @@ export class ConversationExecutor {
     // 指示
     parts.push('【回答形式】')
     parts.push('JSON形式で回答してください。')
-    parts.push('- utterance: あなたの発話')
+    parts.push('- utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）')
     parts.push('- goalAchieved: 会話の目的を達成できたか（true/false）')
     parts.push('')
-    parts.push('自然な会話になるよう心がけてください。目的を達成したら goalAchieved を true にしてください。')
+    parts.push('※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。')
+    parts.push('目的を達成したら goalAchieved を true にしてください。')
 
     return parts.join('\n')
   }
@@ -484,9 +485,10 @@ export class ConversationExecutor {
     // 指示
     parts.push('【回答形式】')
     parts.push('JSON形式で回答してください。')
-    parts.push('- utterance: あなたの応答')
+    parts.push('- utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）')
     parts.push('')
-    parts.push('自然な会話になるよう心がけてください。あなたの性格と知識に基づいて応答してください。')
+    parts.push('※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。')
+    parts.push('あなたの性格と知識に基づいて応答してください。')
 
     return parts.join('\n')
   }

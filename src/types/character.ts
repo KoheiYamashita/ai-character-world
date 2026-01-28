@@ -28,6 +28,7 @@ export interface CharacterConfig {
     hygiene: number
     mood: number
     bladder: number
+    fitness: number
   }
   employment?: Employment
   defaultSchedule?: ScheduleEntry[]
@@ -56,6 +57,7 @@ export interface Character {
   hygiene: number
   mood: number
   bladder: number
+  fitness: number
   currentMapId: string
   currentNodeId: string
   position: Position

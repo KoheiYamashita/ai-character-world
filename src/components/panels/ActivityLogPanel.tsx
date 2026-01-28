@@ -3,23 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { useActivityLogStore } from '@/stores'
 import type { ActivityLogEntry, ActionLogEntry, ConversationLogEntry, ConversationMessageLogEntry, MiniEpisodeLogEntry } from '@/types'
-
-const ACTION_LABELS: Record<string, string> = {
-  eat: '食事',
-  sleep: '睡眠',
-  bathe: '入浴',
-  rest: '休憩',
-  work: '仕事',
-  toilet: 'トイレ',
-  talk: '会話',
-  thinking: '思考中',
-  move: '移動',
-  idle: '待機',
-}
-
-function getActionLabel(actionId: string): string {
-  return ACTION_LABELS[actionId] ?? actionId
-}
+import { getActionLabel } from '@/lib/uiLabels'
 
 function ActionLogLine({ entry }: { entry: ActionLogEntry }) {
   const isStarted = entry.status === 'started'

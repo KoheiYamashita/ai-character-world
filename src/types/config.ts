@@ -13,6 +13,7 @@ export interface StatusDecayConfig {
   hygienePerMinute: number
   moodPerMinute: number
   bladderPerMinute: number
+  fitnessPerMinute: number
 }
 
 export interface TimeConfig {

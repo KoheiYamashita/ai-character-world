@@ -201,7 +201,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0x8b7355",
-      "spawnNodeId": "home-4-5",
+      "spawnNodeId": "home-4-6",
       "grid": {
         "prefix": "home",
         "cols": 12,
@@ -253,8 +253,10 @@
             "end": 4
           },
           "facility": {
-            "tags": [
-              "bedroom"
+            "actionIds": [
+              "sleep",
+              "rest",
+              "nap"
             ],
             "owner": "kanon"
           }
@@ -282,8 +284,9 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "kitchen"
+            "actionIds": [
+              "eat",
+              "snack"
             ],
             "owner": "kanon"
           }
@@ -314,9 +317,9 @@
             "end": 3
           },
           "facility": {
-            "tags": [
-              "bathroom",
-              "toilet"
+            "actionIds": [
+              "toilet",
+              "bathe"
             ],
             "owner": "kanon"
           }
@@ -330,8 +333,12 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "workspace"
+            "actionIds": [
+              "work",
+              "read",
+              "game",
+              "watch",
+              "study"
             ],
             "owner": "kanon"
           }
@@ -393,7 +400,7 @@
       ],
       "obstacles": [
         {
-          "row": 3,
+          "row": 4,
           "col": 3,
           "tileWidth": 4,
           "tileHeight": 4,
@@ -401,8 +408,8 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "restaurant"
+            "actionIds": [
+              "eat"
             ],
             "cost": 800,
             "quality": 70
@@ -469,7 +476,7 @@
         {
           "id": "cafe-kenta",
           "name": "健太",
-          "spawnNodeId": "cafe-2-3",
+          "spawnNodeId": "cafe-2-2",
           "sprite": {
             "sheetUrl": "/assets/sprites/npcs/cafe1/kenta.png",
             "frameWidth": 96,
@@ -502,7 +509,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0x607080",
-      "spawnNodeId": "office-4-2",
+      "spawnNodeId": "office-4-10",
       "grid": {
         "prefix": "office",
         "cols": 12,
@@ -552,8 +559,8 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "workspace"
+            "actionIds": [
+              "work"
             ],
             "job": {
               "jobId": "freelance-writer",
@@ -606,9 +613,8 @@
             "end": 3
           },
           "facility": {
-            "tags": [
-              "toilet",
-              "public"
+            "actionIds": [
+              "toilet"
             ]
           }
         }
@@ -620,7 +626,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0x87ceeb",
-      "spawnNodeId": "convenience-4-5",
+      "spawnNodeId": "convenience-5-10",
       "grid": {
         "prefix": "convenience",
         "cols": 12,
@@ -695,8 +701,9 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "restaurant"
+            "actionIds": [
+              "eat",
+              "shopping"
             ],
             "cost": 400,
             "quality": 40
@@ -742,7 +749,7 @@
         {
           "id": "convenience-taro",
           "name": "太郎",
-          "spawnNodeId": "convenience-6-2",
+          "spawnNodeId": "convenience-6-1",
           "sprite": {
             "sheetUrl": "/assets/sprites/npcs/convenience/taro.png",
             "frameWidth": 96,
@@ -903,6 +910,17 @@
             "nodeId": "hotel-door"
           },
           "label": "ホテル"
+        },
+        {
+          "id": "ent-1769605307401",
+          "row": 4,
+          "col": -1,
+          "connectedNodeIds": [],
+          "leadsTo": {
+            "mapId": "amusement-park",
+            "nodeId": ""
+          },
+          "label": "新規入口"
         }
       ],
       "obstacles": [
@@ -993,7 +1011,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0xcd5c5c",
-      "spawnNodeId": "gym-4-5",
+      "spawnNodeId": "gym-4-1",
       "grid": {
         "prefix": "gym",
         "cols": 12,
@@ -1061,6 +1079,22 @@
           "tileWidth": 3,
           "tileHeight": 2,
           "label": "ベンチ\nプレス"
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "tileWidth": 10,
+          "tileHeight": 7,
+          "label": "トレーニングエリア",
+          "type": "zone",
+          "wallSides": [],
+          "facility": {
+            "actionIds": [
+              "exercise"
+            ],
+            "cost": 1000,
+            "quality": 80
+          }
         }
       ],
       "npcs": [
@@ -1095,7 +1129,7 @@
         {
           "id": "gym-kengo",
           "name": "健吾",
-          "spawnNodeId": "gym-4-5",
+          "spawnNodeId": "gym-3-6",
           "sprite": {
             "sheetUrl": "/assets/sprites/npcs/gym/kengo.png",
             "frameWidth": 96,
@@ -1198,7 +1232,7 @@
       ],
       "obstacles": [
         {
-          "row": 3,
+          "row": 4,
           "col": 3,
           "tileWidth": 4,
           "tileHeight": 4,
@@ -1206,8 +1240,8 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "restaurant"
+            "actionIds": [
+              "eat"
             ],
             "cost": 600,
             "quality": 65
@@ -1349,7 +1383,7 @@
       ],
       "obstacles": [
         {
-          "row": 3,
+          "row": 4,
           "col": 3,
           "tileWidth": 4,
           "tileHeight": 4,
@@ -1357,8 +1391,9 @@
           "type": "zone",
           "wallSides": [],
           "facility": {
-            "tags": [
-              "restaurant"
+            "actionIds": [
+              "eat",
+              "drink_alcohol"
             ],
             "cost": 1000,
             "quality": 75
@@ -1484,10 +1519,8 @@
             "end": 4
           },
           "facility": {
-            "tags": [
-              "hotspring",
-              "bathroom",
-              "public"
+            "actionIds": [
+              "bathe"
             ],
             "cost": 800,
             "quality": 85
@@ -1512,9 +1545,8 @@
             "end": 3
           },
           "facility": {
-            "tags": [
-              "bathroom",
-              "public"
+            "actionIds": [
+              "bathe"
             ]
           }
         }
@@ -1584,7 +1616,7 @@
       "width": 800,
       "height": 600,
       "backgroundColor": "0xdaa520",
-      "spawnNodeId": "hotel-4-2",
+      "spawnNodeId": "hotel-3-0",
       "grid": {
         "prefix": "hotel",
         "cols": 12,
@@ -1643,9 +1675,8 @@
             "end": 4
           },
           "facility": {
-            "tags": [
-              "hotel",
-              "bedroom"
+            "actionIds": [
+              "sleep"
             ],
             "cost": 5000,
             "quality": 80
@@ -1670,9 +1701,8 @@
             "end": 3
           },
           "facility": {
-            "tags": [
-              "hotel",
-              "restaurant"
+            "actionIds": [
+              "eat"
             ],
             "cost": 1500,
             "quality": 75
@@ -1697,9 +1727,8 @@
             "end": 3
           },
           "facility": {
-            "tags": [
-              "hotel",
-              "bathroom"
+            "actionIds": [
+              "bathe"
             ]
           }
         }
@@ -1762,6 +1791,90 @@
           ]
         }
       ]
+    },
+    {
+      "id": "amusement-park",
+      "name": "アドベンチャー・タイム",
+      "width": 800,
+      "height": 600,
+      "backgroundColor": "0x4a7c59",
+      "spawnNodeId": "amusement-park-4-4",
+      "grid": {
+        "prefix": "amusement-park",
+        "cols": 12,
+        "rows": 9
+      },
+      "labels": [],
+      "entrances": [
+        {
+          "id": "ent-1769605281215",
+          "row": 3,
+          "col": 12,
+          "connectedNodeIds": [],
+          "leadsTo": {
+            "mapId": "park",
+            "nodeId": "ent-1769605307401"
+          },
+          "label": "新規入口"
+        }
+      ],
+      "obstacles": [
+        {
+          "row": -1,
+          "col": -1,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        },
+        {
+          "row": -1,
+          "col": 3,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        },
+        {
+          "row": -1,
+          "col": 7,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        },
+        {
+          "row": 3,
+          "col": -1,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        },
+        {
+          "row": 3,
+          "col": 7,
+          "tileWidth": 4,
+          "tileHeight": 4,
+          "type": "zone",
+          "label": "新規ゾーン",
+          "wallSides": []
+        }
+      ],
+      "npcs": []
     }
   ]
 }

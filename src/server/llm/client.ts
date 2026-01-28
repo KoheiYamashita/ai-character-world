@@ -12,12 +12,14 @@ let modelString: string | null = null
 /**
  * Parse model string
  * "openai/chat/gpt-4o-mini" → { provider: "openai", subType: "chat", model: "gpt-4o-mini" }
+ * "openai/chat/nvidia/nemotron-3-nano" → { provider: "openai", subType: "chat", model: "nvidia/nemotron-3-nano" }
  * "anthropic/claude-sonnet-4" → { provider: "anthropic", model: "claude-sonnet-4" }
  */
 function parseModelString(str: string): { provider: string; subType?: string; model: string } {
   const parts = str.split('/')
-  if (parts.length === 3) {
-    return { provider: parts[0], subType: parts[1], model: parts[2] }
+  if (parts.length >= 3) {
+    // First part is provider, second is subType, rest is model (may contain slashes)
+    return { provider: parts[0], subType: parts[1], model: parts.slice(2).join('/') }
   }
   if (parts.length === 2) {
     return { provider: parts[0], model: parts[1] }

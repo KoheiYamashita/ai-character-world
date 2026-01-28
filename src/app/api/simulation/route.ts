@@ -5,6 +5,8 @@ import {
   type SerializedWorldState,
 } from '@/server/simulation'
 
+const isEditorMode = process.env.EDITOR_MODE === 'true'
+
 // Request validation schema
 const ALLOWED_ACTIONS = ['pause', 'unpause', 'toggle', 'start', 'stop'] as const
 const SimulationActionSchema = z.object({
@@ -15,6 +17,12 @@ const SimulationActionSchema = z.object({
 
 // GET - Get current simulation state
 export async function GET() {
+  if (isEditorMode) {
+    return NextResponse.json(
+      { success: false, error: 'Simulation disabled in editor mode' },
+      { status: 503 }
+    )
+  }
   try {
     const engine = await ensureEngineInitialized('[API]')
     const state: SerializedWorldState = engine.getState()
@@ -40,6 +48,13 @@ export async function GET() {
 
 // POST - Control simulation (pause/unpause/restart)
 export async function POST(request: Request) {
+  if (isEditorMode) {
+    return NextResponse.json(
+      { success: false, error: 'Simulation disabled in editor mode' },
+      { status: 503 }
+    )
+  }
+
   try {
     // Parse and validate request body
     let body: unknown

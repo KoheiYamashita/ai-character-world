@@ -23,6 +23,7 @@ function createTestCharacter(overrides: Partial<SimCharacter> = {}): SimCharacte
     hygiene: 90,
     mood: 75,
     bladder: 60,
+    fitness: 80,
     currentMapId: 'town',
     currentNodeId: 'town-0-0',
     position: { x: 100, y: 100 },
@@ -168,17 +169,17 @@ describe('LLMMiniEpisodeGenerator', () => {
       expect(result!.statChanges.mood).toBe(4)
     })
 
-    it('should include facility tags in prompt when facility is provided', async () => {
+    it('should include facility actionIds in prompt when facility is provided', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'レストランでの出来事',
         statChanges: { satiety: null, energy: null, hygiene: null, mood: 2, bladder: null },
       })
 
-      const facility: FacilityInfo = { tags: ['restaurant'], quality: 80 }
+      const facility: FacilityInfo = { actionIds: ['eat'], quality: 80 }
       await generator.generate(createTestCharacter(), 'eat', facility)
 
       const prompt = mockLlmGenerateObject.mock.calls[0][0] as string
-      expect(prompt).toContain('restaurant')
+      expect(prompt).toContain('eat')
     })
 
     it('should include character personality in prompt', async () => {

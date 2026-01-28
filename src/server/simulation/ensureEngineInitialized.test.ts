@@ -107,6 +107,7 @@ function createTestCharacter(id: string): Character {
     hygiene: 80,
     mood: 80,
     bladder: 80,
+    fitness: 80,
     currentMapId: 'town',
     currentNodeId: 'town-0-0',
     position: { x: 100, y: 100 },
@@ -178,7 +179,7 @@ describe('ensureEngineInitialized', () => {
   it('should restore from persistent storage when state exists', async () => {
     // Simulate existing state in store
     const serializedState = {
-      characters: { c1: { id: 'c1', name: 'Restored', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 200, satiety: 70, energy: 60, hygiene: 50, mood: 40, bladder: 30, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
+      characters: { c1: { id: 'c1', name: 'Restored', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 200, satiety: 70, energy: 60, hygiene: 50, mood: 40, bladder: 30, fitness: 80, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
       npcs: {},
       time: { hour: 14, minute: 30, day: 2 },
       currentMapId: 'town',
@@ -198,7 +199,7 @@ describe('ensureEngineInitialized', () => {
 
   it('should save current serverStartTime when not found in DB (legacy data)', async () => {
     const serializedState = {
-      characters: { c1: { id: 'c1', name: 'Legacy', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
+      characters: { c1: { id: 'c1', name: 'Legacy', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80, fitness: 80, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
       npcs: {},
       time: { hour: 10, minute: 0, day: 1 },
       currentMapId: 'town',
@@ -251,7 +252,7 @@ describe('ensureEngineInitialized', () => {
 
   it('should supplement character profiles after restore', async () => {
     const serializedState = {
-      characters: { c1: { id: 'c1', name: 'Char c1', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
+      characters: { c1: { id: 'c1', name: 'Char c1', currentMapId: 'town', currentNodeId: 'town-0-0', position: { x: 100, y: 100 }, direction: 'down', money: 100, satiety: 80, energy: 80, hygiene: 80, mood: 80, bladder: 80, fitness: 80, navigation: { isMoving: false, path: [], currentPathIndex: 0, progress: 0, startPosition: null, targetPosition: null }, crossMapNavigation: null, conversation: null, currentAction: null, pendingAction: null, actionCounter: 0 } },
       npcs: {},
       time: { hour: 10, minute: 0, day: 1 },
       currentMapId: 'town',

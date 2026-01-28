@@ -13,7 +13,6 @@ vi.mock('@/server/llm', () => ({
 
 import { LLMBehaviorDecider } from './LLMBehaviorDecider'
 import type { BehaviorContext } from '@/types/behavior'
-import type { FacilityTag } from '@/types/map'
 import type { SimCharacter } from '@/server/simulation/types'
 
 function createTestContext(overrides: Partial<BehaviorContext> = {}): BehaviorContext {
@@ -27,6 +26,7 @@ function createTestContext(overrides: Partial<BehaviorContext> = {}): BehaviorCo
     hygiene: 80,
     mood: 80,
     bladder: 80,
+    fitness: 80,
     currentMapId: 'town',
     currentNodeId: 'town-0-0',
     position: { x: 100, y: 100 },
@@ -37,6 +37,7 @@ function createTestContext(overrides: Partial<BehaviorContext> = {}): BehaviorCo
     currentAction: null,
     pendingAction: null,
     actionCounter: 0,
+    afterSystemAutoMove: false,
   }
 
   return {
@@ -127,8 +128,7 @@ describe('LLMBehaviorDecider', () => {
         currentMapFacilities: [{
           id: 'toilet-1',
           label: 'Toilet',
-          tags: ['toilet'],
-          availableActions: ['toilet'],
+          actionIds: ['toilet'],
         }],
       })
       const decision = await decider.decide(context)
@@ -177,8 +177,7 @@ describe('LLMBehaviorDecider', () => {
         currentMapFacilities: [{
           id: 'toilet-1',
           label: 'Toilet',
-          tags: ['toilet'],
-          availableActions: ['toilet'],
+          actionIds: ['toilet'],
         }],
       })
       const decision = await decider.decideInterruptFacility('toilet', context)
@@ -196,8 +195,8 @@ describe('LLMBehaviorDecider', () => {
 
       const context = createTestContext({
         currentMapFacilities: [
-          { id: 'toilet-1', label: 'Home Toilet', tags: ['toilet'], availableActions: ['toilet'] },
-          { id: 'toilet-2', label: 'Public Toilet', tags: ['toilet'], availableActions: ['toilet'] },
+          { id: 'toilet-1', label: 'Home Toilet', actionIds: ['toilet'] },
+          { id: 'toilet-2', label: 'Public Toilet', actionIds: ['toilet'] },
         ],
       })
       const decision = await decider.decideInterruptFacility('toilet', context)
@@ -284,8 +283,8 @@ describe('LLMBehaviorDecider', () => {
 
       const context = createTestContext({
         currentMapFacilities: [
-          { id: 'toilet-1', label: 'Home Toilet', tags: ['toilet'], availableActions: ['toilet'] },
-          { id: 'toilet-2', label: 'Public Toilet', tags: ['toilet'], availableActions: ['toilet'] },
+          { id: 'toilet-1', label: 'Home Toilet', actionIds: ['toilet'] },
+          { id: 'toilet-2', label: 'Public Toilet', actionIds: ['toilet'] },
         ],
       })
       const decision = await decider.decide(context)
@@ -306,8 +305,8 @@ describe('LLMBehaviorDecider', () => {
 
       const context = createTestContext({
         currentMapFacilities: [
-          { id: 'toilet-1', label: 'Home Toilet', tags: ['toilet'], availableActions: ['toilet'] },
-          { id: 'toilet-2', label: 'Public Toilet', tags: ['toilet'], availableActions: ['toilet'] },
+          { id: 'toilet-1', label: 'Home Toilet', actionIds: ['toilet'] },
+          { id: 'toilet-2', label: 'Public Toilet', actionIds: ['toilet'] },
         ],
       })
       const decision = await decider.decide(context)
@@ -336,8 +335,8 @@ describe('LLMBehaviorDecider', () => {
 
       const context = createTestContext({
         currentMapFacilities: [
-          { id: 'toilet-1', label: 'Toilet A', tags: ['toilet'], availableActions: ['toilet'] },
-          { id: 'toilet-2', label: 'Toilet B', tags: ['toilet'], availableActions: ['toilet'] },
+          { id: 'toilet-1', label: 'Toilet A', actionIds: ['toilet'] },
+          { id: 'toilet-2', label: 'Toilet B', actionIds: ['toilet'] },
         ],
       })
       const decision = await decider.decide(context)
@@ -363,8 +362,8 @@ describe('LLMBehaviorDecider', () => {
       const context = createTestContext({
         currentMapFacilities: [],
         nearbyFacilities: [
-          { id: 'home-kitchen', label: 'Kitchen', tags: ['restaurant'], distance: 1, mapId: 'home' },
-          { id: 'cafe-restaurant', label: 'Cafe', tags: ['restaurant'], cost: 500, distance: 2, mapId: 'cafe' },
+          { id: 'home-kitchen', label: 'Kitchen', actionIds: ['eat'], distance: 1, mapId: 'home' },
+          { id: 'cafe-restaurant', label: 'Cafe', actionIds: ['eat'], cost: 500, distance: 2, mapId: 'cafe' },
         ],
       })
       const decision = await decider.decide(context)
@@ -413,14 +412,14 @@ describe('LLMBehaviorDecider', () => {
       const context = createTestContext({
         availableActions: ['eat', 'eat', 'bathe', 'talk', 'rest', 'toilet'],
         nearbyNPCs: [
-          { id: 'npc-1', name: 'Shopkeeper', mapId: 'town', currentNodeId: 'town-2-2', position: { x: 200, y: 200 }, direction: 'down', isInConversation: false },
+          { id: 'npc-1', name: 'Shopkeeper' },
         ],
         currentMapFacilities: [
-          { id: 'kitchen-1', label: '自宅キッチン', tags: ['kitchen'], availableActions: ['eat'] },
-          { id: 'toilet-1', label: 'トイレ', tags: ['toilet'], availableActions: ['toilet'] },
+          { id: 'kitchen-1', label: '自宅キッチン', actionIds: ['eat', 'cook'] },
+          { id: 'toilet-1', label: 'トイレ', actionIds: ['toilet'] },
         ],
         nearbyFacilities: [
-          { id: 'cafe-1', label: 'カフェ', tags: ['restaurant'], cost: 500, quality: 4, distance: 1, mapId: 'cafe', availableActions: ['eat'] },
+          { id: 'cafe-1', label: 'カフェ', actionIds: ['eat'], cost: 500, quality: 4, distance: 1, mapId: 'cafe' },
         ],
         nearbyMaps: [
           { id: 'town', label: '広場', distance: 0 },
@@ -612,61 +611,58 @@ describe('LLMBehaviorDecider', () => {
   })
 
   // =========================================================================
-  // Bug: マルチタグ施設でのアクションID解決バグ
-  // 施設 ['bathroom', 'toilet'] でtoiletを要求すると、先頭の'bathroom'から
-  // 'bathe'が返されてしまう問題の再現テスト
+  // 施設のactionIds直接指定テスト
+  // タグ→アクション間接マッピングが廃止され、施設はactionIdsを直接指定
   // =========================================================================
 
-  describe('getActionIdFromFacility with multi-tag facility', () => {
-    it('should return toilet when facility has [bathroom, toilet] and requestedAction is toilet', () => {
-      const facility = { id: 'home-obstacle-5', label: '浴室', tags: ['bathroom', 'toilet'] as FacilityTag[] }
+  describe('getActionIdFromFacility with multiple actionIds', () => {
+    it('should return toilet when facility has [bathe, toilet] and requestedAction is toilet', () => {
+      const facility = { id: 'home-obstacle-5', label: '浴室', actionIds: ['bathe', 'toilet'] }
       const result = (decider as any).getActionIdFromFacility(facility, 'toilet')
       expect(result).toBe('toilet')
     })
 
-    it('should return bathe when facility has [bathroom, toilet] and requestedAction is bathe', () => {
-      const facility = { id: 'home-obstacle-5', label: '浴室', tags: ['bathroom', 'toilet'] as FacilityTag[] }
+    it('should return bathe when facility has [bathe, toilet] and requestedAction is bathe', () => {
+      const facility = { id: 'home-obstacle-5', label: '浴室', actionIds: ['bathe', 'toilet'] }
       const result = (decider as any).getActionIdFromFacility(facility, 'bathe')
       expect(result).toBe('bathe')
     })
 
-    it('should return first match when no requestedAction is specified (backward compat)', () => {
-      const facility = { id: 'home-obstacle-5', label: '浴室', tags: ['bathroom', 'toilet'] as FacilityTag[] }
+    it('should return first actionId when no requestedAction is specified', () => {
+      const facility = { id: 'home-obstacle-5', label: '浴室', actionIds: ['bathe', 'toilet'] }
       const result = (decider as any).getActionIdFromFacility(facility)
-      // Without requestedAction, returns first match (existing behavior)
+      // Without requestedAction, returns first actionId
       expect(result).toBe('bathe')
     })
 
     it('should return toilet when facility has [toilet] only', () => {
-      const facility = { id: 'toilet-1', label: 'トイレ', tags: ['toilet'] as FacilityTag[] }
+      const facility = { id: 'toilet-1', label: 'トイレ', actionIds: ['toilet'] }
       const result = (decider as any).getActionIdFromFacility(facility, 'toilet')
       expect(result).toBe('toilet')
     })
   })
 
-  describe('decideInterruptFacility with multi-tag facility (bug reproduction)', () => {
-    it('should select toilet action (not bathe) when forcedAction is toilet and facility has [bathroom, toilet]', async () => {
+  describe('decideInterruptFacility with multi-action facility', () => {
+    it('should select toilet action when forcedAction is toilet and facility has [bathe, toilet]', async () => {
       const context = createTestContext({
         currentMapFacilities: [{
           id: 'home-obstacle-5',
           label: '浴室',
-          tags: ['bathroom', 'toilet'] as FacilityTag[],
-          availableActions: ['bathe', 'toilet'],
+          actionIds: ['bathe', 'toilet'],
         }],
       })
       const decision = await decider.decideInterruptFacility('toilet', context)
       expect(decision.type).toBe('action')
-      expect(decision.actionId).toBe('toilet')  // NOT 'bathe'
+      expect(decision.actionId).toBe('toilet')
       expect(decision.targetFacilityId).toBe('home-obstacle-5')
     })
 
-    it('should select bathe when forcedAction is bathe and facility has [bathroom, toilet]', async () => {
+    it('should select bathe when forcedAction is bathe and facility has [bathe, toilet]', async () => {
       const context = createTestContext({
         currentMapFacilities: [{
           id: 'home-obstacle-5',
           label: '浴室',
-          tags: ['bathroom', 'toilet'] as FacilityTag[],
-          availableActions: ['bathe', 'toilet'],
+          actionIds: ['bathe', 'toilet'],
         }],
       })
       const decision = await decider.decideInterruptFacility('bathe', context)
@@ -676,8 +672,8 @@ describe('LLMBehaviorDecider', () => {
     })
   })
 
-  describe('convertToInternalFormat with multi-tag facility (normal flow)', () => {
-    it('should return toilet actionId when LLM decides toilet and facility has [bathroom, toilet]', async () => {
+  describe('convertToInternalFormat with multi-action facility (normal flow)', () => {
+    it('should return toilet actionId when LLM decides toilet and facility has [bathe, toilet]', async () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'toilet',
@@ -691,17 +687,16 @@ describe('LLMBehaviorDecider', () => {
         currentMapFacilities: [{
           id: 'home-obstacle-5',
           label: '浴室',
-          tags: ['bathroom', 'toilet'] as FacilityTag[],
-          availableActions: ['bathe', 'toilet'],
+          actionIds: ['bathe', 'toilet'],
         }],
       })
       const decision = await decider.decide(context)
       expect(decision.type).toBe('action')
-      expect(decision.actionId).toBe('toilet')  // NOT 'bathe'
+      expect(decision.actionId).toBe('toilet')
       expect(decision.targetFacilityId).toBe('home-obstacle-5')
     })
 
-    it('should return bathe actionId when LLM decides bathe and facility has [bathroom, toilet]', async () => {
+    it('should return bathe actionId when LLM decides bathe and facility has [bathe, toilet]', async () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'bathe',
@@ -715,8 +710,7 @@ describe('LLMBehaviorDecider', () => {
         currentMapFacilities: [{
           id: 'home-obstacle-5',
           label: '浴室',
-          tags: ['bathroom', 'toilet'] as FacilityTag[],
-          availableActions: ['bathe', 'toilet'],
+          actionIds: ['bathe', 'toilet'],
         }],
       })
       const decision = await decider.decide(context)
@@ -727,13 +721,12 @@ describe('LLMBehaviorDecider', () => {
   })
 
   // =========================================================================
-  // 副作用テスト: マルチタグ施設バグによるステータス影響
+  // 副作用テスト: アクション効果確認
   // =========================================================================
 
-  describe('side effects of multi-tag facility bug', () => {
+  describe('action effects verification', () => {
     it('bathe action has no bladder recovery in perMinute effects', () => {
       // bathe の perMinute には bladder が含まれないことを確認
-      // これにより bathe をいくら繰り返しても bladder は回復しない
       decider.setActionConfigs({
         bathe: { durationRange: { min: 15, max: 60, default: 30 }, perMinute: { hygiene: 3.33, mood: 0.5 } },
         toilet: { fixed: true, duration: 5, effects: { bladder: 100 } },
@@ -747,25 +740,23 @@ describe('LLMBehaviorDecider', () => {
       expect(toiletDesc).toContain('膀胱')
     })
 
-    it('repeated interrupt with wrong action should keep selecting same facility (loop detection)', async () => {
-      // 同じ状況で繰り返し呼ばれた場合、同じ誤ったアクションが選ばれ続ける
+    it('repeated interrupt should consistently select correct action', async () => {
+      // 同じ状況で繰り返し呼ばれた場合、同じアクションが選ばれ続ける
       const context = createTestContext({
         currentMapFacilities: [{
           id: 'home-obstacle-5',
           label: '浴室',
-          tags: ['bathroom', 'toilet'] as FacilityTag[],
-          availableActions: ['bathe', 'toilet'],
+          actionIds: ['bathe', 'toilet'],
         }],
       })
 
-      // 3回連続で呼び出し - 全て同じ結果になるべき（ループの証明）
+      // 3回連続で呼び出し - 全て同じ結果になるべき
       const decisions = await Promise.all([
         decider.decideInterruptFacility('toilet', context),
         decider.decideInterruptFacility('toilet', context),
         decider.decideInterruptFacility('toilet', context),
       ])
 
-      // 修正後は全て 'toilet' になるべき
       for (const decision of decisions) {
         expect(decision.actionId).toBe('toilet')
       }
@@ -777,15 +768,13 @@ describe('LLMBehaviorDecider', () => {
       const result = (decider as any).formatFacilityEntry({
         id: 'cafe-1',
         label: 'カフェ',
-        tags: ['restaurant'],
-        availableActions: ['eat'],
+        actionIds: ['eat'],
         cost: 500,
         quality: 4,
         distance: 2,
       })
       expect(result).toContain('cafe-1')
       expect(result).toContain('カフェ')
-      expect(result).toContain('restaurant')
       expect(result).toContain('アクション: eat')
       expect(result).toContain('料金: 500円')
       expect(result).toContain('品質: 4')
@@ -796,7 +785,7 @@ describe('LLMBehaviorDecider', () => {
       const result = (decider as any).formatFacilityEntry({
         id: 'toilet-1',
         label: 'トイレ',
-        tags: ['toilet'],
+        actionIds: ['toilet'],
       })
       expect(result).toContain('toilet-1')
       expect(result).toContain('トイレ')

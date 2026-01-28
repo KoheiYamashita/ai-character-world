@@ -2,14 +2,17 @@ import { z } from 'zod'
 import type { BehaviorDecider } from './BehaviorDecider'
 import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry } from '@/types/behavior'
 import type { ActionId } from '@/server/simulation/actions/definitions'
-import type { SimNPC } from '@/server/simulation/types'
-import type { ScheduleEntry, FacilityTag, ActionConfig, WorldTime } from '@/types'
+import type { NPCWithCooldown } from '@/types/behavior'
+import type { ScheduleEntry, ActionConfig, WorldTime } from '@/types'
 import type { EffectPerMinute } from '@/types/action'
 import { llmGenerateObject } from '@/server/llm'
-import {
-  FACILITY_TAG_TO_ACTION_ID,
-  ACTION_TO_FACILITY_TAGS,
-} from '@/lib/facilityMapping'
+import { getActionLabel as getActionLabelFromUI, NON_ACTION_LABELS } from '@/lib/uiLabels'
+
+// =============================================================================
+// 定数定義
+// =============================================================================
+
+// アクションラベルは src/lib/uiLabels.ts から取得
 
 // =============================================================================
 // Zod スキーマ
@@ -33,7 +36,27 @@ const ScheduleUpdateSchema = z.object({
 /**
  * 許可されるアクション種別
  */
-const ALLOWED_ACTIONS = ['eat', 'sleep', 'toilet', 'bathe', 'rest', 'talk', 'work', 'move', 'idle'] as const
+const ALLOWED_ACTIONS = [
+  // 既存
+  'eat', 'sleep', 'toilet', 'bathe', 'rest', 'talk', 'work',
+  'exercise', 'read', 'game', 'drink_alcohol', 'watch', 'shopping',
+  // 自己改善・学習系
+  'study', 'meditate', 'nap',
+  // 趣味・創作系
+  'draw', 'play_music', 'cook', 'garden',
+  // 運動・アウトドア系
+  'jog', 'swim', 'walk', 'fish',
+  // 娯楽施設系
+  'karaoke', 'cinema', 'arcade', 'bowling',
+  // 軽い消費・休憩系
+  'coffee', 'snack',
+  // サービス利用系
+  'massage', 'haircut',
+  // 家事系
+  'clean',
+  // 移動・待機
+  'move', 'idle'
+] as const
 
 /**
  * LLMからのアクション決定出力スキーマ
@@ -48,7 +71,7 @@ const ActionDecisionSchema = z.object({
   action: z.enum(ALLOWED_ACTIONS).describe('アクション種別'),
   target: z.string().nullable().describe('対象のID（施設ID、NPC ID、マップIDのいずれか。不要ならnull）'),
   reason: z.string().describe('この行動を選んだ理由'),
-  durationMinutes: z.number().nullable().describe('実行時間（分）。可変時間アクション（eat, sleep, toilet, bathe, rest, work）の場合に指定。talk, move, idle, thinkingはnull'),
+  durationMinutes: z.number().nullable().describe('実行時間（分）。可変時間アクション（eat, sleep, toilet, bathe, rest, work, exercise, read, game, drink_alcohol, watch, shopping, study, meditate, nap, draw, play_music, cook, garden, jog, swim, walk, fish, karaoke, cinema, arcade, bowling, coffee, snack, massage, haircut, clean）の場合に指定。talk, move, idle, thinkingはnull'),
   conversationGoal: ConversationGoalSchema.nullable().describe('会話の目的と達成条件（talkの場合に必須。それ以外はnull）'),
   scheduleUpdate: ScheduleUpdateSchema.nullable().describe('スケジュール変更（不要ならnull）'),
 })
@@ -140,21 +163,22 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    * 詳細選択が必要かどうかを判定
    */
   private needsDetailSelection(decision: LLMActionDecision, context: BehaviorContext): boolean {
-    // 施設選択が必要なアクション（eat, bathe）で複数施設がある場合
-    if (ACTION_TO_FACILITY_TAGS[decision.action]) {
-      const relevantFacilities = this.getRelevantFacilities(decision.action, context)
+    // 施設選択が必要なアクションで複数施設がある場合
+    const relevantFacilities = this.getRelevantFacilities(decision.action, context)
+    if (relevantFacilities.length === 0) {
+      return false
+    }
 
-      // LLMがtargetを指定していて、それが有効な施設IDの場合は2段階選択不要
-      if (decision.target) {
-        const targetFacility = relevantFacilities.find(f => f.id === decision.target)
-        if (targetFacility) {
-          return false
-        }
+    // LLMがtargetを指定していて、それが有効な施設IDの場合は2段階選択不要
+    if (decision.target) {
+      const targetFacility = relevantFacilities.find(f => f.id === decision.target)
+      if (targetFacility) {
+        return false
       }
+    }
 
-      if (relevantFacilities.length > 1) {
-        return true
-      }
+    if (relevantFacilities.length > 1) {
+      return true
     }
 
     // talk は最初の決定で target に NPC ID を指定するので2段階選択不要
@@ -170,8 +194,9 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     decision: LLMActionDecision,
     context: BehaviorContext
   ): Promise<BehaviorDecision> {
-    // 施設選択が必要なアクション
-    if (ACTION_TO_FACILITY_TAGS[decision.action]) {
+    // 施設選択が必要なアクション（施設が存在する場合）
+    const relevantFacilities = this.getRelevantFacilities(decision.action, context)
+    if (relevantFacilities.length > 0) {
       return this.selectFacility(decision, context)
     }
 
@@ -261,32 +286,26 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    * アクションに関連する施設を取得（現在マップ + 他マップ）
    */
   private getRelevantFacilities(action: string, context: BehaviorContext): NearbyFacility[] {
-    const relevantTags = ACTION_TO_FACILITY_TAGS[action]
-    if (!relevantTags) {
-      return []
-    }
-
-    const hasRelevantTag = (tags: FacilityTag[]) => tags.some(tag => relevantTags.includes(tag))
+    const actionId = action as ActionId
     const results: NearbyFacility[] = []
 
     // 現在マップの施設を検索（distance: 0）
     for (const f of context.currentMapFacilities ?? []) {
-      if (hasRelevantTag(f.tags)) {
+      if (f.actionIds.includes(actionId)) {
         results.push({
           id: f.id,
           label: f.label,
-          tags: f.tags,
+          actionIds: f.actionIds,
           cost: f.cost,
           distance: 0,
           mapId: context.character.currentMapId,
-          availableActions: f.availableActions,
         })
       }
     }
 
     // 他マップの施設を検索（distance > 0）
     for (const f of context.nearbyFacilities ?? []) {
-      if (hasRelevantTag(f.tags)) {
+      if (f.actionIds.includes(actionId)) {
         results.push(f)
       }
     }
@@ -298,23 +317,16 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    * 施設から具体的なアクションIDを取得
    */
   private getActionIdFromFacility(facility: NearbyFacility, preferredAction?: string): ActionId {
-    // preferredAction が指定されている場合、そのアクションに対応するタグを施設が持っていれば優先
-    if (preferredAction) {
-      const preferredTags = ACTION_TO_FACILITY_TAGS[preferredAction]
-      if (preferredTags) {
-        const hasMatchingTag = facility.tags.some(tag => preferredTags.includes(tag as FacilityTag))
-        if (hasMatchingTag) {
-          return preferredAction as ActionId
-        }
-      }
+    // preferredAction が指定されている場合、その施設がサポートしていれば優先
+    if (preferredAction && facility.actionIds.includes(preferredAction as ActionId)) {
+      return preferredAction as ActionId
     }
 
-    for (const tag of facility.tags) {
-      const actionId = FACILITY_TAG_TO_ACTION_ID[tag]
-      if (actionId) {
-        return actionId
-      }
+    // 施設の最初のアクションを返す
+    if (facility.actionIds.length > 0) {
+      return facility.actionIds[0]
     }
+
     // フォールバック（通常はここに来ない）
     return 'rest'
   }
@@ -351,10 +363,9 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       durationMinutes: duration,
     })
 
-    // 施設選択が必要なアクション（eat, bathe）
-    if (ACTION_TO_FACILITY_TAGS[action]) {
-      const relevantFacilities = this.getRelevantFacilities(action, context)
-
+    // 施設選択が必要なアクション
+    const relevantFacilities = this.getRelevantFacilities(action, context)
+    if (relevantFacilities.length > 0) {
       // LLMがtargetを指定している場合、その施設を使用
       if (target) {
         const targetFacility = relevantFacilities.find(f => f.id === target)
@@ -368,14 +379,6 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       // 単一施設の場合は自動選択
       if (relevantFacilities.length === 1) {
         return buildFacilityAction(relevantFacilities[0])
-      }
-      // 施設がない場合
-      if (relevantFacilities.length === 0) {
-        return {
-          type: 'idle',
-          reason: `${action}できる施設がない`,
-          scheduleUpdate: convertedScheduleUpdate,
-        }
       }
     }
 
@@ -449,7 +452,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
 
   /**
    * アクションに対応する施設をnearbyFacilitiesから検索
-   * ACTION_FACILITY_TAGSマッピングを使用して、必要なタグを持つ施設を探す
+   * 指定アクションをサポートする施設を探す
    */
   private findFacilityForAction(
     action: string,
@@ -457,13 +460,8 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   ): NearbyFacility | null {
     if (!nearbyFacilities || nearbyFacilities.length === 0) return null
 
-    const requiredTags = ACTION_TO_FACILITY_TAGS[action]
-    if (!requiredTags || requiredTags.length === 0) return null
-
-    // 必要なタグをすべて持つ施設を探す
-    return nearbyFacilities.find(f =>
-      requiredTags.every(tag => f.tags.includes(tag))
-    ) ?? null
+    const actionId = action as ActionId
+    return nearbyFacilities.find(f => f.actionIds.includes(actionId)) ?? null
   }
 
   // ===========================================================================
@@ -541,20 +539,22 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push('【現在の状況】')
     parts.push(`- 時刻: ${currentTime.hour}:${String(currentTime.minute).padStart(2, '0')}`)
     parts.push(`- 場所: ${character.currentMapId}`)
-    parts.push(`- 現在の施設: ${currentFacility ? currentFacility.tags.join(', ') : 'なし'}`)
+    parts.push(`- 現在の施設: ${currentFacility ? currentFacility.actionIds.join(', ') : 'なし'}`)
     parts.push(`- ステータス説明:`)
     parts.push(`  - 全ステータスは0〜100%で、高いほど良い状態です`)
     parts.push(`  - 満腹度: 100%=満腹、0%=空腹（食事で回復）`)
     parts.push(`  - エネルギー: 100%=元気、0%=疲労困憊（睡眠で回復）`)
     parts.push(`  - 衛生: 100%=清潔、0%=不潔（入浴で回復）`)
-    parts.push(`  - 気分: 100%=上機嫌、0%=不機嫌（会話・休憩で回復）`)
+    parts.push(`  - 気分: 100%=上機嫌、0%=不機嫌（会話・休憩・娯楽で回復）`)
     parts.push(`  - トイレ: 100%=快適、0%=限界（トイレで回復）`)
+    parts.push(`  - 体力: 100%=健康、0%=運動不足（運動で回復）`)
     parts.push(`- 現在のステータス:`)
     parts.push(`  - 満腹度: ${character.satiety.toFixed(0)}%`)
     parts.push(`  - エネルギー: ${character.energy.toFixed(0)}%`)
     parts.push(`  - 衛生: ${character.hygiene.toFixed(0)}%`)
     parts.push(`  - 気分: ${character.mood.toFixed(0)}%`)
     parts.push(`  - トイレ: ${character.bladder.toFixed(0)}%`)
+    parts.push(`  - 体力: ${character.fitness.toFixed(0)}%`)
     parts.push(`- 所持金: ${character.money}円`)
     parts.push('')
 
@@ -606,7 +606,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push('- 特にすることがなければ「idle」を選択（targetはnull）')
     parts.push('')
     parts.push('【durationMinutesについて】')
-    parts.push('- eat, sleep, toilet, bathe, rest, work の場合は durationMinutes を分単位で指定してください')
+    parts.push('- eat, sleep, toilet, bathe, rest, work, exercise, read, game, drink_alcohol, watch, shopping の場合は durationMinutes を分単位で指定してください')
     parts.push('- 各アクションの最小〜最大時間の範囲内で指定してください')
     parts.push('- 次のスケジュールまでの時間を考慮して適切な時間を選んでください')
     parts.push('- talk, move, idle は固定または即時なので durationMinutes は null にしてください')
@@ -668,7 +668,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    */
   private formatAvailableActions(
     actions: ActionId[],
-    npcs?: SimNPC[],
+    npcs?: NPCWithCooldown[],
     currentMapFacilities?: CurrentMapFacility[]
   ): string {
     if (actions.length === 0 && (!npcs || npcs.length === 0)) {
@@ -682,10 +682,10 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     const actionFacilityMap = new Map<string, string[]>()
     if (currentMapFacilities) {
       for (const facility of currentMapFacilities) {
-        for (const action of facility.availableActions) {
-          const existing = actionFacilityMap.get(action) || []
+        for (const actionId of facility.actionIds) {
+          const existing = actionFacilityMap.get(actionId) || []
           existing.push(`${facility.label}[${facility.id}]`)
-          actionFacilityMap.set(action, existing)
+          actionFacilityMap.set(actionId, existing)
         }
       }
     }
@@ -698,9 +698,14 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       const description = this.buildActionDescription(action)
       let facilityInfo = ''
 
-      // talk の場合は NPC 情報を付加
+      // talk の場合は NPC 情報を付加（クールダウン情報含む）
       if (action === 'talk' && npcs && npcs.length > 0) {
-        const npcList = npcs.map(n => `${n.name}[${n.id}]`).join('、')
+        const npcList = npcs.map(n => {
+          if (n.nextAvailableTime) {
+            return `${n.name}[${n.id}](現在会話不可。次回会話可能: ${n.nextAvailableTime})`
+          }
+          return `${n.name}[${n.id}]`
+        }).join('、')
         facilityInfo = `（${npcList}）`
       }
       // 施設アクションの場合は施設情報を付加
@@ -732,9 +737,9 @@ export class LLMBehaviorDecider implements BehaviorDecider {
    * 施設エントリをフォーマット（共通処理）
    */
   private formatFacilityEntry(f: NearbyFacility): string {
-    const parts: string[] = [`- ID: ${f.id}, ${f.label} (${f.tags.join(', ')})`]
-    if (f.availableActions && f.availableActions.length > 0) {
-      parts.push(`アクション: ${f.availableActions.join(', ')}`)
+    const parts: string[] = [`- ID: ${f.id}, ${f.label}`]
+    if (f.actionIds.length > 0) {
+      parts.push(`アクション: ${f.actionIds.join(', ')}`)
     }
     if (f.cost !== undefined) {
       parts.push(`料金: ${f.cost}円`)
@@ -837,19 +842,7 @@ ${facilityList}
    * アクション説明を動的に生成
    */
   buildActionDescription(actionType: string): string {
-    const baseDescriptions: Record<string, string> = {
-      eat: '食事',
-      sleep: '睡眠',
-      toilet: 'トイレ',
-      bathe: '入浴',
-      rest: '休憩',
-      talk: 'NPC会話',
-      work: '仕事',
-      move: '別の場所へ移動',
-      idle: '何もしない（待機）',
-    }
-
-    const base = baseDescriptions[actionType] || actionType
+    const base = getActionLabelFromUI(actionType)
     const config = this.actionConfigs[actionType]
 
     // 設定がない場合は基本説明のみ
@@ -894,7 +887,7 @@ ${facilityList}
    * ステータス効果をフォーマット（共通処理）
    */
   private formatEffects(
-    effects: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder', number>>,
+    effects: Partial<Record<'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder' | 'fitness', number>>,
     perMinute: boolean
   ): string {
     const labels: Record<string, string> = {
@@ -903,6 +896,7 @@ ${facilityList}
       hygiene: '衛生',
       mood: '気分',
       bladder: '膀胱',
+      fitness: '体力',
     }
     const suffix = perMinute ? '%/分' : ''
 
@@ -1022,13 +1016,6 @@ ${facilityList}
    * アクション種別からラベルを取得
    */
   private getActionLabel(action: string): string {
-    const labels: Record<string, string> = {
-      eat: '食事',
-      sleep: '睡眠',
-      toilet: 'トイレ',
-      bathe: '入浴',
-      rest: '休憩',
-    }
-    return labels[action] || action
+    return getActionLabelFromUI(action)
   }
 }

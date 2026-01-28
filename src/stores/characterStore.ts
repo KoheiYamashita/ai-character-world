@@ -8,7 +8,7 @@ function clampStat(value: number): number {
 }
 
 // Status fields that are clamped to 0-100
-type ClampedStatKey = 'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder'
+type ClampedStatKey = 'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder' | 'fitness'
 
 interface CharacterStore {
   characters: Map<string, Character>
@@ -31,6 +31,7 @@ interface CharacterStore {
   updateHygiene: (id: string, delta: number) => void
   updateMood: (id: string, delta: number) => void
   updateBladder: (id: string, delta: number) => void
+  updateFitness: (id: string, delta: number) => void
 }
 
 export const useCharacterStore = create<CharacterStore>((set, get) => ({
@@ -126,6 +127,7 @@ export const useCharacterStore = create<CharacterStore>((set, get) => ({
   updateHygiene: (id, delta) => get().updateStat(id, 'hygiene', delta),
   updateMood: (id, delta) => get().updateStat(id, 'mood', delta),
   updateBladder: (id, delta) => get().updateStat(id, 'bladder', delta),
+  updateFitness: (id, delta) => get().updateStat(id, 'fitness', delta),
 }))
 
 /**

@@ -3,9 +3,9 @@ import {
   getFacilityForNode,
   findZoneFacilityForNode,
   findBuildingFacilityNearNode,
-  hasFacilityTag,
-  findObstaclesWithFacilityTag,
-  findObstaclesWithAnyFacilityTag,
+  facilitySupportsAction,
+  findObstaclesWithAction,
+  findObstaclesWithAnyAction,
   getAllFacilities,
   findObstacleById,
   isNodeAtFacility,
@@ -75,7 +75,7 @@ function createNode(id: string, x: number, y: number): PathNode {
 describe('facilityUtils', () => {
   describe('getFacilityForNode', () => {
     it('should return facility for node inside zone', () => {
-      const facility: FacilityInfo = { tags: ['bedroom'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['sleep'], owner: 'player' }
       const zones = [createZone('bedroom', 0, 0, 4, 4, facility)]
       const node = createNode('test-2-2', 180, 180) // Inside zone
 
@@ -85,7 +85,7 @@ describe('facilityUtils', () => {
     })
 
     it('should return null for node outside zone', () => {
-      const facility: FacilityInfo = { tags: ['bedroom'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['sleep'], owner: 'player' }
       const zones = [createZone('bedroom', 0, 0, 4, 4, facility)]
       const node = createNode('test-10-10', 600, 600) // Outside zone
 
@@ -95,7 +95,7 @@ describe('facilityUtils', () => {
     })
 
     it('should return null for invalid node id format', () => {
-      const facility: FacilityInfo = { tags: ['bedroom'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['sleep'], owner: 'player' }
       const zones = [createZone('bedroom', 0, 0, 4, 4, facility)]
       const node = createNode('invalid-node-id', 180, 180)
 
@@ -107,7 +107,7 @@ describe('facilityUtils', () => {
 
   describe('findZoneFacilityForNode', () => {
     it('should return facility when inside zone', () => {
-      const facility: FacilityInfo = { tags: ['kitchen'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['eat', 'cook'], owner: 'player' }
       const zones = [createZone('kitchen', 0, 0, 4, 4, facility)]
 
       // Row 2, Col 2 is inside zone (0,0) to (4,4)
@@ -117,7 +117,7 @@ describe('facilityUtils', () => {
     })
 
     it('should return null when on zone boundary', () => {
-      const facility: FacilityInfo = { tags: ['kitchen'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['eat', 'cook'], owner: 'player' }
       const zones = [createZone('kitchen', 0, 0, 4, 4, facility)]
 
       // Row 0, Col 0 is on the boundary
@@ -127,7 +127,7 @@ describe('facilityUtils', () => {
     })
 
     it('should return null when outside all zones', () => {
-      const facility: FacilityInfo = { tags: ['kitchen'], owner: 'player' }
+      const facility: FacilityInfo = { actionIds: ['eat', 'cook'], owner: 'player' }
       const zones = [createZone('kitchen', 0, 0, 4, 4, facility)]
 
       const result = findZoneFacilityForNode(10, 10, zones)
@@ -146,7 +146,7 @@ describe('facilityUtils', () => {
 
   describe('findBuildingFacilityNearNode', () => {
     it('should return facility when adjacent to building', () => {
-      const facility: FacilityInfo = { tags: ['restaurant'], cost: 500 }
+      const facility: FacilityInfo = { actionIds: ['eat'], cost: 500 }
       const buildings = [createBuilding('restaurant', 2, 2, 2, 2, facility)]
 
       // Adjacent to building (row 1 is above building at row 2)
@@ -156,7 +156,7 @@ describe('facilityUtils', () => {
     })
 
     it('should return null when too far from building', () => {
-      const facility: FacilityInfo = { tags: ['restaurant'], cost: 500 }
+      const facility: FacilityInfo = { actionIds: ['eat'], cost: 500 }
       const buildings = [createBuilding('restaurant', 2, 2, 2, 2, facility)]
 
       // Too far from building
@@ -166,7 +166,7 @@ describe('facilityUtils', () => {
     })
 
     it('should respect custom proximity', () => {
-      const facility: FacilityInfo = { tags: ['restaurant'], cost: 500 }
+      const facility: FacilityInfo = { actionIds: ['eat'], cost: 500 }
       const buildings = [createBuilding('restaurant', 5, 5, 2, 2, facility)]
 
       // Within proximity of 2
@@ -184,38 +184,38 @@ describe('facilityUtils', () => {
     })
   })
 
-  describe('hasFacilityTag', () => {
-    it('should return true if facility has the tag', () => {
-      const facility: FacilityInfo = { tags: ['kitchen', 'bedroom'] }
+  describe('facilitySupportsAction', () => {
+    it('should return true if facility supports the action', () => {
+      const facility: FacilityInfo = { actionIds: ['eat', 'cook', 'sleep'] }
 
-      expect(hasFacilityTag(facility, 'kitchen')).toBe(true)
-      expect(hasFacilityTag(facility, 'bedroom')).toBe(true)
+      expect(facilitySupportsAction(facility, 'eat')).toBe(true)
+      expect(facilitySupportsAction(facility, 'sleep')).toBe(true)
     })
 
-    it('should return false if facility does not have the tag', () => {
-      const facility: FacilityInfo = { tags: ['kitchen'] }
+    it('should return false if facility does not support the action', () => {
+      const facility: FacilityInfo = { actionIds: ['eat', 'cook'] }
 
-      expect(hasFacilityTag(facility, 'bedroom')).toBe(false)
+      expect(facilitySupportsAction(facility, 'sleep')).toBe(false)
     })
 
     it('should return false for null facility', () => {
-      expect(hasFacilityTag(null, 'kitchen')).toBe(false)
+      expect(facilitySupportsAction(null, 'eat')).toBe(false)
     })
 
     it('should return false for undefined facility', () => {
-      expect(hasFacilityTag(undefined, 'kitchen')).toBe(false)
+      expect(facilitySupportsAction(undefined, 'eat')).toBe(false)
     })
   })
 
-  describe('findObstaclesWithFacilityTag', () => {
-    it('should return obstacles with the specified tag', () => {
+  describe('findObstaclesWithAction', () => {
+    it('should return obstacles that support the specified action', () => {
       const obstacles = [
-        createZone('zone1', 0, 0, 4, 4, { tags: ['bedroom'] }),
-        createBuilding('building1', 5, 5, 2, 2, { tags: ['kitchen'] }),
-        createZone('zone2', 0, 8, 4, 4, { tags: ['bedroom', 'bathroom'] }),
+        createZone('zone1', 0, 0, 4, 4, { actionIds: ['sleep'] }),
+        createBuilding('building1', 5, 5, 2, 2, { actionIds: ['eat', 'cook'] }),
+        createZone('zone2', 0, 8, 4, 4, { actionIds: ['sleep', 'bathe'] }),
       ]
 
-      const result = findObstaclesWithFacilityTag(obstacles, 'bedroom')
+      const result = findObstaclesWithAction(obstacles, 'sleep')
 
       expect(result).toHaveLength(2)
       expect(result.map((o) => o.id)).toContain('zone1')
@@ -224,24 +224,24 @@ describe('facilityUtils', () => {
 
     it('should return empty array when no obstacles match', () => {
       const obstacles = [
-        createZone('zone1', 0, 0, 4, 4, { tags: ['bedroom'] }),
+        createZone('zone1', 0, 0, 4, 4, { actionIds: ['sleep'] }),
       ]
 
-      const result = findObstaclesWithFacilityTag(obstacles, 'restaurant')
+      const result = findObstaclesWithAction(obstacles, 'eat')
 
       expect(result).toHaveLength(0)
     })
   })
 
-  describe('findObstaclesWithAnyFacilityTag', () => {
-    it('should return obstacles with any of the specified tags', () => {
+  describe('findObstaclesWithAnyAction', () => {
+    it('should return obstacles that support any of the specified actions', () => {
       const obstacles = [
-        createZone('zone1', 0, 0, 4, 4, { tags: ['bedroom'] }),
-        createBuilding('building1', 5, 5, 2, 2, { tags: ['kitchen'] }),
-        createZone('zone2', 0, 8, 4, 4, { tags: ['bathroom'] }),
+        createZone('zone1', 0, 0, 4, 4, { actionIds: ['sleep'] }),
+        createBuilding('building1', 5, 5, 2, 2, { actionIds: ['eat', 'cook'] }),
+        createZone('zone2', 0, 8, 4, 4, { actionIds: ['bathe'] }),
       ]
 
-      const result = findObstaclesWithAnyFacilityTag(obstacles, ['bedroom', 'bathroom'])
+      const result = findObstaclesWithAnyAction(obstacles, ['sleep', 'bathe'])
 
       expect(result).toHaveLength(2)
       expect(result.map((o) => o.id)).toContain('zone1')
@@ -252,9 +252,9 @@ describe('facilityUtils', () => {
   describe('getAllFacilities', () => {
     it('should return all obstacles with facilities', () => {
       const obstacles = [
-        createZone('zone1', 0, 0, 4, 4, { tags: ['bedroom'] }),
+        createZone('zone1', 0, 0, 4, 4, { actionIds: ['sleep'] }),
         createBuilding('building1', 5, 5, 2, 2, undefined),
-        createZone('zone2', 0, 8, 4, 4, { tags: ['bathroom'] }),
+        createZone('zone2', 0, 8, 4, 4, { actionIds: ['bathe'] }),
       ]
 
       const result = getAllFacilities(obstacles)

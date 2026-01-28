@@ -1,5 +1,6 @@
 import type { NPCConfigJson } from './npc'
 import type { JobInfo } from './job'
+import type { ActionId } from './action'
 
 export type NodeType = 'waypoint' | 'entrance' | 'spawn'
 
@@ -19,24 +20,12 @@ export interface PathNode {
 export type ObstacleType = 'building' | 'zone'
 export type WallSide = 'top' | 'bottom' | 'left' | 'right'
 
-// Facility types for action locations
-export type FacilityTag =
-  | 'bathroom'
-  | 'kitchen'
-  | 'bedroom'
-  | 'toilet'
-  | 'restaurant'
-  | 'workspace'
-  | 'hotspring'
-  | 'hotel'
-  | 'public'
-
 export interface FacilityInfo {
-  tags: FacilityTag[]
-  owner?: string      // 所有者ID
-  cost?: number       // 利用料金
-  quality?: number    // 品質（0-100）
-  job?: JobInfo       // 仕事情報（workspace施設用）
+  actionIds: ActionId[] // この施設で実行可能なアクション
+  owner?: string        // 所有者ID
+  cost?: number         // 利用料金
+  quality?: number      // 品質（0-100）
+  job?: JobInfo         // 仕事情報（workspace施設用）
 }
 
 export interface DoorConfig {

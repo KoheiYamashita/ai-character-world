@@ -38,6 +38,8 @@ export interface SimCharacter extends Character {
   pendingAction: PendingAction | null
   // System auto-move counter (resets after 5 actions)
   actionCounter: number
+  // Flag: true after system auto-move completes (reset on behavior decision)
+  afterSystemAutoMove: boolean
 }
 
 export interface SimNavigationState {
@@ -136,6 +138,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     hygiene: char.hygiene,
     mood: char.mood,
     bladder: char.bladder,
+    fitness: char.fitness,
     currentMapId: char.currentMapId,
     currentNodeId: char.currentNodeId,
     position: { ...char.position },
@@ -157,6 +160,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     currentAction: null,
     pendingAction: null,
     actionCounter: 0,
+    afterSystemAutoMove: false,
   }
 }
 

@@ -1,8 +1,8 @@
 import type { Character } from './character'
-import type { FacilityTag } from './map'
 
 // アクションIDの型（循環依存を避けるため明示的に定義）
 export type ActionId =
+  // 既存
   | 'eat'
   | 'sleep'
   | 'toilet'
@@ -11,12 +11,45 @@ export type ActionId =
   | 'talk'
   | 'work'
   | 'thinking'
+  | 'exercise'
+  | 'read'
+  | 'game'
+  | 'drink_alcohol'
+  | 'watch'
+  | 'shopping'
+  // 自己改善・学習系
+  | 'study'
+  | 'meditate'
+  | 'nap'
+  // 趣味・創作系
+  | 'draw'
+  | 'play_music'
+  | 'cook'
+  | 'garden'
+  // 運動・アウトドア系
+  | 'jog'
+  | 'swim'
+  | 'walk'
+  | 'fish'
+  // 娯楽施設系
+  | 'karaoke'
+  | 'cinema'
+  | 'arcade'
+  | 'bowling'
+  // 軽い消費・休憩系
+  | 'coffee'
+  | 'snack'
+  // サービス利用系
+  | 'massage'
+  | 'haircut'
+  // 家事系
+  | 'clean'
 
 // キャラクターステータスの部分型（effects用）
 // Character型から数値ステータスを抽出
 export type CharacterStats = Pick<
   Character,
-  'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder' | 'money'
+  'satiety' | 'energy' | 'hygiene' | 'mood' | 'bladder' | 'money' | 'fitness'
 >
 
 // 可変時間アクションの時間範囲
@@ -33,11 +66,12 @@ export interface EffectPerMinute {
   hygiene?: number
   mood?: number
   bladder?: number
+  fitness?: number
+  money?: number
 }
 
 // アクションの前提条件
 export interface ActionRequirements {
-  facilityTags?: FacilityTag[] // 必要な施設タグ（いずれかのタグを持つ施設が必要）
   minStats?: Partial<CharacterStats> // 最低ステータス
   nearNpc?: boolean // NPC近くにいる必要
   employment?: boolean // 雇用されている必要
@@ -51,10 +85,10 @@ export interface ActionEffects {
 
 // アクション定義
 // Note: duration と effects.stats は world-config.json の actions セクションから読み込む
+// Note: 絵文字は src/lib/uiLabels.ts の ACTION_INFO から取得
 export interface ActionDefinition {
   requirements: ActionRequirements
   effects: ActionEffects // stats は world-config.json から取得するため空でも可
-  emoji?: string // 頭上表示用絵文字
 }
 
 // アクション実行状態

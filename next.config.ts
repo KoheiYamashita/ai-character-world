@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+const isEditorMode = process.env.EDITOR_MODE === "true";
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  distDir: isEditorMode ? ".next-editor" : ".next",
 };
 
 export default nextConfig;

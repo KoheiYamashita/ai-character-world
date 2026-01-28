@@ -23,6 +23,7 @@ interface CharacterRow {
   hygiene: number
   mood: number
   bladder: number
+  fitness: number
   current_map_id: string
   current_node_id: string
   position_x: number
@@ -98,6 +99,7 @@ export class SqliteStore implements StateStore {
         hygiene INTEGER NOT NULL,
         mood INTEGER NOT NULL,
         bladder INTEGER NOT NULL,
+        fitness INTEGER NOT NULL DEFAULT 80,
         current_map_id TEXT NOT NULL,
         current_node_id TEXT NOT NULL,
         position_x REAL NOT NULL,
@@ -203,6 +205,18 @@ export class SqliteStore implements StateStore {
 
     // Migration: add episode column to action_history
     this.migrateActionHistoryEpisode()
+
+    // Migration: add fitness column to character_states
+    this.migrateCharacterFitness()
+  }
+
+  private migrateCharacterFitness(): void {
+    const columns = this.db.pragma('table_info(character_states)') as Array<{ name: string }>
+    const hasFitness = columns.some(c => c.name === 'fitness')
+    if (!hasFitness) {
+      this.db.prepare('ALTER TABLE character_states ADD COLUMN fitness INTEGER NOT NULL DEFAULT 80').run()
+      console.log('[SqliteStore] Migrated: added fitness column to character_states')
+    }
   }
 
   private migrateActionHistoryEpisode(): void {
@@ -330,10 +344,10 @@ export class SqliteStore implements StateStore {
   private saveCharacterSync(id: string, character: SimCharacter): void {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO character_states (
-        id, name, sprite, employment, money, satiety, energy, hygiene, mood, bladder,
+        id, name, sprite, employment, money, satiety, energy, hygiene, mood, bladder, fitness,
         current_map_id, current_node_id, position_x, position_y, direction, updated_at
       ) VALUES (
-        @id, @name, @sprite, @employment, @money, @satiety, @energy, @hygiene, @mood, @bladder,
+        @id, @name, @sprite, @employment, @money, @satiety, @energy, @hygiene, @mood, @bladder, @fitness,
         @current_map_id, @current_node_id, @position_x, @position_y, @direction, @updated_at
       )
     `)
@@ -349,6 +363,7 @@ export class SqliteStore implements StateStore {
       hygiene: round2(character.hygiene),
       mood: round2(character.mood),
       bladder: round2(character.bladder),
+      fitness: round2(character.fitness),
       current_map_id: character.currentMapId,
       current_node_id: character.currentNodeId,
       position_x: character.position.x,
@@ -392,6 +407,7 @@ export class SqliteStore implements StateStore {
       hygiene: row.hygiene,
       mood: row.mood,
       bladder: row.bladder,
+      fitness: row.fitness,
       currentMapId: row.current_map_id,
       currentNodeId: row.current_node_id,
       position: { x: row.position_x, y: row.position_y },
@@ -410,6 +426,7 @@ export class SqliteStore implements StateStore {
       currentAction: null,
       pendingAction: null,
       actionCounter: 0, // Runtime state - reset on load
+      afterSystemAutoMove: false, // Runtime state - reset on load
     }
   }
 
@@ -630,6 +647,19 @@ export class SqliteStore implements StateStore {
     startTimeReal: number
   }): Promise<number> {
     const now = Date.now()
+
+    // First, force-complete any existing in_progress action for this character
+    // This prevents UNIQUE constraint violation on idx_active_action
+    const forceCompleteStmt = this.db.prepare(`
+      UPDATE action_history
+      SET status = 'aborted', end_time = 'interrupted', last_update_time = @last_update_time
+      WHERE character_id = @character_id AND status = 'in_progress'
+    `)
+    forceCompleteStmt.run({
+      character_id: entry.characterId,
+      last_update_time: now,
+    })
+
     const stmt = this.db.prepare(`
       INSERT INTO action_history (
         character_id, day, time, action_id, target, duration_minutes, reason,

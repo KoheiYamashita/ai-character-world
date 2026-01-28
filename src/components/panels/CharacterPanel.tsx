@@ -2,25 +2,15 @@
 
 import { useWorldStore, useCharacterStore } from '@/stores'
 import { getMaps } from '@/data/maps'
-import type { ActionId } from '@/types/action'
-
-const ACTION_LABELS: Record<ActionId, string> = {
-  eat: '🍽️ 食事中',
-  sleep: '💤 睡眠中',
-  toilet: '🚻 トイレ中',
-  bathe: '🛁 入浴中',
-  rest: '☕ 休憩中',
-  talk: '💬 会話中',
-  work: '💼 仕事中',
-  thinking: '🤔 考え中',
-}
+import { getActionStatusLabel } from '@/lib/uiLabels'
 
 const STAT_LABELS: Record<string, { label: string; color: string }> = {
   satiety: { label: '満腹', color: 'bg-orange-500' },
-  energy: { label: '体力', color: 'bg-green-500' },
+  energy: { label: '元気', color: 'bg-green-500' },
   hygiene: { label: '清潔', color: 'bg-blue-500' },
   mood: { label: '気分', color: 'bg-pink-500' },
   bladder: { label: 'WC', color: 'bg-yellow-500' },
+  fitness: { label: '体力', color: 'bg-purple-500' },
 }
 
 interface CompactStatBarProps {
@@ -95,7 +85,7 @@ export function CharacterPanel(): React.ReactNode {
         {currentAction ? (
           <div>
             <p className="text-slate-100 font-medium">
-              {ACTION_LABELS[currentAction.actionId] || currentAction.actionId}
+              {getActionStatusLabel(currentAction.actionId)}
             </p>
             {currentAction.actionId !== 'talk' && (
               <p className="text-slate-400 text-sm">

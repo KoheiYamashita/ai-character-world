@@ -22,8 +22,9 @@ import type { MiniEpisodeGenerator } from '../episode/MiniEpisodeGenerator'
 import { StubMiniEpisodeGenerator } from '../episode/StubMiniEpisodeGenerator'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
-import { getActionsForTags } from '@/lib/facilityMapping'
 import { getDirection } from '@/lib/movement'
+import { filterForBehaviorDecision, filterForConversation, addCooldownInfoToNPCs } from '@/lib/conversationFilters'
+import { SPECIAL_EMOJI, getActionEmoji } from '@/lib/uiLabels'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 export type LogEventCallback = (entry: ActivityLogEntry) => void
@@ -111,12 +112,14 @@ export class SimulationEngine {
       entry.time = this.formatTimeString(currentTime)
       if (this.stateStore) await this.stateStore.saveNPCSummary(entry)
       // Update recentConversationsCache (optimistic)
+      // Use world time (total minutes) for cooldown calculation instead of real time
+      const worldTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
       const cached = this.recentConversationsCache.get(entry.characterId) ?? []
       cached.push({
         npcId: entry.npcId,
         npcName: entry.npcName,
         summary: entry.summary,
-        timestamp: entry.timestamp,
+        timestamp: worldTimeMinutes,
       })
       this.recentConversationsCache.set(entry.characterId, cached)
       if (!this.recentConversationsCacheDay.has(entry.characterId)) {
@@ -575,6 +578,14 @@ export class SimulationEngine {
       const newMood = calculateStatChange(
         char.mood, decayRates.moodPerMinute, elapsedMinutes, perMinuteEffects?.mood
       )
+      const newFitness = calculateStatChange(
+        char.fitness, decayRates.fitnessPerMinute, elapsedMinutes, perMinuteEffects?.fitness
+      )
+
+      // お金の計算（perMinuteEffects.money がある場合）
+      const newMoney = perMinuteEffects?.money !== undefined
+        ? char.money + Math.floor(perMinuteEffects.money * elapsedMinutes)
+        : char.money
 
       // Update character stats
       this.worldState.updateCharacter(char.id, {
@@ -583,6 +594,8 @@ export class SimulationEngine {
         energy: newEnergy,
         hygiene: newHygiene,
         mood: newMood,
+        fitness: newFitness,
+        ...(newMoney !== char.money ? { money: newMoney } : {}),
       })
 
       // Check for status interrupts (when stat crosses below threshold)
@@ -698,6 +711,8 @@ export class SimulationEngine {
     )
 
     if (success) {
+      // Set flag to disable 'talk' action after system auto-move completes
+      this.worldState.updateCharacter(character.id, { afterSystemAutoMove: true })
       console.log(`[SimulationEngine] System auto-move: ${character.name} -> ${targetMapId}`)
     } else {
       console.log(`[SimulationEngine] System auto-move failed: ${character.name} -> ${targetMapId}`)
@@ -768,17 +783,40 @@ export class SimulationEngine {
   private buildBehaviorContext(character: SimCharacter, includeTodayActions: boolean = true): BehaviorContext {
     const currentTime = this.worldState.getTime()
 
+    // Calculate current world time in minutes for cooldown calculation
+    const currentTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
+
+    // Get recent conversations for this character
+    const recentConversations = this.recentConversationsCache.get(character.id)
+
+    // Get NPCs on current map with cooldown info
+    // After system auto-move, don't show NPCs (talk is disabled anyway)
+    const allNPCs = this.worldState.getNPCsOnMap(character.currentMapId)
+    const npcsWithCooldown = character.afterSystemAutoMove
+      ? []
+      : addCooldownInfoToNPCs(allNPCs, recentConversations, currentTimeMinutes)
+
+    // Get available actions, then remove 'talk' if afterSystemAutoMove flag is set
+    let availableActions = this.actionExecutor.getAvailableActions(character.id)
+    if (character.afterSystemAutoMove) {
+      availableActions = availableActions.filter(action => action !== 'talk')
+    }
+
+    // After system auto-move, don't allow pure 'move' action (which would trigger another behavior decision)
+    // But allow nearbyFacilities (action + move is atomic, no talk can occur in between)
+    const nearbyMaps = character.afterSystemAutoMove ? [] : this.buildNearbyMaps(character.currentMapId)
+
     return {
       character,
       currentTime,
       currentFacility: this.actionExecutor.getCurrentFacility(character.id),
       schedule: this.getScheduleForCharacter(character.id),
-      availableActions: this.actionExecutor.getAvailableActions(character.id),
-      nearbyNPCs: this.worldState.getNPCsOnMap(character.currentMapId),
+      availableActions,
+      nearbyNPCs: npcsWithCooldown,
       currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
       nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
-      nearbyMaps: this.buildNearbyMaps(character.currentMapId),
-      recentConversations: this.recentConversationsCache.get(character.id),
+      nearbyMaps,
+      recentConversations: filterForBehaviorDecision(recentConversations),
       midTermMemories: this.midTermMemoriesCache.get(character.id),
       todayActions: includeTodayActions ? this.getActionHistoryForCharacter(character.id) : undefined,
     }
@@ -844,7 +882,7 @@ export class SimulationEngine {
         // Different emoji for interrupt vs normal idle
         const isInterrupt = logContext === 'interrupt'
         this.worldState.updateCharacter(character.id, {
-          displayEmoji: isInterrupt ? '😰' : '😶',
+          displayEmoji: isInterrupt ? SPECIAL_EMOJI.interrupt : SPECIAL_EMOJI.idle,
         })
         // Record idle only if last entry is not already idle (prevents spam from 2s retry)
         const history = this.getActionHistoryForCharacter(character.id)
@@ -878,6 +916,11 @@ export class SimulationEngine {
 
       console.log(`[SimulationEngine] Interrupt decision for ${character.name}: ${decision.type} (${decision.reason})`)
       this.applyBehaviorDecision(currentChar, decision, 'interrupt')
+
+      // Reset afterSystemAutoMove flag after decision is applied
+      if (currentChar.afterSystemAutoMove) {
+        this.worldState.updateCharacter(character.id, { afterSystemAutoMove: false })
+      }
     }).catch((error) => {
       this.actionExecutor.forceCompleteAction(character.id)
       console.error(`[SimulationEngine] Error in interrupt decision for ${character.name}:`, error)
@@ -904,6 +947,11 @@ export class SimulationEngine {
       if (!currentChar || !this.isCharacterIdle(currentChar)) return
 
       this.applyBehaviorDecision(currentChar, decision, 'normal')
+
+      // Reset afterSystemAutoMove flag after decision is applied
+      if (currentChar.afterSystemAutoMove) {
+        this.worldState.updateCharacter(character.id, { afterSystemAutoMove: false })
+      }
 
       // Apply schedule update if LLM proposed one
       if (decision.scheduleUpdate) {
@@ -1097,7 +1145,7 @@ export class SimulationEngine {
 
     // Build conversation context
     const context: ConversationContext = {
-      recentConversations: this.recentConversationsCache.get(characterId) ?? [],
+      recentConversations: filterForConversation(this.recentConversationsCache.get(characterId), npcId),
       midTermMemories: this.midTermMemoriesCache.get(characterId) ?? [],
       todayActions: this.getActionHistoryForCharacter(characterId),
       schedule: this.getScheduleForCharacter(characterId),
@@ -1274,16 +1322,13 @@ export class SimulationEngine {
 
     for (const obstacle of map.obstacles) {
       if (!obstacle.facility) continue
-
-      const availableActions = getActionsForTags(obstacle.facility.tags)
-      if (availableActions.length === 0) continue
+      if (obstacle.facility.actionIds.length === 0) continue
 
       facilities.push({
         id: obstacle.id,
         label: obstacle.label || obstacle.id,
-        tags: obstacle.facility.tags,
+        actionIds: obstacle.facility.actionIds,
         cost: obstacle.facility.cost,
-        availableActions,
       })
     }
 
@@ -1337,19 +1382,16 @@ export class SimulationEngine {
       const facilities: NearbyFacility[] = []
       for (const obstacle of map.obstacles) {
         if (!obstacle.facility) continue
-
-        // Calculate available actions from facility tags
-        const availableActions = getActionsForTags(obstacle.facility.tags)
+        if (obstacle.facility.actionIds.length === 0) continue
 
         facilities.push({
           id: obstacle.id,
           label: obstacle.label || obstacle.id,
-          tags: obstacle.facility.tags,
+          actionIds: obstacle.facility.actionIds,
           cost: obstacle.facility.cost,
           quality: obstacle.facility.quality,
           distance,
           mapId,
-          availableActions: availableActions.length > 0 ? availableActions : undefined,
         })
       }
       return facilities
@@ -1812,6 +1854,7 @@ export class SimulationEngine {
         hygiene: character.hygiene,
         mood: character.mood,
         bladder: character.bladder,
+        fitness: character.fitness,
         money: character.money,
       }
 
@@ -1884,14 +1927,19 @@ export class SimulationEngine {
           reason: entry.reason,
         }
 
+        // displayEmoji も復元
+        const emoji = getActionEmoji(entry.actionId as ActionId)
+
         this.worldState.updateCharacter(entry.characterId, {
           currentAction: actionState,
+          displayEmoji: emoji || undefined,
         })
         this.activeActionRowIds.set(entry.characterId, entry.rowId)
 
         const remainingMs = targetEndTime - now
         const remainingMin = Math.ceil(remainingMs / 60000)
         console.log(`[SimulationEngine] Restored active action: ${character.name} ${entry.actionId} (${remainingMin}min remaining, rowId=${entry.rowId})`)
+        // Note: Log notification not needed here - getTodayLogs() includes in-progress actions
       }
     }
   }
@@ -1905,12 +1953,19 @@ export class SimulationEngine {
     this.recentConversationsCache.clear()
     this.recentConversationsCacheDay.clear()
     for (const entry of summaries) {
+      // Convert time string (HH:MM) to world time minutes for cooldown calculation
+      // entry.time is set by onSummaryPersist callback, format: "HH:MM"
+      let worldTimeMinutes = currentDay * 24 * 60 // Default to start of day
+      if (entry.time) {
+        const [hours, minutes] = entry.time.split(':').map(Number)
+        worldTimeMinutes = currentDay * 24 * 60 + hours * 60 + minutes
+      }
       const cached = this.recentConversationsCache.get(entry.characterId) ?? []
       cached.push({
         npcId: entry.npcId,
         npcName: entry.npcName,
         summary: entry.summary,
-        timestamp: entry.timestamp,
+        timestamp: worldTimeMinutes,
       })
       this.recentConversationsCache.set(entry.characterId, cached)
       this.recentConversationsCacheDay.set(entry.characterId, currentDay)
@@ -1929,7 +1984,7 @@ export class SimulationEngine {
     const currentDay = this.worldState.getTime().day
     const logs: ActivityLogEntry[] = []
 
-    // Collect action logs from cache
+    // Collect action logs from cache (completed actions)
     for (const [key, entries] of this.actionHistoryCache) {
       if (!key.endsWith(`-${currentDay}`)) continue
       const characterId = key.slice(0, key.lastIndexOf('-'))
@@ -1944,6 +1999,24 @@ export class SimulationEngine {
           target: entry.target,
           durationMinutes: entry.durationMinutes,
           reason: entry.reason,
+        })
+      }
+    }
+
+    // Collect in-progress actions from current character state
+    for (const character of this.worldState.getAllCharacters()) {
+      if (character.currentAction) {
+        const action = character.currentAction
+        logs.push({
+          type: 'action',
+          characterId: character.id,
+          characterName: character.name,
+          time: this.formatTimeString(this.worldState.getTime()),
+          actionId: action.actionId,
+          target: action.facilityId,
+          durationMinutes: action.durationMinutes,
+          reason: action.reason,
+          status: 'started',
         })
       }
     }

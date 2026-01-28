@@ -5,6 +5,7 @@ import type { WorldStateManager } from '../WorldState'
 import { ACTIONS, type ActionId } from './definitions'
 import { findZoneFacilityForNode, findBuildingFacilityNearNode } from '@/lib/facilityUtils'
 import { parseNodeIdToGridCoord } from '@/lib/gridUtils'
+import { getActionEmoji } from '@/lib/uiLabels'
 
 /** Callback type for action completion events */
 export type ActionCompleteCallback = (characterId: string, actionId: ActionId) => void
@@ -80,8 +81,20 @@ export class ActionExecutor {
     // 固定時間アクションには perMinute がないので null を返す
     if (actionConfig.fixed) return null
 
-    // 可変時間アクションの perMinute を返す
-    return actionConfig.perMinute ?? null
+    const baseEffects = actionConfig.perMinute ?? {}
+
+    // work アクションの場合、施設の時給から money を動的に計算
+    if (actionId === 'work' && actionDef.effects.money === 'hourlyWage') {
+      const facility = this.getCurrentFacility(characterId)
+      if (facility?.job) {
+        return {
+          ...baseEffects,
+          money: facility.job.hourlyWage / 60,  // 時給を分給に変換
+        }
+      }
+    }
+
+    return Object.keys(baseEffects).length > 0 ? baseEffects : null
   }
 
   /** Set callback for action completion events */
@@ -138,10 +151,9 @@ export class ActionExecutor {
     const actionDef = ACTIONS[actionId]!
     const actionConfig = this.actionConfigs[actionId]
 
-    // コストの支払い（施設を必要とするアクションで、施設にcostが設定されていれば支払う）
+    // コストの支払い（施設にcostが設定されていれば支払う）
     const facility = this.getCurrentFacility(characterId)
-    const requiresFacility = actionDef.requirements.facilityTags && actionDef.requirements.facilityTags.length > 0
-    if (requiresFacility && facility?.cost !== undefined && facility.cost > 0) {
+    if (facility?.cost !== undefined && facility.cost > 0) {
       this.worldState.updateCharacter(characterId, {
         money: character.money - facility.cost,
       })
@@ -164,15 +176,16 @@ export class ActionExecutor {
     }
 
     // キャラクター状態更新（displayEmoji設定含む）
+    const emoji = getActionEmoji(actionId)
     this.worldState.updateCharacter(characterId, {
       currentAction: actionState,
-      displayEmoji: actionDef.emoji,  // 頭上絵文字を設定 (6-4)
+      displayEmoji: emoji || undefined,  // 頭上絵文字を設定 (6-4)
     })
 
     const durationStr = actualDurationMinutes !== undefined
       ? `${actualDurationMinutes}min`
       : `${durationMs / 1000}s`
-    console.log(`[ActionExecutor] ${character.name} started action: ${actionId} (duration: ${durationStr}, emoji: ${actionDef.emoji ?? 'none'})`)
+    console.log(`[ActionExecutor] ${character.name} started action: ${actionId} (duration: ${durationStr}, emoji: ${emoji || 'none'})`)
 
     // Notify action start callback (skip thinking action - it's internal)
     if (this.onActionStart && actionId !== 'thinking') {
@@ -333,26 +346,14 @@ export class ActionExecutor {
       })
     }
 
-    // お金の効果を適用
-    if (actionDef.effects.money === 'hourlyWage') {
-      // 時給計算
-      const facility = this.getCurrentFacility(characterId)
-      if (facility?.job) {
-        const durationMs = character.currentAction!.targetEndTime - character.currentAction!.startTime
-        const hoursWorked = durationMs / (60 * 60 * 1000)
-        const earnings = Math.floor(facility.job.hourlyWage * hoursWorked)
-        const newMoney = character.money + earnings
-        this.worldState.updateCharacter(characterId, {
-          money: newMoney,
-        })
-        console.log(`[ActionExecutor] ${character.name} earned ${earnings} yen (${hoursWorked.toFixed(2)} hours at ${facility.job.hourlyWage}/hour)`)
-      }
-    } else if (typeof actionDef.effects.money === 'number') {
+    // お金の効果を適用（固定金額のみ - 時給はperMinuteで処理）
+    if (typeof actionDef.effects.money === 'number') {
       const newMoney = character.money + actionDef.effects.money
       this.worldState.updateCharacter(characterId, {
         money: Math.max(0, newMoney),
       })
     }
+    // Note: money === 'hourlyWage' の場合は perMinute で処理されるため、ここでは何もしない
 
     const durationStr = durationMinutes !== undefined ? `(${durationMinutes}min)` : ''
     console.log(`[ActionExecutor] ${character.name} completed action: ${actionId} ${durationStr}`)
@@ -480,20 +481,20 @@ export class ActionExecutor {
 
     const requirements = actionDef.requirements
 
-    // Check facility tags at MAP level (not position level)
-    // Character can execute action if there's an accessible facility with any required tag on the map
-    if (requirements.facilityTags && requirements.facilityTags.length > 0) {
+    // Check if map has an accessible facility that supports this action
+    // Skip this check for actions that don't require facilities (talk, thinking)
+    if (actionId !== 'thinking' && !requirements.nearNpc) {
       const map = this.worldState.getMap(character.currentMapId)
       if (!map) {
         return { canExecute: false, reason: 'Map not found' }
       }
 
-      // Check if map has an accessible facility with any of the required tags
+      // Check if map has an accessible facility that supports this action
       // Accessible = no owner (public) OR owned by this character, AND affordable
       const hasAccessibleFacility = map.obstacles.some(obs => {
         if (!obs.facility) return false
-        const hasTag = requirements.facilityTags!.some(tag => obs.facility!.tags.includes(tag))
-        if (!hasTag) return false
+        const supportsAction = obs.facility.actionIds.includes(actionId)
+        if (!supportsAction) return false
         // Owner check: if facility has owner, only owner can use
         if (obs.facility.owner && obs.facility.owner !== characterId) return false
         // Cost check: if facility has cost, character needs enough money
@@ -502,7 +503,7 @@ export class ActionExecutor {
       })
 
       if (!hasAccessibleFacility) {
-        return { canExecute: false, reason: `No accessible facility with tags: ${requirements.facilityTags.join(', ')}` }
+        return { canExecute: false, reason: `No accessible facility for action: ${actionId}` }
       }
     }
 

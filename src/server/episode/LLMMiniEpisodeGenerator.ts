@@ -76,7 +76,7 @@ export class LLMMiniEpisodeGenerator implements MiniEpisodeGenerator {
     }
     parts.push(`完了したアクション: ${actionId}`)
     if (facility) {
-      parts.push(`施設タグ: ${facility.tags.join(', ')}`)
+      parts.push(`施設アクション: ${facility.actionIds.join(', ')}`)
     }
     parts.push('')
     parts.push('【現在のステータス】')

@@ -44,6 +44,7 @@ export function createCharacterFromConfig(
     hygiene: config.defaultStats.hygiene,
     mood: config.defaultStats.mood,
     bladder: config.defaultStats.bladder,
+    fitness: config.defaultStats.fitness,
     currentMapId: mapId,
     currentNodeId: nodeId,
     position,

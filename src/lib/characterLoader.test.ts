@@ -27,7 +27,7 @@ describe('characterLoader', () => {
             id: 'test-char',
             name: 'Test',
             sprite: { sheetUrl: 'test.png', frameWidth: 96, frameHeight: 96, cols: 3, rows: 4, rowMapping: { down: 0, left: 1, right: 2, up: 3 } },
-            defaultStats: { money: 100, satiety: 50, energy: 50, hygiene: 50, mood: 50, bladder: 50 },
+            defaultStats: { money: 100, satiety: 50, energy: 50, hygiene: 50, mood: 50, bladder: 50, fitness: 80 },
           },
         ],
       }
@@ -159,6 +159,7 @@ describe('characterLoader', () => {
           hygiene: 90,
           mood: 75,
           bladder: 60,
+          fitness: 80,
         },
       }
 
@@ -202,6 +203,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
       }
 
@@ -229,6 +231,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
         employment: {
           jobId: 'barista',
@@ -261,6 +264,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
       }
 
@@ -290,6 +294,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
         personality: '明るく社交的だが、少し心配性な面もある',
       }
@@ -316,6 +321,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
         tendencies: [
           '節約志向で安い店を選ぶ',
@@ -347,6 +353,7 @@ describe('characterLoader', () => {
           hygiene: 50,
           mood: 50,
           bladder: 50,
+          fitness: 80,
         },
         customPrompt: '3年前に都会から引っ越してきた。毎朝コーヒーを飲まないと調子が出ない。',
       }

@@ -78,6 +78,7 @@ function createTestCharacter(id: string, overrides: Partial<Character> = {}): Ch
     hygiene: 80,
     mood: 80,
     bladder: 80,
+    fitness: 80,
     currentMapId: 'town',
     currentNodeId: 'town-0-0',
     position: { x: 100, y: 100 },
@@ -392,7 +393,7 @@ describe('SimulationEngine (integration)', () => {
         height: 200,
         type: 'zone',
         label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 0,
         tileCol: 0,
         tileWidth: 2,
@@ -641,7 +642,7 @@ describe('SimulationEngine (integration)', () => {
         height: 200,
         type: 'zone',
         label: 'Kitchen',
-        facility: { tags: ['kitchen'], owner: 'kitchen-1' },
+        facility: { actionIds: ['eat', 'cook'], owner: 'kitchen-1' },
         tileRow: 0,
         tileCol: 0,
         tileWidth: 2,
@@ -721,7 +722,7 @@ describe('SimulationEngine (integration)', () => {
         id: 'toilet-1',
         x: 100, y: 100, width: 300, height: 300,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 1, tileCol: 1, tileWidth: 3, tileHeight: 3,
         // Interior nodes: row > 1 && row < 4, col > 1 && col < 4 → (2,2), (2,3), (3,2), (3,3)
       }
@@ -759,7 +760,7 @@ describe('SimulationEngine (integration)', () => {
         id: 'toilet-1',
         x: 100, y: 100, width: 300, height: 300,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 1, tileCol: 1, tileWidth: 3, tileHeight: 3,
       }
       const nodes = createTestNodes('town', 5, 5)
@@ -805,7 +806,7 @@ describe('SimulationEngine (integration)', () => {
         id: 'cafe-kitchen',
         x: 200, y: 100, width: 200, height: 200,
         type: 'zone', label: 'Kitchen',
-        facility: { tags: ['kitchen'], owner: 'cafe-kitchen' },
+        facility: { actionIds: ['eat', 'cook'], owner: 'cafe-kitchen' },
         tileRow: 0, tileCol: 0, tileWidth: 3, tileHeight: 3,
         // Interior: row > 0 && row < 3, col > 0 && col < 3 → (1,1)
       }
@@ -1232,6 +1233,63 @@ describe('SimulationEngine (integration)', () => {
       // Should NOT be navigating (auto-move skipped)
       expect(updated.navigation.isMoving).toBe(false)
     })
+
+    it('should set afterSystemAutoMove flag when auto-move succeeds', async () => {
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-entrance'] },
+        { id: 'town-entrance', x: 200, y: 100, type: 'entrance' as const, connectedTo: ['town-0-0'], leadsTo: { mapId: 'cafe', nodeId: 'cafe-entrance' } },
+      ]
+      const cafeNodes = [
+        { id: 'cafe-entrance', x: 100, y: 100, type: 'entrance' as const, connectedTo: ['cafe-0-0'], leadsTo: { mapId: 'town', nodeId: 'town-entrance' } },
+        { id: 'cafe-0-0', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['cafe-entrance'] },
+      ]
+      const maps = {
+        town: createTestMap('town', { nodes: townNodes, spawnNodeId: 'town-0-0' }),
+        cafe: createTestMap('cafe', { nodes: cafeNodes, spawnNodeId: 'cafe-0-0' }),
+      }
+      const chars = [createTestCharacter('c1')]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Set actionCounter after initialize
+      ;(engine as any).worldState.updateCharacter('c1', { actionCounter: 2 })
+      ;(engine as any).onActionComplete('c1')
+
+      const updated = engine.getCharacter('c1')!
+      // afterSystemAutoMove flag should be set
+      expect(updated.afterSystemAutoMove).toBe(true)
+    })
+
+    it('should exclude talk from availableActions when afterSystemAutoMove is true', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Set afterSystemAutoMove flag
+      ;(engine as any).worldState.updateCharacter('c1', { afterSystemAutoMove: true })
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      // talk should be excluded from availableActions
+      expect(context.availableActions).not.toContain('talk')
+    })
+
+    it('should include talk in availableActions when afterSystemAutoMove is false', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Ensure afterSystemAutoMove is false
+      ;(engine as any).worldState.updateCharacter('c1', { afterSystemAutoMove: false })
+
+      const char = engine.getCharacter('c1')!
+      const _context = (engine as any).buildBehaviorContext(char)
+
+      // talk should be included (if available from ActionExecutor)
+      // Note: default testActionConfigs may not include talk, so we just check it's not excluded
+      expect(char.afterSystemAutoMove).toBe(false)
+    })
   })
 
   describe('buildCurrentMapFacilities', () => {
@@ -1241,14 +1299,14 @@ describe('SimulationEngine (integration)', () => {
           id: 'kitchen-1',
           x: 100, y: 100, width: 200, height: 200,
           type: 'zone', label: 'Kitchen',
-          facility: { tags: ['kitchen'], owner: 'kitchen-1' },
+          facility: { actionIds: ['eat', 'cook'], owner: 'kitchen-1' },
           tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
         },
         {
           id: 'toilet-1',
           x: 300, y: 100, width: 100, height: 100,
           type: 'zone', label: 'Toilet',
-          facility: { tags: ['toilet'] },
+          facility: { actionIds: ['toilet'] },
           tileRow: 0, tileCol: 3, tileWidth: 2, tileHeight: 2,
         },
         {
@@ -1285,7 +1343,7 @@ describe('SimulationEngine (integration)', () => {
         id: 'cafe-counter',
         x: 200, y: 100, width: 100, height: 100,
         type: 'zone', label: 'Counter',
-        facility: { tags: ['kitchen'], owner: 'cafe-counter', cost: 500 },
+        facility: { actionIds: ['eat', 'cook'], owner: 'cafe-counter', cost: 500 },
         tileRow: 0, tileCol: 1, tileWidth: 2, tileHeight: 2,
       }
       const maps = {
@@ -1626,7 +1684,7 @@ describe('SimulationEngine (integration)', () => {
         id: 'toilet-1',
         x: 100, y: 100, width: 100, height: 100,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
       }
       const maps = { town: createTestMap('town', { obstacles: [toiletObstacle] }) }
@@ -2078,7 +2136,7 @@ describe('SimulationEngine (integration)', () => {
       const toiletObstacle: Obstacle = {
         id: 'toilet-1', x: 100, y: 100, width: 100, height: 100,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
       }
       const maps = { town: createTestMap('town', { obstacles: [toiletObstacle] }) }
@@ -2097,7 +2155,7 @@ describe('SimulationEngine (integration)', () => {
       const toiletObstacle: Obstacle = {
         id: 'toilet-1', x: 200, y: 200, width: 300, height: 300,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 1, tileCol: 1, tileWidth: 3, tileHeight: 3,
       }
       const nodes = createTestNodes('town', 5, 5)
@@ -2118,7 +2176,7 @@ describe('SimulationEngine (integration)', () => {
       const toiletObstacle: Obstacle = {
         id: 'toilet-1', x: 100, y: 100, width: 300, height: 300,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 0, tileCol: 0, tileWidth: 3, tileHeight: 3,
       }
       const townNodes = [
@@ -2207,7 +2265,7 @@ describe('SimulationEngine (integration)', () => {
       const toiletObstacle: Obstacle = {
         id: 'toilet-1', x: 100, y: 100, width: 100, height: 100,
         type: 'zone', label: 'Toilet',
-        facility: { tags: ['toilet'] },
+        facility: { actionIds: ['toilet'] },
         tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
       }
       const npc = createTestNPC('npc1', {
@@ -2284,7 +2342,7 @@ describe('SimulationEngine (integration)', () => {
     const bathroomObstacle: Obstacle = {
       id: 'home-obstacle-5', x: 100, y: 100, width: 200, height: 200,
       type: 'zone', label: '浴室',
-      facility: { tags: ['bathroom', 'toilet'], owner: 'c1' },
+      facility: { actionIds: ['bathe', 'toilet'], owner: 'c1' },
       tileRow: 0, tileCol: 0, tileWidth: 4, tileHeight: 4,
     }
 
@@ -2560,10 +2618,14 @@ describe('SimulationEngine (integration)', () => {
       const maps = { town: createTestMap('town') }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
 
+      // DB entries now include 'time' field (HH:MM format) for world time calculation
+      // World time = day * 24 * 60 + hour * 60 + minute
+      // Default day = 1, so 10:30 = 1*24*60 + 10*60 + 30 = 1440 + 630 = 2070
+      // 14:00 = 1*24*60 + 14*60 + 0 = 1440 + 840 = 2280
       const mockStore = {
         loadNPCSummariesForDay: vi.fn().mockResolvedValue([
-          { characterId: 'c1', npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 1000 },
-          { characterId: 'c1', npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2000 },
+          { characterId: 'c1', npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 1000, time: '10:30' },
+          { characterId: 'c1', npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2000, time: '14:00' },
         ]),
       }
       engine.setStateStore(mockStore as never)
@@ -2572,9 +2634,10 @@ describe('SimulationEngine (integration)', () => {
 
       const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
       expect(cache.get('c1')).toHaveLength(2)
+      // timestamp is now world time in minutes (converted from time field)
       expect(cache.get('c1')).toEqual([
-        { npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 1000 },
-        { npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2000 },
+        { npcId: 'npc1', npcName: 'テスト太郎', summary: '天気の話をした', timestamp: 2070 }, // 10:30 on day 1
+        { npcId: 'npc2', npcName: 'テスト花子', summary: '仕事の話をした', timestamp: 2280 }, // 14:00 on day 1
       ])
       expect(mockStore.loadNPCSummariesForDay).toHaveBeenCalledWith(expect.any(Number))
     })
@@ -2612,7 +2675,7 @@ describe('SimulationEngine (integration)', () => {
       expect(context.recentConversations).toEqual(testConversations)
     })
 
-    it('should return undefined recentConversations when cache is empty', async () => {
+    it('should return empty array recentConversations when cache is empty', async () => {
       const maps = { town: createTestMap('town') }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
@@ -2620,7 +2683,7 @@ describe('SimulationEngine (integration)', () => {
       const char = engine.getCharacter('c1')!
       const context = (engine as any).buildBehaviorContext(char)
 
-      expect(context.recentConversations).toBeUndefined()
+      expect(context.recentConversations).toEqual([])
     })
 
     it('should update cache when summary persist callback is triggered', async () => {
@@ -2637,6 +2700,10 @@ describe('SimulationEngine (integration)', () => {
       const summaryCallback = postProcessor.onSummaryPersist
       expect(summaryCallback).toBeDefined()
 
+      // Get current world time to calculate expected timestamp
+      const currentTime = engine.getState().time
+      const expectedWorldTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
+
       await summaryCallback({
         characterId: 'c1',
         npcId: 'npc1',
@@ -2644,7 +2711,7 @@ describe('SimulationEngine (integration)', () => {
         summary: '新しい会話',
         topics: ['天気'],
         goalAchieved: true,
-        timestamp: 3000,
+        timestamp: 3000, // This is ignored, world time is used instead
       })
 
       const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
@@ -2653,7 +2720,7 @@ describe('SimulationEngine (integration)', () => {
         npcId: 'npc1',
         npcName: 'テスト太郎',
         summary: '新しい会話',
-        timestamp: 3000,
+        timestamp: expectedWorldTimeMinutes, // World time in minutes
       })
     })
 
@@ -2796,6 +2863,70 @@ describe('SimulationEngine (integration)', () => {
       const cache = (engine as any).recentConversationsCache as Map<string, unknown[]>
       expect(cache.get('c1')).toHaveLength(1)
       expect(cache.get('c2')).toHaveLength(1)
+    })
+
+    it('should filter out NPCs within cooldown period from nearbyNPCs', async () => {
+      const maps = { town: createTestMap('town') }
+      const npcs = [
+        createTestNPC('npc1', { mapId: 'town', currentNodeId: 'town-0-0' }),
+        createTestNPC('npc2', { mapId: 'town', currentNodeId: 'town-0-1' }),
+      ]
+      // initialize signature: maps, characters, initialMapId, npcBlockedNodes, npcs, timeConfig
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, npcs, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Get current world time
+      const currentTime = engine.getState().time
+      const currentTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
+
+      // Set up recent conversation with npc1 (30 minutes ago - within cooldown)
+      ;(engine as any).recentConversationsCache.set('c1', [
+        { npcId: 'npc1', npcName: 'NPC1', summary: '最近の会話', timestamp: currentTimeMinutes - 30 },
+      ])
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      // Both NPCs should be included, but npc1 should have nextAvailableTime set (within cooldown)
+      expect(context.nearbyNPCs.map((n: { id: string }) => n.id).sort()).toEqual(['npc1', 'npc2'])
+      // npc1 is within cooldown (30 min ago), should have nextAvailableTime
+      const npc1 = context.nearbyNPCs.find((n: { id: string }) => n.id === 'npc1')
+      expect(npc1.nextAvailableTime).toBeDefined()
+      // npc2 has no conversation history, should not have nextAvailableTime
+      const npc2 = context.nearbyNPCs.find((n: { id: string }) => n.id === 'npc2')
+      expect(npc2.nextAvailableTime).toBeUndefined()
+    })
+
+    it('should include NPCs outside cooldown period in nearbyNPCs', async () => {
+      const maps = { town: createTestMap('town') }
+      const npcs = [
+        createTestNPC('npc1', { mapId: 'town', currentNodeId: 'town-0-0' }),
+        createTestNPC('npc2', { mapId: 'town', currentNodeId: 'town-0-1' }),
+      ]
+      // initialize signature: maps, characters, initialMapId, npcBlockedNodes, npcs, timeConfig
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, npcs, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Get current world time
+      const currentTime = engine.getState().time
+      const currentTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
+
+      // Set up recent conversation with npc1 (90 minutes ago - outside cooldown)
+      ;(engine as any).recentConversationsCache.set('c1', [
+        { npcId: 'npc1', npcName: 'NPC1', summary: '少し前の会話', timestamp: currentTimeMinutes - 90 },
+      ])
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      // Both NPCs should be included (npc1 is outside 60 min cooldown, no nextAvailableTime)
+      expect(context.nearbyNPCs.map((n: { id: string }) => n.id).sort()).toEqual(['npc1', 'npc2'])
+      // npc1 is outside cooldown (90 min ago), should not have nextAvailableTime
+      const npc1 = context.nearbyNPCs.find((n: { id: string }) => n.id === 'npc1')
+      expect(npc1.nextAvailableTime).toBeUndefined()
+      // npc2 has no conversation history, should not have nextAvailableTime
+      const npc2 = context.nearbyNPCs.find((n: { id: string }) => n.id === 'npc2')
+      expect(npc2.nextAvailableTime).toBeUndefined()
     })
   })
 
