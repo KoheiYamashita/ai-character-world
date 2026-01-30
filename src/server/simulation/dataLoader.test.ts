@@ -43,7 +43,7 @@ const mockWorldConfig = {
     characterFallback: { fill: 'white', stroke: 'black', strokeWidth: 2, radius: 16 },
     transition: { overlayColor: 'black' },
   },
-  initialState: { mapId: 'town', time: { hour: 8, minute: 0, day: 1 } },
+  initialState: { time: { hour: 8, minute: 0, day: 1 } },
   paths: { mapsJson: '/data/maps.json', charactersJson: '/data/characters.json' },
   time: { timezone: 'Asia/Tokyo', statusDecayIntervalMs: 60000, decayRates: { satietyPerMinute: 0.1, energyPerMinute: 0.1, hygienePerMinute: 0.05, moodPerMinute: 0.05, bladderPerMinute: 0.15 } },
 }
@@ -51,13 +51,13 @@ const mockWorldConfig = {
 const mockMapsData = {
   maps: [
     {
-      id: 'town',
-      name: 'Town',
+      id: 'home',
+      name: 'Home',
       width: 800,
       height: 600,
       backgroundColor: '0x333333',
-      spawnNodeId: 'town-0-0',
-      grid: { prefix: 'town', cols: 3, rows: 3 },
+      spawnNodeId: 'home-0-0',
+      grid: { prefix: 'home', cols: 3, rows: 3 },
       labels: [],
       entrances: [],
       obstacles: [],
@@ -91,7 +91,7 @@ describe('dataLoader', () => {
     it('should load and parse world config JSON', async () => {
       vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(mockWorldConfig))
       const config = await dataLoader.loadWorldConfigServer()
-      expect(config.initialState.mapId).toBe('town')
+      expect(config.initialState.time.hour).toBe(8)
       expect(config.grid.defaultCols).toBe(12)
     })
   })
@@ -102,9 +102,9 @@ describe('dataLoader', () => {
         .mockResolvedValueOnce(JSON.stringify(mockWorldConfig)) // config
         .mockResolvedValueOnce(JSON.stringify(mockMapsData))    // maps
       const maps = await dataLoader.loadMapsServer()
-      expect(maps['town']).toBeDefined()
-      expect(maps['town'].id).toBe('town')
-      expect(maps['town'].nodes.length).toBeGreaterThan(0)
+      expect(maps['home']).toBeDefined()
+      expect(maps['home'].id).toBe('home')
+      expect(maps['home'].nodes.length).toBeGreaterThan(0)
     })
 
     it('should parse backgroundColor from hex string', async () => {
@@ -112,7 +112,7 @@ describe('dataLoader', () => {
         .mockResolvedValueOnce(JSON.stringify(mockWorldConfig))
         .mockResolvedValueOnce(JSON.stringify(mockMapsData))
       const maps = await dataLoader.loadMapsServer()
-      expect(maps['town'].backgroundColor).toBe(0x333333)
+      expect(maps['home'].backgroundColor).toBe(0x333333)
     })
 
     it('should handle # prefix in backgroundColor', async () => {
@@ -126,7 +126,7 @@ describe('dataLoader', () => {
         .mockResolvedValueOnce(JSON.stringify(mockWorldConfig))
         .mockResolvedValueOnce(JSON.stringify(mapsWithHash))
       const maps = await dataLoader.loadMapsServer()
-      expect(maps['town'].backgroundColor).toBe(0xFF0000)
+      expect(maps['home'].backgroundColor).toBe(0xFF0000)
     })
 
     it('should convert obstacles from tile to pixel coordinates', async () => {
@@ -140,9 +140,9 @@ describe('dataLoader', () => {
         .mockResolvedValueOnce(JSON.stringify(mockWorldConfig))
         .mockResolvedValueOnce(JSON.stringify(mapsWithObs))
       const maps = await dataLoader.loadMapsServer()
-      expect(maps['town'].obstacles).toHaveLength(1)
-      expect(maps['town'].obstacles[0].label).toBe('Table')
-      expect(maps['town'].obstacles[0].type).toBe('building')
+      expect(maps['home'].obstacles).toHaveLength(1)
+      expect(maps['home'].obstacles[0].label).toBe('Table')
+      expect(maps['home'].obstacles[0].type).toBe('building')
     })
   })
 
@@ -157,7 +157,29 @@ describe('dataLoader', () => {
       expect(characters[0].id).toBe('char1')
       expect(characters[0].name).toBe('Test Character')
       expect(characters[0].money).toBe(100)
-      expect(characters[0].currentMapId).toBe('town')
+      expect(characters[0].currentMapId).toBe('home')
+    })
+
+    it('should throw error when home map is not found', async () => {
+      const mapsWithoutHome = {
+        maps: [{
+          id: 'town',
+          name: 'Town',
+          width: 800,
+          height: 600,
+          backgroundColor: '0x333333',
+          spawnNodeId: 'town-0-0',
+          grid: { prefix: 'town', cols: 3, rows: 3 },
+          labels: [],
+          entrances: [],
+          obstacles: [],
+        }],
+      }
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(mockWorldConfig))      // 1. loadWorldConfigServer
+        .mockResolvedValueOnce(JSON.stringify(mockCharactersData))   // 2. characters.json
+        .mockResolvedValueOnce(JSON.stringify(mapsWithoutHome))      // 3. maps.json (no home map)
+      await expect(dataLoader.loadCharactersServer()).rejects.toThrow('Required "home" map not found in maps.json')
     })
   })
 
@@ -166,15 +188,15 @@ describe('dataLoader', () => {
       const mapsWithNPCs = {
         maps: [{
           ...mockMapsData.maps[0],
-          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'town-1-1' }],
+          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'home-1-1' }],
         }],
       }
       vi.mocked(fs.promises.readFile)
         .mockResolvedValueOnce(JSON.stringify(mockWorldConfig))
         .mockResolvedValueOnce(JSON.stringify(mapsWithNPCs))
       const blocked = await dataLoader.loadNPCBlockedNodesServer()
-      expect(blocked.get('town')).toBeDefined()
-      expect(blocked.get('town')!.has('town-1-1')).toBe(true)
+      expect(blocked.get('home')).toBeDefined()
+      expect(blocked.get('home')!.has('home-1-1')).toBe(true)
     })
 
     it('should return empty map when no NPCs', async () => {
@@ -260,7 +282,7 @@ describe('dataLoader', () => {
       const mapsWithZoneNoWalls = {
         maps: [{
           ...mockMapsData.maps[0],
-          grid: { prefix: 'town', cols: 4, rows: 4 },
+          grid: { prefix: 'home', cols: 4, rows: 4 },
           obstacles: [{
             row: 1, col: 1, tileWidth: 2, tileHeight: 2,
             label: 'Open Area',
@@ -274,7 +296,7 @@ describe('dataLoader', () => {
         .mockResolvedValueOnce(JSON.stringify(mapsWithZoneNoWalls))
       const maps = await dataLoader.loadMapsServer()
       // 壁なしzoneなら全ノード生成される（4x4 = 16ノード）
-      expect(maps['town'].nodes.length).toBe(16)
+      expect(maps['home'].nodes.length).toBe(16)
     })
   })
 
@@ -287,7 +309,7 @@ describe('dataLoader', () => {
             id: 'npc1',
             name: 'TestNPC',
             sprite: { sheetUrl: 'npc.png' },
-            spawnNodeId: 'town-1-1',
+            spawnNodeId: 'home-1-1',
             personality: '明るく社交的',
             tendencies: ['話好き', '親切'],
             facts: ['花屋で働いている'],
@@ -303,8 +325,8 @@ describe('dataLoader', () => {
       expect(npcs).toHaveLength(1)
       expect(npcs[0].id).toBe('npc1')
       expect(npcs[0].name).toBe('TestNPC')
-      expect(npcs[0].mapId).toBe('town')
-      expect(npcs[0].currentNodeId).toBe('town-1-1')
+      expect(npcs[0].mapId).toBe('home')
+      expect(npcs[0].currentNodeId).toBe('home-1-1')
       expect(npcs[0].direction).toBe('down')
       expect(npcs[0].position.x).toBeGreaterThan(0)
       expect(npcs[0].position.y).toBeGreaterThan(0)
@@ -324,7 +346,7 @@ describe('dataLoader', () => {
       const mapsWithBadNPC = {
         maps: [{
           ...mockMapsData.maps[0],
-          npcs: [{ id: 'npc1', name: 'BadNPC', sprite: {}, spawnNodeId: 'town-99-99' }],
+          npcs: [{ id: 'npc1', name: 'BadNPC', sprite: {}, spawnNodeId: 'home-99-99' }],
         }],
       }
       vi.mocked(fs.promises.readFile)
@@ -363,7 +385,7 @@ describe('dataLoader', () => {
       const mapsWithNPCs = {
         maps: [{
           ...mockMapsData.maps[0],
-          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'town-0-0' }],
+          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'home-0-0' }],
         }],
       }
       const charsWithSchedule = {
@@ -396,7 +418,7 @@ describe('dataLoader', () => {
 
       const data = await dataLoader.loadWorldDataServer()
       expect(data.config).toBeDefined()
-      expect(data.maps['town']).toBeDefined()
+      expect(data.maps['home']).toBeDefined()
       expect(data.characters).toHaveLength(1)
       expect(data.npcBlockedNodes).toBeInstanceOf(Map)
       expect(data.defaultSchedules).toBeInstanceOf(Map)

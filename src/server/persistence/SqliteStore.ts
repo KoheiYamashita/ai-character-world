@@ -498,7 +498,7 @@ export class SqliteStore implements StateStore {
       VALUES (
         1,
         COALESCE(@server_start_time, (SELECT server_start_time FROM server_state WHERE id = 1), @fallback_time),
-        COALESCE(@current_map_id, (SELECT current_map_id FROM server_state WHERE id = 1), 'town'),
+        COALESCE(@current_map_id, (SELECT current_map_id FROM server_state WHERE id = 1), 'home'),
         @updated_at
       )
     `)

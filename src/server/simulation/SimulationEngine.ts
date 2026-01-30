@@ -78,6 +78,8 @@ export class SimulationEngine {
   private activeActionRowIds: Map<string, number> = new Map()
   // Track last day for day-change detection (schedule cache refresh)
   private lastDay: number = 1
+  // Action restrictions (consecutive action limit)
+  private maxConsecutiveSameAction: number = 3
   // Status interrupt threshold (design: 10%)
   private static readonly INTERRUPT_THRESHOLD = 10
   // System auto-move interval (every N actions)
@@ -802,6 +804,10 @@ export class SimulationEngine {
       availableActions = availableActions.filter(action => action !== 'talk')
     }
 
+    // Apply consecutive action limit filter
+    const todayActions = this.getActionHistoryForCharacter(character.id)
+    availableActions = this.filterActionsByConsecutiveLimit(availableActions, todayActions)
+
     // After system auto-move, don't allow pure 'move' action (which would trigger another behavior decision)
     // But allow nearbyFacilities (action + move is atomic, no talk can occur in between)
     const nearbyMaps = character.afterSystemAutoMove ? [] : this.buildNearbyMaps(character.currentMapId)
@@ -818,7 +824,7 @@ export class SimulationEngine {
       nearbyMaps,
       recentConversations: filterForBehaviorDecision(recentConversations),
       midTermMemories: this.midTermMemoriesCache.get(character.id),
-      todayActions: includeTodayActions ? this.getActionHistoryForCharacter(character.id) : undefined,
+      todayActions: includeTodayActions ? todayActions : undefined,
     }
   }
 
@@ -1372,30 +1378,51 @@ export class SimulationEngine {
   }
 
   /**
+   * マップから施設情報を抽出（共通ヘルパー）
+   */
+  private extractFacilitiesFromMap(map: WorldMap, mapId: string, distance: number): NearbyFacility[] {
+    const facilities: NearbyFacility[] = []
+    for (const obstacle of map.obstacles) {
+      if (!obstacle.facility) continue
+      if (obstacle.facility.actionIds.length === 0) continue
+
+      facilities.push({
+        id: obstacle.id,
+        label: obstacle.label || obstacle.id,
+        actionIds: obstacle.facility.actionIds,
+        cost: obstacle.facility.cost,
+        quality: obstacle.facility.quality,
+        distance,
+        mapId,
+      })
+    }
+    return facilities
+  }
+
+  /**
    * 他マップの施設を収集（現在マップは除外、distance > 0 のみ）
+   * homeマップの施設は、現在位置に関わらず常に含める
    */
   private buildNearbyFacilities(currentMapId: string): NearbyFacility[] {
-    return this.traverseNearbyMaps(currentMapId, (map, mapId, distance) => {
+    const facilities = this.traverseNearbyMaps(currentMapId, (map, mapId, distance) => {
       // 現在マップの施設は除外
       if (distance === 0) return []
-
-      const facilities: NearbyFacility[] = []
-      for (const obstacle of map.obstacles) {
-        if (!obstacle.facility) continue
-        if (obstacle.facility.actionIds.length === 0) continue
-
-        facilities.push({
-          id: obstacle.id,
-          label: obstacle.label || obstacle.id,
-          actionIds: obstacle.facility.actionIds,
-          cost: obstacle.facility.cost,
-          quality: obstacle.facility.quality,
-          distance,
-          mapId,
-        })
-      }
-      return facilities
+      return this.extractFacilitiesFromMap(map, mapId, distance)
     })
+
+    // homeマップの施設を常に含める（現在マップがhomeでなく、BFS結果に含まれていない場合）
+    if (currentMapId !== 'home') {
+      const homeAlreadyIncluded = facilities.some(f => f.mapId === 'home')
+      if (!homeAlreadyIncluded) {
+        const homeMap = this.worldState.getMap('home')
+        if (homeMap) {
+          // distance: 10 - 3ホップより遠いが常に利用可能
+          facilities.push(...this.extractFacilitiesFromMap(homeMap, 'home', 10))
+        }
+      }
+    }
+
+    return facilities
   }
 
   /**
@@ -1795,6 +1822,37 @@ export class SimulationEngine {
     const currentDay = this.worldState.getTime().day
     const cacheKey = this.characterDayCacheKey(characterId, currentDay)
     return this.actionHistoryCache.get(cacheKey) ?? []
+  }
+
+  /**
+   * Count consecutive trailing occurrences of a specific action from the end of history
+   */
+  private countConsecutiveTrailingAction(
+    actions: ActionHistoryEntry[],
+    actionId: string
+  ): number {
+    let count = 0
+    for (let i = actions.length - 1; i >= 0; i--) {
+      if (actions[i].actionId === actionId) {
+        count++
+      } else {
+        break
+      }
+    }
+    return count
+  }
+
+  /**
+   * Filter available actions based on consecutive execution limit
+   */
+  private filterActionsByConsecutiveLimit(
+    availableActions: ActionId[],
+    todayActions: ActionHistoryEntry[]
+  ): ActionId[] {
+    return availableActions.filter(action => {
+      const consecutiveCount = this.countConsecutiveTrailingAction(todayActions, action)
+      return consecutiveCount < this.maxConsecutiveSameAction
+    })
   }
 
   // Load action history from DB into cache for all characters on current day
@@ -2268,6 +2326,12 @@ export class SimulationEngine {
     console.log(`[SimulationEngine] Action configs set`)
   }
 
+  // Set action restrictions config
+  setActionRestrictions(restrictions: import('@/types').ActionRestrictions): void {
+    this.maxConsecutiveSameAction = restrictions.maxConsecutiveSameAction
+    console.log(`[SimulationEngine] Action restrictions set (maxConsecutiveSameAction: ${this.maxConsecutiveSameAction})`)
+  }
+
   // Set mini episode config (creates LLMMiniEpisodeGenerator if LLM is available)
   async setMiniEpisodeConfig(config: MiniEpisodeConfig): Promise<void> {
     const { isLLMAvailable } = await import('../llm')
@@ -2417,8 +2481,8 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         // Set NPC blocked nodes (not persisted, loaded fresh)
         engine.initializeNPCsAndConfig(npcBlockedNodes, npcs, config.time, defaultSchedules)
       } else {
-        // Fresh initialization
-        await engine.initialize(maps, characters, config.initialState.mapId, npcBlockedNodes, npcs, config.time, defaultSchedules)
+        // Fresh initialization - home map is always the initial map
+        await engine.initialize(maps, characters, 'home', npcBlockedNodes, npcs, config.time, defaultSchedules)
 
         // Save server start time on fresh start
         await stateStore.saveServerStartTime(engine.getServerStartTime())
@@ -2437,6 +2501,11 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
       // Set action configs for ActionExecutor and LLMBehaviorDecider
       if (config.actions) {
         engine.setActionConfigs(config.actions)
+      }
+
+      // Set action restrictions
+      if (config.actionRestrictions) {
+        engine.setActionRestrictions(config.actionRestrictions)
       }
 
       // Set mini episode config

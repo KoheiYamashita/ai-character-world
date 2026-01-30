@@ -3,7 +3,7 @@ import type { WorldTime, TransitionState } from '@/types'
 import type { SimCharacter } from '@/server/simulation/types'
 
 // Initial state defaults (will be overridden when config loads in PixiAppSync)
-const INITIAL_MAP_ID = 'town'
+const INITIAL_MAP_ID = 'home'
 const INITIAL_TIME: WorldTime = { hour: 8, minute: 0, day: 1 }
 
 interface WorldStore {

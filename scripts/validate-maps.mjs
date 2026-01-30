@@ -22,6 +22,13 @@ const maps = JSON.parse(readFileSync(mapsPath, 'utf8')).maps
 
 let hasErrors = false
 
+// Check that required 'home' map exists
+const homeMap = maps.find(m => m.id === 'home')
+if (!homeMap) {
+  console.error('❌ 必須の "home" マップが見つかりません')
+  hasErrors = true
+}
+
 // Minimum sizes for obstacle types
 const MIN_BUILDING_SIZE = 2
 const MIN_ZONE_SIZE = 4

@@ -1359,6 +1359,95 @@ describe('SimulationEngine (integration)', () => {
       expect(facilities[0].distance).toBe(1)
       expect(facilities[0].cost).toBe(500)
     })
+
+    it('should always include home facilities even when not connected', async () => {
+      // town and park are not connected to home
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-entrance'] },
+        { id: 'town-entrance', x: 200, y: 100, type: 'entrance' as const, connectedTo: ['town-0-0'], leadsTo: { mapId: 'park', nodeId: 'park-entrance' } },
+      ]
+      const parkNodes = [
+        { id: 'park-entrance', x: 100, y: 100, type: 'entrance' as const, connectedTo: ['park-0-0'], leadsTo: { mapId: 'town', nodeId: 'town-entrance' } },
+        { id: 'park-0-0', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['park-entrance'] },
+      ]
+      const homeNodes = [
+        { id: 'home-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: [] },
+      ]
+      const homeObstacle: Obstacle = {
+        id: 'home-bed',
+        x: 100, y: 100, width: 100, height: 100,
+        type: 'zone', label: 'Bed',
+        facility: { actionIds: ['sleep', 'rest'], owner: 'home-bed' },
+        tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
+      }
+      const maps = {
+        town: createTestMap('town', { nodes: townNodes }),
+        park: createTestMap('park', { nodes: parkNodes }),
+        home: createTestMap('home', { nodes: homeNodes, obstacles: [homeObstacle] }),
+      }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town')
+
+      const facilities = (engine as any).buildNearbyFacilities('town')
+
+      // home facilities should be included even though home is not connected to town
+      const homeFacility = facilities.find((f: { mapId: string }) => f.mapId === 'home')
+      expect(homeFacility).toBeDefined()
+      expect(homeFacility.id).toBe('home-bed')
+      expect(homeFacility.distance).toBe(10) // special distance for always-available home
+    })
+
+    it('should not duplicate home facilities when already included via BFS', async () => {
+      // town is connected to home
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-entrance'] },
+        { id: 'town-entrance', x: 200, y: 100, type: 'entrance' as const, connectedTo: ['town-0-0'], leadsTo: { mapId: 'home', nodeId: 'home-entrance' } },
+      ]
+      const homeNodes = [
+        { id: 'home-entrance', x: 100, y: 100, type: 'entrance' as const, connectedTo: ['home-0-0'], leadsTo: { mapId: 'town', nodeId: 'town-entrance' } },
+        { id: 'home-0-0', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['home-entrance'] },
+      ]
+      const homeObstacle: Obstacle = {
+        id: 'home-bed',
+        x: 100, y: 100, width: 100, height: 100,
+        type: 'zone', label: 'Bed',
+        facility: { actionIds: ['sleep'], owner: 'home-bed' },
+        tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
+      }
+      const maps = {
+        town: createTestMap('town', { nodes: townNodes }),
+        home: createTestMap('home', { nodes: homeNodes, obstacles: [homeObstacle] }),
+      }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town')
+
+      const facilities = (engine as any).buildNearbyFacilities('town')
+
+      // home facilities should appear only once (via BFS, not duplicated)
+      const homeFacilities = facilities.filter((f: { mapId: string }) => f.mapId === 'home')
+      expect(homeFacilities.length).toBe(1)
+      expect(homeFacilities[0].distance).toBe(1) // via BFS, not 10
+    })
+
+    it('should not include home facilities when current map is home', async () => {
+      const homeNodes = [
+        { id: 'home-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: [] },
+      ]
+      const homeObstacle: Obstacle = {
+        id: 'home-bed',
+        x: 100, y: 100, width: 100, height: 100,
+        type: 'zone', label: 'Bed',
+        facility: { actionIds: ['sleep'], owner: 'home-bed' },
+        tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
+      }
+      const maps = {
+        home: createTestMap('home', { nodes: homeNodes, obstacles: [homeObstacle] }),
+      }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'home')
+
+      const facilities = (engine as any).buildNearbyFacilities('home')
+
+      // When on home map, buildNearbyFacilities should not include home (current map excluded)
+      expect(facilities.length).toBe(0)
+    })
   })
 
   describe('buildNearbyMaps', () => {
@@ -3110,6 +3199,120 @@ describe('SimulationEngine (integration)', () => {
       // Should not throw for non-existent character
       await (engine as any).generateMiniEpisode('nonexistent', 'eat', null, '10:00', 1)
       expect(mockGenerator.generate).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Consecutive Action Limit', () => {
+    it('should count consecutive trailing actions correctly', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const countFn = (engine as any).countConsecutiveTrailingAction.bind(engine)
+
+      // Empty history
+      expect(countFn([], 'eat')).toBe(0)
+
+      // No trailing match
+      expect(countFn([
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'sleep' },
+      ], 'eat')).toBe(0)
+
+      // One trailing match
+      expect(countFn([
+        { time: '08:00', actionId: 'sleep' },
+        { time: '09:00', actionId: 'eat' },
+      ], 'eat')).toBe(1)
+
+      // Multiple trailing matches
+      expect(countFn([
+        { time: '08:00', actionId: 'sleep' },
+        { time: '09:00', actionId: 'eat' },
+        { time: '10:00', actionId: 'eat' },
+        { time: '11:00', actionId: 'eat' },
+      ], 'eat')).toBe(3)
+
+      // All same action
+      expect(countFn([
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'eat' },
+        { time: '10:00', actionId: 'eat' },
+      ], 'eat')).toBe(3)
+    })
+
+    it('should filter actions that exceed consecutive limit', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Set limit to 2
+      engine.setActionRestrictions({ maxConsecutiveSameAction: 2 })
+
+      const filterFn = (engine as any).filterActionsByConsecutiveLimit.bind(engine)
+
+      // No history - all actions available
+      const allActions = ['eat', 'sleep', 'rest'] as const
+      expect(filterFn([...allActions], [])).toEqual(['eat', 'sleep', 'rest'])
+
+      // eat executed 1 time - still available
+      expect(filterFn([...allActions], [
+        { time: '08:00', actionId: 'eat' },
+      ])).toEqual(['eat', 'sleep', 'rest'])
+
+      // eat executed 2 times consecutively - should be filtered
+      expect(filterFn([...allActions], [
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'eat' },
+      ])).toEqual(['sleep', 'rest'])
+
+      // eat executed 2 times, but not consecutively - still available
+      expect(filterFn([...allActions], [
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'sleep' },
+        { time: '10:00', actionId: 'eat' },
+      ])).toEqual(['eat', 'sleep', 'rest'])
+    })
+
+    it('should use default limit of 3 when not configured', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      const filterFn = (engine as any).filterActionsByConsecutiveLimit.bind(engine)
+      const allActions = ['eat', 'sleep'] as const
+
+      // 2 consecutive - still available
+      expect(filterFn([...allActions], [
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'eat' },
+      ])).toEqual(['eat', 'sleep'])
+
+      // 3 consecutive - should be filtered (default limit is 3)
+      expect(filterFn([...allActions], [
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'eat' },
+        { time: '10:00', actionId: 'eat' },
+      ])).toEqual(['sleep'])
+    })
+
+    it('should apply consecutive limit filter in buildBehaviorContext', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+      engine.setActionRestrictions({ maxConsecutiveSameAction: 2 })
+
+      // Populate action history cache with 2 consecutive 'eat' actions
+      const cacheKey = `1-c1` // day 1, character c1
+      ;(engine as any).actionHistoryCache.set(cacheKey, [
+        { time: '08:00', actionId: 'eat' },
+        { time: '09:00', actionId: 'eat' },
+      ])
+
+      const char = engine.getCharacter('c1')!
+      const context = (engine as any).buildBehaviorContext(char)
+
+      // 'eat' should be filtered out from availableActions
+      expect(context.availableActions).not.toContain('eat')
+      // Other actions should still be available (depending on testActionConfigs)
+      expect(context.availableActions.length).toBeGreaterThan(0)
     })
   })
 })

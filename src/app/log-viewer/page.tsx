@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Script from 'next/script';
+import { ACTION_INFO } from '@/lib/uiLabels';
 
 type Database = {
   exec: (sql: string) => { columns: string[]; values: unknown[][] }[];
@@ -33,13 +34,6 @@ type ServerState = {
   current_map_id: string | null;
 };
 
-type Schedule = {
-  character_id: string;
-  character_name: string | null;
-  day: number;
-  entries: string;
-};
-
 type ActionHistory = {
   id: number;
   character_id: string;
@@ -51,6 +45,44 @@ type ActionHistory = {
   duration_minutes: number | null;
   reason: string | null;
   created_at: number;
+};
+
+type NpcSummary = {
+  id: number;
+  character_id: string;
+  character_name: string | null;
+  npc_id: string;
+  npc_name: string;
+  summary: string;
+  topics: string;
+  affinity_change: number | null;
+  day: number;
+  time: string | null;
+};
+
+type Schedule = {
+  character_id: string;
+  character_name: string | null;
+  day: number;
+  entries: string;
+};
+
+type ScheduleEntry = {
+  time?: string;
+  activity?: string;
+  location?: string;
+  note?: string;
+};
+
+// タイムラインイベント統合型
+type TimelineEvent = {
+  type: 'action' | 'schedule' | 'conversation';
+  day: number;
+  time: string;
+  sortKey: string; // ソート用: "day-time"
+  characterId: string;
+  characterName: string;
+  data: ActionHistory | { entry: ScheduleEntry; schedule: Schedule } | NpcSummary;
 };
 
 declare global {
@@ -68,20 +100,16 @@ export default function LogViewer() {
   const [activeTab, setActiveTab] = useState('overview');
   const [sqlJsLoaded, setSqlJsLoaded] = useState(false);
 
-  // Filters
-  const [scheduleCharFilter, setScheduleCharFilter] = useState('');
-  const [scheduleDayFilter, setScheduleDayFilter] = useState('');
-  const [historyCharFilter, setHistoryCharFilter] = useState('');
-  const [historyDayFilter, setHistoryDayFilter] = useState('');
-  const [historyActionFilter, setHistoryActionFilter] = useState('');
+  // Timeline Filters
+  const [timelineCharFilter, setTimelineCharFilter] = useState('');
+  const [timelineDayFilter, setTimelineDayFilter] = useState('');
+  const [timelineEventTypeFilter, setTimelineEventTypeFilter] = useState<'' | 'action' | 'schedule' | 'conversation'>('');
 
   // Data
   const [characters, setCharacters] = useState<CharacterState[]>([]);
   const [worldTime, setWorldTime] = useState<WorldTime | null>(null);
   const [serverState, setServerState] = useState<ServerState | null>(null);
-  const [scheduleDays, setScheduleDays] = useState<number[]>([]);
-  const [historyDays, setHistoryDays] = useState<number[]>([]);
-  const [actionIds, setActionIds] = useState<string[]>([]);
+  const [timelineDays, setTimelineDays] = useState<number[]>([]);
 
   const query = useCallback(
     <T,>(sql: string): T[] => {
@@ -139,21 +167,13 @@ export default function LogViewer() {
     setCharacters(query<CharacterState>('SELECT * FROM character_states'));
     setWorldTime(query<WorldTime>('SELECT * FROM world_time')[0] || null);
     setServerState(query<ServerState>('SELECT * FROM server_state')[0] || null);
-    setScheduleDays(
-      query<{ day: number }>('SELECT DISTINCT day FROM schedules ORDER BY day').map(
-        (r) => r.day
-      )
-    );
-    setHistoryDays(
-      query<{ day: number }>(
-        'SELECT DISTINCT day FROM action_history ORDER BY day'
-      ).map((r) => r.day)
-    );
-    setActionIds(
-      query<{ action_id: string }>(
-        'SELECT DISTINCT action_id FROM action_history ORDER BY action_id'
-      ).map((r) => r.action_id)
-    );
+
+    // タイムライン用日付（3テーブルのユニオン）
+    const days = new Set<number>();
+    query<{ day: number }>('SELECT DISTINCT day FROM schedules').forEach(r => days.add(r.day));
+    query<{ day: number }>('SELECT DISTINCT day FROM action_history').forEach(r => days.add(r.day));
+    query<{ day: number }>('SELECT DISTINCT day FROM npc_summaries').forEach(r => days.add(r.day));
+    setTimelineDays([...days].sort((a, b) => a - b));
   }, [db, query]);
 
   const parseJson = (str: string | null) => {
@@ -180,26 +200,83 @@ export default function LogViewer() {
     return `${hour}:${min}`;
   };
 
-  const getSchedules = useCallback(() => {
+  // タイムラインイベントの取得・統合
+  const getTimelineEvents = useCallback((): TimelineEvent[] => {
     if (!db) return [];
-    let sql =
-      'SELECT s.*, c.name as character_name FROM schedules s LEFT JOIN character_states c ON s.character_id = c.id WHERE 1=1';
-    if (scheduleCharFilter) sql += ` AND s.character_id = '${scheduleCharFilter}'`;
-    if (scheduleDayFilter) sql += ` AND s.day = ${scheduleDayFilter}`;
-    sql += ' ORDER BY s.day, s.character_id';
-    return query<Schedule>(sql);
-  }, [db, query, scheduleCharFilter, scheduleDayFilter]);
+    const events: TimelineEvent[] = [];
 
-  const getHistory = useCallback(() => {
-    if (!db) return [];
-    let sql =
-      'SELECT h.*, c.name as character_name FROM action_history h LEFT JOIN character_states c ON h.character_id = c.id WHERE 1=1';
-    if (historyCharFilter) sql += ` AND h.character_id = '${historyCharFilter}'`;
-    if (historyDayFilter) sql += ` AND h.day = ${historyDayFilter}`;
-    if (historyActionFilter) sql += ` AND h.action_id = '${historyActionFilter}'`;
-    sql += ' ORDER BY h.day DESC, h.time DESC';
-    return query<ActionHistory>(sql);
-  }, [db, query, historyCharFilter, historyDayFilter, historyActionFilter]);
+    // 行動履歴
+    if (!timelineEventTypeFilter || timelineEventTypeFilter === 'action') {
+      let sql = 'SELECT h.*, c.name as character_name FROM action_history h LEFT JOIN character_states c ON h.character_id = c.id WHERE 1=1';
+      if (timelineCharFilter) sql += ` AND h.character_id = '${timelineCharFilter}'`;
+      if (timelineDayFilter) sql += ` AND h.day = ${timelineDayFilter}`;
+      sql += ' ORDER BY h.day, h.time';
+      const actions = query<ActionHistory>(sql);
+      actions.forEach(a => {
+        const time = a.time || '00:00';
+        events.push({
+          type: 'action',
+          day: a.day,
+          time,
+          sortKey: `${String(a.day).padStart(5, '0')}-${time}`,
+          characterId: a.character_id,
+          characterName: a.character_name || a.character_id,
+          data: a,
+        });
+      });
+    }
+
+    // スケジュール
+    if (!timelineEventTypeFilter || timelineEventTypeFilter === 'schedule') {
+      let sql = 'SELECT s.*, c.name as character_name FROM schedules s LEFT JOIN character_states c ON s.character_id = c.id WHERE 1=1';
+      if (timelineCharFilter) sql += ` AND s.character_id = '${timelineCharFilter}'`;
+      if (timelineDayFilter) sql += ` AND s.day = ${timelineDayFilter}`;
+      sql += ' ORDER BY s.day, s.character_id';
+      const schedules = query<Schedule>(sql);
+      schedules.forEach(s => {
+        const entries = parseJson(s.entries) as ScheduleEntry[] | null;
+        if (entries && Array.isArray(entries)) {
+          entries.forEach(entry => {
+            const time = entry.time || '00:00';
+            events.push({
+              type: 'schedule',
+              day: s.day,
+              time,
+              sortKey: `${String(s.day).padStart(5, '0')}-${time}`,
+              characterId: s.character_id,
+              characterName: s.character_name || s.character_id,
+              data: { entry, schedule: s },
+            });
+          });
+        }
+      });
+    }
+
+    // NPC会話サマリ
+    if (!timelineEventTypeFilter || timelineEventTypeFilter === 'conversation') {
+      let sql = `SELECT ns.*, c.name as character_name FROM npc_summaries ns LEFT JOIN character_states c ON ns.character_id = c.id WHERE 1=1`;
+      if (timelineCharFilter) sql += ` AND ns.character_id = '${timelineCharFilter}'`;
+      if (timelineDayFilter) sql += ` AND ns.day = ${timelineDayFilter}`;
+      sql += ' ORDER BY ns.day, ns.time';
+      const summaries = query<NpcSummary>(sql);
+      summaries.forEach(s => {
+        const time = s.time || '00:00';
+        events.push({
+          type: 'conversation',
+          day: s.day,
+          time,
+          sortKey: `${String(s.day).padStart(5, '0')}-${time}`,
+          characterId: s.character_id,
+          characterName: s.character_name || s.character_id,
+          data: s,
+        });
+      });
+    }
+
+    // 時系列でソート（降順: 新しいものが上）
+    events.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+    return events;
+  }, [db, query, parseJson, timelineCharFilter, timelineDayFilter, timelineEventTypeFilter]);
 
   return (
     <>
@@ -226,7 +303,7 @@ export default function LogViewer() {
           <>
             {/* Tabs */}
             <div className="flex gap-1 mb-5 flex-wrap">
-              {['overview', 'characters', 'schedules', 'history'].map((tab) => (
+              {['overview', 'characters', 'timeline'].map((tab) => (
                 <button
                   key={tab}
                   className={`px-5 py-2.5 rounded-t-lg border-none cursor-pointer text-sm transition-all ${
@@ -238,8 +315,7 @@ export default function LogViewer() {
                 >
                   {tab === 'overview' && '概要'}
                   {tab === 'characters' && 'キャラクター'}
-                  {tab === 'schedules' && 'スケジュール'}
-                  {tab === 'history' && '行動履歴'}
+                  {tab === 'timeline' && 'タイムライン'}
                 </button>
               ))}
             </div>
@@ -413,16 +489,17 @@ export default function LogViewer() {
                 </div>
               )}
 
-              {/* Schedules Tab */}
-              {activeTab === 'schedules' && (
+              {/* Timeline Tab */}
+              {activeTab === 'timeline' && (
                 <div>
+                  {/* フィルタ */}
                   <div className="flex gap-4 mb-5 flex-wrap items-center">
                     <div className="flex items-center gap-2">
                       <label className="text-gray-500 text-sm">キャラクター:</label>
                       <select
                         className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
-                        value={scheduleCharFilter}
-                        onChange={(e) => setScheduleCharFilter(e.target.value)}
+                        value={timelineCharFilter}
+                        onChange={(e) => setTimelineCharFilter(e.target.value)}
                       >
                         <option value="">全員</option>
                         {characters.map((c) => (
@@ -436,113 +513,11 @@ export default function LogViewer() {
                       <label className="text-gray-500 text-sm">日:</label>
                       <select
                         className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
-                        value={scheduleDayFilter}
-                        onChange={(e) => setScheduleDayFilter(e.target.value)}
+                        value={timelineDayFilter}
+                        onChange={(e) => setTimelineDayFilter(e.target.value)}
                       >
                         <option value="">全日</option>
-                        {scheduleDays.map((d) => (
-                          <option key={d} value={d}>
-                            Day {d}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {(() => {
-                    const schedules = getSchedules();
-                    if (schedules.length === 0) {
-                      return (
-                        <div className="text-center py-16 text-gray-600">
-                          スケジュールデータがありません
-                        </div>
-                      );
-                    }
-
-                    let currentChar: string | null = null;
-                    let currentDay: number | null = null;
-                    const elements: React.ReactNode[] = [];
-
-                    schedules.forEach((s, idx) => {
-                      const entries = parseJson(s.entries) || [];
-
-                      if (s.character_id !== currentChar || s.day !== currentDay) {
-                        currentChar = s.character_id;
-                        currentDay = s.day;
-                        elements.push(
-                          <div key={`header-${idx}`} className="mb-8">
-                            <h3 className="text-[#6dd5ed] text-base mb-4 pb-2.5 border-b border-[#3a3a5a]">
-                              {s.character_name || s.character_id} - Day {s.day}
-                            </h3>
-                            <div className="relative pl-8 before:content-[''] before:absolute before:left-2.5 before:top-0 before:bottom-0 before:w-0.5 before:bg-[#3a3a5a]">
-                              {entries.map(
-                                (
-                                  entry: {
-                                    time?: string;
-                                    activity?: string;
-                                    location?: string;
-                                    note?: string;
-                                  },
-                                  i: number
-                                ) => (
-                                  <div
-                                    key={i}
-                                    className="relative p-3 bg-[#1a1a2e] rounded-lg mb-2.5 before:content-[''] before:absolute before:-left-6 before:top-4 before:w-2.5 before:h-2.5 before:bg-[#6dd5ed] before:rounded-full"
-                                  >
-                                    <div className="text-[#6dd5ed] font-semibold mb-1">
-                                      {entry.time || '-'}
-                                    </div>
-                                    <div className="mb-1">{entry.activity || '-'}</div>
-                                    <div className="text-gray-500 text-xs">
-                                      📍 {entry.location || '-'}
-                                    </div>
-                                    {entry.note && (
-                                      <div className="text-gray-600 text-xs italic mt-1">
-                                        {entry.note}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          </div>
-                        );
-                      }
-                    });
-
-                    return elements;
-                  })()}
-                </div>
-              )}
-
-              {/* History Tab */}
-              {activeTab === 'history' && (
-                <div>
-                  <div className="flex gap-4 mb-5 flex-wrap items-center">
-                    <div className="flex items-center gap-2">
-                      <label className="text-gray-500 text-sm">キャラクター:</label>
-                      <select
-                        className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
-                        value={historyCharFilter}
-                        onChange={(e) => setHistoryCharFilter(e.target.value)}
-                      >
-                        <option value="">全員</option>
-                        {characters.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-gray-500 text-sm">日:</label>
-                      <select
-                        className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
-                        value={historyDayFilter}
-                        onChange={(e) => setHistoryDayFilter(e.target.value)}
-                      >
-                        <option value="">全日</option>
-                        {historyDays.map((d) => (
+                        {timelineDays.map((d) => (
                           <option key={d} value={d}>
                             Day {d}
                           </option>
@@ -550,65 +525,50 @@ export default function LogViewer() {
                       </select>
                     </div>
                     <div className="flex items-center gap-2">
-                      <label className="text-gray-500 text-sm">アクション:</label>
+                      <label className="text-gray-500 text-sm">種別:</label>
                       <select
                         className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
-                        value={historyActionFilter}
-                        onChange={(e) => setHistoryActionFilter(e.target.value)}
+                        value={timelineEventTypeFilter}
+                        onChange={(e) => setTimelineEventTypeFilter(e.target.value as '' | 'action' | 'schedule' | 'conversation')}
                       >
                         <option value="">全て</option>
-                        {actionIds.map((a) => (
-                          <option key={a} value={a}>
-                            {a}
-                          </option>
-                        ))}
+                        <option value="action">行動</option>
+                        <option value="schedule">予定</option>
+                        <option value="conversation">会話</option>
                       </select>
                     </div>
                   </div>
 
+                  {/* タイムライン表示 */}
                   {(() => {
-                    const history = getHistory();
-                    if (history.length === 0) {
+                    const events = getTimelineEvents();
+                    if (events.length === 0) {
                       return (
                         <div className="text-center py-16 text-gray-600">
-                          行動履歴データがありません
+                          タイムラインデータがありません
                         </div>
                       );
                     }
 
-                    return history.map((h, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-[#1a1a2e] rounded-lg p-4 mb-2.5"
-                      >
-                        <div className="flex justify-between items-start mb-2.5">
-                          <div>
-                            <span className="bg-[#3a3a6a] px-2 py-1 rounded text-xs text-[#6dd5ed]">
-                              {h.action_id || '-'}
-                            </span>
-                            <strong className="ml-2.5">
-                              {h.character_name || h.character_id}
-                            </strong>
-                          </div>
-                          <div className="text-gray-500 text-xs">
-                            Day {h.day} {h.time || ''}
-                          </div>
+                    // 日付ごとにグループ化
+                    const eventsByDay: Record<number, TimelineEvent[]> = {};
+                    events.forEach(e => {
+                      if (!eventsByDay[e.day]) eventsByDay[e.day] = [];
+                      eventsByDay[e.day].push(e);
+                    });
+
+                    const sortedDays = Object.keys(eventsByDay).map(Number).sort((a, b) => b - a);
+
+                    return sortedDays.map(day => (
+                      <div key={day} className="mb-8">
+                        <h3 className="text-[#6dd5ed] text-base mb-4 pb-2.5 border-b border-[#3a3a5a]">
+                          📅 Day {day}
+                        </h3>
+                        <div className="relative pl-8 before:content-[''] before:absolute before:left-2.5 before:top-0 before:bottom-0 before:w-0.5 before:bg-[#3a3a5a]">
+                          {eventsByDay[day].map((event, idx) => (
+                            <TimelineEventCard key={`${event.type}-${idx}`} event={event} escapeHtml={escapeHtml} />
+                          ))}
                         </div>
-                        <div className="text-gray-500 text-sm mb-2">
-                          対象: {h.target || '-'} | 所要時間:{' '}
-                          {h.duration_minutes ?? '-'}分
-                        </div>
-                        {h.reason && (
-                          <div className="bg-[#252540] p-2.5 rounded-md text-sm text-gray-400 leading-relaxed">
-                            <strong>判断理由:</strong>
-                            <br />
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: escapeHtml(h.reason).replace(/\n/g, '<br>'),
-                              }}
-                            />
-                          </div>
-                        )}
                       </div>
                     ));
                   })()}
@@ -701,4 +661,115 @@ function JsonSection({
       </pre>
     </div>
   );
+}
+
+// タイムラインイベントのスタイル設定
+const EVENT_STYLES: Record<TimelineEvent['type'], { color: string; icon: string }> = {
+  action: { color: 'bg-blue-500', icon: '' },
+  schedule: { color: 'bg-green-500', icon: '📋' },
+  conversation: { color: 'bg-purple-500', icon: '💬' },
+};
+
+// タイムラインイベントカード
+function TimelineEventCard({
+  event,
+  escapeHtml,
+}: {
+  event: TimelineEvent;
+  escapeHtml: (str: string | null) => string;
+}) {
+  const { color, icon } = EVENT_STYLES[event.type];
+
+  // 共通のカードラッパー
+  const cardBaseClass = `relative p-3 bg-[#1a1a2e] rounded-lg mb-2.5 before:content-[''] before:absolute before:-left-6 before:top-4 before:w-2.5 before:h-2.5 before:rounded-full before:${color}`;
+
+  // 共通のヘッダー部分
+  const renderHeader = (badgeContent: string) => (
+    <div className="flex justify-between items-start mb-1">
+      <div className="flex items-center gap-2">
+        <span className="text-[#6dd5ed] font-semibold">{event.time}</span>
+        <span className={`${color} px-1.5 py-0.5 rounded text-xs text-white`}>
+          {badgeContent}
+        </span>
+      </div>
+      <span className="text-gray-500 text-xs">{event.characterName}</span>
+    </div>
+  );
+
+  // 行動イベント
+  if (event.type === 'action') {
+    const action = event.data as ActionHistory;
+    const actionInfo = ACTION_INFO[action.action_id as keyof typeof ACTION_INFO];
+    const emoji = actionInfo?.emoji ?? '';
+    const label = actionInfo?.label ?? action.action_id;
+
+    return (
+      <div className={cardBaseClass}>
+        {renderHeader(`${emoji} ${label}`)}
+        {action.target && (
+          <div className="text-gray-400 text-sm mb-1">
+            📍 {action.target}
+            {action.duration_minutes && ` (${action.duration_minutes}分)`}
+          </div>
+        )}
+        {action.reason && (
+          <div className="text-gray-500 text-xs mt-1">
+            └─ {escapeHtml(action.reason).replace(/\n/g, ' ')}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // スケジュールイベント
+  if (event.type === 'schedule') {
+    const { entry } = event.data as { entry: ScheduleEntry; schedule: Schedule };
+
+    return (
+      <div className={cardBaseClass}>
+        {renderHeader(`${icon} 予定`)}
+        <div className="text-gray-300 mb-1">{entry.activity || '-'}</div>
+        {entry.location && (
+          <div className="text-gray-500 text-xs">📍 {entry.location}</div>
+        )}
+        {entry.note && (
+          <div className="text-gray-600 text-xs italic mt-1">{entry.note}</div>
+        )}
+      </div>
+    );
+  }
+
+  // 会話イベント
+  if (event.type === 'conversation') {
+    const summary = event.data as NpcSummary;
+    let topics: string[] = [];
+    try {
+      topics = JSON.parse(summary.topics);
+    } catch {
+      topics = summary.topics ? [summary.topics] : [];
+    }
+
+    return (
+      <div className={cardBaseClass}>
+        {renderHeader(`${icon} 会話 (${summary.npc_name}と)`)}
+        <div className="text-gray-300 text-sm mb-1">
+          └─ {summary.summary}
+        </div>
+        {topics.length > 0 && (
+          <div className="text-gray-500 text-xs mb-1">
+            話題: {topics.map((t, i) => (
+              <span key={i} className="bg-[#3a3a5a] px-1 py-0.5 rounded mr-1">{t}</span>
+            ))}
+          </div>
+        )}
+        {summary.affinity_change !== null && summary.affinity_change !== 0 && (
+          <div className={`text-xs ${summary.affinity_change > 0 ? 'text-green-400' : 'text-red-400'}`}>
+            好感度: {summary.affinity_change > 0 ? '+' : ''}{summary.affinity_change}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }

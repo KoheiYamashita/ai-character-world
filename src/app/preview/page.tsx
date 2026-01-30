@@ -10,7 +10,7 @@ const MapPreview = dynamic(() => import('@/components/world/MapPreview'), {
 
 function PreviewContent() {
   const searchParams = useSearchParams()
-  const mapId = searchParams.get('map') || 'town'
+  const mapId = searchParams.get('map') || 'home'
   return <MapPreview mapId={mapId} />
 }
 

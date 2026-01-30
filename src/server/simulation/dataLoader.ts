@@ -314,9 +314,13 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
   const charactersData: CharactersData = JSON.parse(content)
 
   // Get initial map and spawn position
+  // home map is required and always used as the initial map
   const maps = await loadMapsServer(cfg)
-  const initialMap = maps[cfg.initialState.mapId]
-  const spawnNode = initialMap?.nodes.find((n) => n.id === initialMap.spawnNodeId)
+  const initialMap = maps['home']
+  if (!initialMap) {
+    throw new Error('Required "home" map not found in maps.json')
+  }
+  const spawnNode = initialMap.nodes.find((n) => n.id === initialMap.spawnNodeId)
 
   const characters: Character[] = charactersData.characters.map((charConfig: CharacterConfig) => ({
     id: charConfig.id,
@@ -329,8 +333,8 @@ export async function loadCharactersServer(config?: WorldConfig): Promise<Charac
     mood: charConfig.defaultStats.mood,
     bladder: charConfig.defaultStats.bladder,
     fitness: charConfig.defaultStats.fitness,
-    currentMapId: cfg.initialState.mapId,
-    currentNodeId: initialMap?.spawnNodeId ?? '',
+    currentMapId: 'home',
+    currentNodeId: initialMap.spawnNodeId ?? '',
     position: spawnNode
       ? { x: spawnNode.x, y: spawnNode.y }
       : { x: 0, y: 0 },

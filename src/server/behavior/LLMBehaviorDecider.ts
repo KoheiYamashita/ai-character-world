@@ -542,11 +542,11 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push(`- 現在の施設: ${currentFacility ? currentFacility.actionIds.join(', ') : 'なし'}`)
     parts.push(`- ステータス説明:`)
     parts.push(`  - 全ステータスは0〜100%で、高いほど良い状態です`)
-    parts.push(`  - 満腹度: 100%=満腹、0%=空腹（食事で回復）`)
-    parts.push(`  - エネルギー: 100%=元気、0%=疲労困憊（睡眠で回復）`)
-    parts.push(`  - 衛生: 100%=清潔、0%=不潔（入浴で回復）`)
-    parts.push(`  - 気分: 100%=上機嫌、0%=不機嫌（会話・休憩・娯楽で回復）`)
-    parts.push(`  - トイレ: 100%=快適、0%=限界（トイレで回復）`)
+    parts.push(`  - 満腹度: 100%=満腹、0%=空腹（食事で回復）⚠️0%で空腹で倒れる`)
+    parts.push(`  - エネルギー: 100%=元気、0%=疲労困憊（睡眠で回復）⚠️0%で過労で倒れる`)
+    parts.push(`  - 衛生: 100%=清潔、0%=不潔（入浴で回復）⚠️0%で感染症になって倒れる`)
+    parts.push(`  - 気分: 100%=上機嫌、0%=不機嫌（会話・休憩・娯楽で回復）⚠️0%で無気力状態に陥る`)
+    parts.push(`  - トイレ: 100%=快適、0%=限界（トイレで回復）⚠️0%で社会的死（人前で粗相し信用を失う）`)
     parts.push(`  - 体力: 100%=健康、0%=運動不足（運動で回復）`)
     parts.push(`- 現在のステータス:`)
     parts.push(`  - 満腹度: ${character.satiety.toFixed(0)}%`)
@@ -555,7 +555,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push(`  - 気分: ${character.mood.toFixed(0)}%`)
     parts.push(`  - トイレ: ${character.bladder.toFixed(0)}%`)
     parts.push(`  - 体力: ${character.fitness.toFixed(0)}%`)
-    parts.push(`- 所持金: ${character.money}円`)
+    parts.push(`- 所持金: ${character.money}円 ⚠️0円で生活困窮（食事・施設を利用できなくなる）`)
     parts.push('')
 
     // 今日のスケジュール
@@ -588,7 +588,9 @@ export class LLMBehaviorDecider implements BehaviorDecider {
 
     // その他のアクション
     parts.push('【その他】')
-    parts.push('- move: 任意の場所へ移動（上記マップIDをtargetに指定）')
+    if (nearbyMaps && nearbyMaps.length > 0) {
+      parts.push('- move: 任意の場所へ移動（上記マップIDをtargetに指定）')
+    }
     parts.push('- idle: その場で待機')
     parts.push('')
 
@@ -598,11 +600,14 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push('')
     parts.push('【行動選択の指針】')
     parts.push('- ステータスが低い場合（20%以下）は優先的に対処してください')
+    parts.push('- ⚠️ 0%になると深刻な結果（倒れる、社会的死など）を招くため、絶対に避けてください')
     parts.push('- スケジュールも考慮してください')
     parts.push('- 現在マップで実行可能なアクションを優先してください')
     parts.push('- 施設を利用する場合（eat, sleep, bathe, rest等）はアクションを選択し、targetに施設IDを指定')
     parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定。conversationGoalには1回の会話で達成可能な具体的目的を設定すること（例: 「おすすめの料理を聞く」「最近の出来事を聞く」）。「会話する」「話す」のような曖昧な目的は避けること')
-    parts.push('- 別のマップに移動したい場合は「move」を選択し、targetにマップIDを指定')
+    if (nearbyMaps && nearbyMaps.length > 0) {
+      parts.push('- 別のマップに移動したい場合は「move」を選択し、targetにマップIDを指定')
+    }
     parts.push('- 特にすることがなければ「idle」を選択（targetはnull）')
     parts.push('')
     parts.push('【durationMinutesについて】')

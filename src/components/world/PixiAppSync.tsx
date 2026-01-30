@@ -91,7 +91,8 @@ export default function PixiAppSync(): React.ReactNode {
         const loadedMaps = await loadMaps()
         if (cancelled) return
 
-        const initialMap = loadedMaps[config.initialState.mapId]
+        // home map is required and always used as the initial map
+        const initialMap = loadedMaps['home']
         if (initialMap) {
           setMapBaseSize({ width: initialMap.width, height: initialMap.height })
         }

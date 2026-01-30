@@ -97,7 +97,6 @@ export interface ThemeConfig {
 }
 
 export interface InitialStateConfig {
-  mapId: string
   time: {
     hour: number
     minute: number
@@ -142,6 +141,11 @@ export interface MiniEpisodeConfig {
   probability: number  // ミニエピソード生成確率（0-1）
 }
 
+export interface ActionRestrictions {
+  /** 同じアクションの最大連続実行回数（デフォルト: 3） */
+  maxConsecutiveSameAction: number
+}
+
 export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
@@ -156,4 +160,5 @@ export interface WorldConfig {
   error?: ErrorConfig
   actions?: Record<string, ActionConfig>
   miniEpisode?: MiniEpisodeConfig
+  actionRestrictions?: ActionRestrictions
 }

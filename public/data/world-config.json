@@ -92,7 +92,6 @@
     }
   },
   "initialState": {
-    "mapId": "home",
     "time": {
       "hour": 8,
       "minute": 0,
@@ -246,5 +245,8 @@
   },
   "miniEpisode": {
     "probability": 0.5
+  },
+  "actionRestrictions": {
+    "maxConsecutiveSameAction": 3
   }
 }
