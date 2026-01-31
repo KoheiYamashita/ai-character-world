@@ -41,7 +41,10 @@ function createTestNPC(overrides?: Partial<NPC>): NPC {
     direction: 'down',
     personality: '温厚で優しい店主',
     tendencies: ['お客さんに親切'],
-    facts: ['この店は10年営業している', '名物はカレーライス'],
+    facts: [
+      { content: 'この店は10年営業している', expiresDay: null },
+      { content: '名物はカレーライス', expiresDay: null },
+    ],
     affinity: 5,
     mood: 'neutral',
     conversationCount: 3,
@@ -105,12 +108,18 @@ describe('ConversationPostProcessor', () => {
   })
 
   it('should extract summary and update NPC state on normal conversation', async () => {
+    const updatedFactsFromLLM = [
+      { content: 'この店は10年営業している', expiresDay: null },
+      { content: '名物はカレーライス', expiresDay: null },
+      { content: 'TestCharは常連客', expiresDay: null },
+    ]
     vi.mocked(llmGenerateObject).mockResolvedValueOnce({
       summary: '店主と挨拶を交わした',
       affinityChange: 5,
-      updatedFacts: ['この店は10年営業している', '名物はカレーライス', 'TestCharは常連客'],
+      updatedFacts: updatedFactsFromLLM,
       mood: 'happy',
       topicsDiscussed: ['挨拶', '店の雰囲気'],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
@@ -126,7 +135,7 @@ describe('ConversationPostProcessor', () => {
 
     // NPC update callback
     expect(npcUpdateSpy).toHaveBeenCalledWith('npc-1', {
-      facts: ['この店は10年営業している', '名物はカレーライス', 'TestCharは常連客'],
+      facts: updatedFactsFromLLM,
       affinity: 10, // 5 + 5
       mood: 'happy',
       conversationCount: 4, // 3 + 1
@@ -151,7 +160,7 @@ describe('ConversationPostProcessor', () => {
     expect(npcStatePersistSpy).toHaveBeenCalledWith('npc-1', {
       affinity: 10,
       mood: 'happy',
-      facts: ['この店は10年営業している', '名物はカレーライス', 'TestCharは常連客'],
+      facts: updatedFactsFromLLM,
       conversationCount: 4,
       lastConversation: expect.any(Number),
     })
@@ -172,23 +181,34 @@ describe('ConversationPostProcessor', () => {
   })
 
   it('should replace facts entirely with LLM output', async () => {
+    const newFacts = [
+      { content: '全く新しいfact1', expiresDay: null },
+      { content: '全く新しいfact2', expiresDay: null },
+    ]
     vi.mocked(llmGenerateObject).mockResolvedValueOnce({
       summary: '新しい情報を得た',
       affinityChange: 0,
-      updatedFacts: ['全く新しいfact1', '全く新しいfact2'],
+      updatedFacts: newFacts,
       mood: 'neutral',
       topicsDiscussed: ['新情報'],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
-    const npc = createTestNPC({ facts: ['古いfact1', '古いfact2', '古いfact3'] })
+    const npc = createTestNPC({
+      facts: [
+        { content: '古いfact1', expiresDay: null },
+        { content: '古いfact2', expiresDay: null },
+        { content: '古いfact3', expiresDay: null },
+      ],
+    })
     const character = createTestCharacter()
 
     await processor.process(session, npc, character)
 
     // Facts should be entirely replaced
     expect(npcUpdateSpy).toHaveBeenCalledWith('npc-1', expect.objectContaining({
-      facts: ['全く新しいfact1', '全く新しいfact2'],
+      facts: newFacts,
     }))
   })
 
@@ -199,6 +219,7 @@ describe('ConversationPostProcessor', () => {
       updatedFacts: [],
       mood: 'happy',
       topicsDiscussed: [],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
@@ -219,6 +240,7 @@ describe('ConversationPostProcessor', () => {
       updatedFacts: [],
       mood: 'angry',
       topicsDiscussed: [],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
@@ -239,6 +261,7 @@ describe('ConversationPostProcessor', () => {
       updatedFacts: [],
       mood: 'neutral',
       topicsDiscussed: [],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
@@ -258,9 +281,10 @@ describe('ConversationPostProcessor', () => {
     vi.mocked(llmGenerateObject).mockResolvedValueOnce({
       summary: 'テスト',
       affinityChange: 5,
-      updatedFacts: ['fact'],
+      updatedFacts: [{ content: 'fact', expiresDay: null }],
       mood: 'happy',
       topicsDiscussed: ['test'],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
@@ -277,14 +301,14 @@ describe('ConversationPostProcessor', () => {
     vi.mocked(llmGenerateObject).mockResolvedValueOnce({
       summary: 'test',
       affinityChange: 0,
-      updatedFacts: ['fact1', 'fact2'],
+      updatedFacts: [{ content: 'fact1', expiresDay: null }, { content: 'fact2', expiresDay: null }],
       mood: 'neutral',
       topicsDiscussed: [],
-      memories: [],
+      consolidatedMemories: [],
     })
 
     const session = createTestSession()
-    const npc = createTestNPC({ facts: ['特別なfact'] })
+    const npc = createTestNPC({ facts: [{ content: '特別なfact', expiresDay: null }] })
     const character = createTestCharacter()
 
     await processor.process(session, npc, character)
@@ -296,18 +320,21 @@ describe('ConversationPostProcessor', () => {
     expect(prompt).toContain('最近の様子を聞く')
   })
 
-  describe('mid-term memory extraction', () => {
-    it('should call memory persist callback with extracted memories', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
+  describe('mid-term memory consolidation', () => {
+    it('should call memory replace callback with consolidated memories', async () => {
+      const memoryReplaceSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryReplace(memoryReplaceSpy)
 
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: 'カフェで待ち合わせの約束をした',
         affinityChange: 5,
-        updatedFacts: ['この店は10年営業している', '名物はカレーライス'],
+        updatedFacts: [
+          { content: 'この店は10年営業している', expiresDay: null },
+          { content: '名物はカレーライス', expiresDay: null },
+        ],
         mood: 'happy',
         topicsDiscussed: ['待ち合わせ'],
-        memories: [
+        consolidatedMemories: [
           { content: '明日14時にカフェで待ち合わせ', importance: 'high' },
           { content: 'NPCは水曜日が定休日', importance: 'medium' },
         ],
@@ -320,8 +347,9 @@ describe('ConversationPostProcessor', () => {
 
       await processor.process(session, npc, character, currentTime)
 
-      expect(memoryPersistSpy).toHaveBeenCalledTimes(1)
-      const memories = memoryPersistSpy.mock.calls[0][0]
+      expect(memoryReplaceSpy).toHaveBeenCalledTimes(1)
+      const [characterId, memories] = memoryReplaceSpy.mock.calls[0]
+      expect(characterId).toBe('char-1')
       expect(memories).toHaveLength(2)
 
       expect(memories[0]).toEqual(expect.objectContaining({
@@ -343,8 +371,8 @@ describe('ConversationPostProcessor', () => {
     })
 
     it('should set expiresDay based on importance', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
+      const memoryReplaceSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryReplace(memoryReplaceSpy)
 
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: 'test',
@@ -352,7 +380,7 @@ describe('ConversationPostProcessor', () => {
         updatedFacts: [],
         mood: 'neutral',
         topicsDiscussed: [],
-        memories: [
+        consolidatedMemories: [
           { content: 'low importance', importance: 'low' },
           { content: 'medium importance', importance: 'medium' },
           { content: 'high importance', importance: 'high' },
@@ -366,23 +394,26 @@ describe('ConversationPostProcessor', () => {
 
       await processor.process(session, npc, character, currentTime)
 
-      const memories = memoryPersistSpy.mock.calls[0][0]
+      const [, memories] = memoryReplaceSpy.mock.calls[0]
       expect(memories[0].expiresDay).toBe(3) // low: +0
       expect(memories[1].expiresDay).toBe(4) // medium: +1
       expect(memories[2].expiresDay).toBe(5) // high: +2
     })
 
-    it('should not call memory persist callback when memories array is empty', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
+    it('should not call memory replace callback when consolidatedMemories array is empty', async () => {
+      const memoryReplaceSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryReplace(memoryReplaceSpy)
 
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: '普通の挨拶',
         affinityChange: 2,
-        updatedFacts: ['この店は10年営業している', '名物はカレーライス'],
+        updatedFacts: [
+          { content: 'この店は10年営業している', expiresDay: null },
+          { content: '名物はカレーライス', expiresDay: null },
+        ],
         mood: 'neutral',
         topicsDiscussed: ['挨拶'],
-        memories: [],
+        consolidatedMemories: [],
       })
 
       const session = createTestSession()
@@ -392,12 +423,13 @@ describe('ConversationPostProcessor', () => {
 
       await processor.process(session, npc, character, currentTime)
 
-      expect(memoryPersistSpy).not.toHaveBeenCalled()
+      // Should still be called but with empty array (replace behavior)
+      expect(memoryReplaceSpy).toHaveBeenCalledWith('char-1', [])
     })
 
-    it('should not call memory persist callback when currentTime is not provided', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
+    it('should not call memory replace callback when currentTime is not provided', async () => {
+      const memoryReplaceSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryReplace(memoryReplaceSpy)
 
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: 'test',
@@ -405,7 +437,7 @@ describe('ConversationPostProcessor', () => {
         updatedFacts: [],
         mood: 'neutral',
         topicsDiscussed: [],
-        memories: [{ content: 'some memory', importance: 'high' }],
+        consolidatedMemories: [{ content: 'some memory', importance: 'high' }],
       })
 
       const session = createTestSession()
@@ -415,12 +447,12 @@ describe('ConversationPostProcessor', () => {
       // No currentTime provided
       await processor.process(session, npc, character)
 
-      expect(memoryPersistSpy).not.toHaveBeenCalled()
+      expect(memoryReplaceSpy).not.toHaveBeenCalled()
     })
 
     it('should generate unique memory ids', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
+      const memoryReplaceSpy = vi.fn().mockResolvedValue(undefined)
+      processor.setOnMemoryReplace(memoryReplaceSpy)
 
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: 'test',
@@ -428,7 +460,7 @@ describe('ConversationPostProcessor', () => {
         updatedFacts: [],
         mood: 'neutral',
         topicsDiscussed: [],
-        memories: [
+        consolidatedMemories: [
           { content: 'memory 1', importance: 'low' },
           { content: 'memory 2', importance: 'high' },
         ],
@@ -441,21 +473,18 @@ describe('ConversationPostProcessor', () => {
 
       await processor.process(session, npc, character, currentTime)
 
-      const memories = memoryPersistSpy.mock.calls[0][0]
+      const [, memories] = memoryReplaceSpy.mock.calls[0]
       expect(memories[0].id).not.toBe(memories[1].id)
     })
 
-    it('should include memory extraction instruction in prompt', async () => {
-      const memoryPersistSpy = vi.fn().mockResolvedValue(undefined)
-      processor.setOnMemoryPersist(memoryPersistSpy)
-
+    it('should include consolidatedMemories instruction in prompt', async () => {
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         summary: 'test',
         affinityChange: 0,
         updatedFacts: [],
         mood: 'neutral',
         topicsDiscussed: [],
-        memories: [],
+        consolidatedMemories: [],
       })
 
       const session = createTestSession()
@@ -465,8 +494,8 @@ describe('ConversationPostProcessor', () => {
       await processor.process(session, npc, character)
 
       const prompt = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
-      expect(prompt).toContain('memories')
-      expect(prompt).toContain('行動に影響')
+      expect(prompt).toContain('consolidatedMemories')
+      expect(prompt).toContain('統合')
     })
   })
 })

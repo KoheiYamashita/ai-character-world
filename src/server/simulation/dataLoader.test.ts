@@ -333,7 +333,7 @@ describe('dataLoader', () => {
       // プロフィールフィールド
       expect(npcs[0].personality).toBe('明るく社交的')
       expect(npcs[0].tendencies).toEqual(['話好き', '親切'])
-      expect(npcs[0].facts).toEqual(['花屋で働いている'])
+      expect(npcs[0].facts).toEqual([{ content: '花屋で働いている', expiresDay: null }])
       expect(npcs[0].customPrompt).toBe('テスト用プロンプト')
       // 動的ステータス初期値
       expect(npcs[0].affinity).toBe(0)
@@ -385,7 +385,7 @@ describe('dataLoader', () => {
       const mapsWithNPCs = {
         maps: [{
           ...mockMapsData.maps[0],
-          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'home-0-0' }],
+          npcs: [{ id: 'npc1', name: 'NPC', sprite: {}, spawnNodeId: 'home-0-0', personality: '', tendencies: [], facts: [] }],
         }],
       }
       const charsWithSchedule = {

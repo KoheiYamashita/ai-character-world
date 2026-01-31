@@ -146,6 +146,20 @@ export interface ActionRestrictions {
   maxConsecutiveSameAction: number
 }
 
+export interface MemoryConfig {
+  /** 中期記憶の上限件数（デフォルト: 8） */
+  midTermLimit: number
+  /** 行動履歴の上限件数（デフォルト: 10） */
+  todayActionsLimit: number
+  /** NPCのfactsの上限件数（デフォルト: 20） */
+  factsLimit: number
+}
+
+export interface NPCConfig {
+  /** 会話クールダウン（分） */
+  conversationCooldownMinutes?: number
+}
+
 export interface WorldConfig {
   timing: TimingConfig
   movement: MovementConfig
@@ -161,4 +175,6 @@ export interface WorldConfig {
   actions?: Record<string, ActionConfig>
   miniEpisode?: MiniEpisodeConfig
   actionRestrictions?: ActionRestrictions
+  memory?: MemoryConfig
+  npc?: NPCConfig
 }

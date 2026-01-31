@@ -563,9 +563,9 @@
               "work"
             ],
             "job": {
-              "jobId": "freelance-writer",
-              "title": "フリーライター",
-              "hourlyWage": 1500,
+              "jobId": "freelance-engineer",
+              "title": "フリーエンジニア",
+              "hourlyWage": 5000,
               "workHours": {
                 "start": 9,
                 "end": 18

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
+import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, NPCFact, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -426,7 +426,7 @@ export class SqliteStore implements StateStore {
       currentAction: null,
       pendingAction: null,
       actionCounter: 0, // Runtime state - reset on load
-      afterSystemAutoMove: false, // Runtime state - reset on load
+      afterSystemAutoAction: false, // Runtime state - reset on load
     }
   }
 
@@ -601,13 +601,16 @@ export class SqliteStore implements StateStore {
     })
   }
 
-  async loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]> {
-    const stmt = this.db.prepare(
-      'SELECT * FROM action_history WHERE character_id = ? AND day = ? ORDER BY time, created_at'
-    )
-    const rows = stmt.all(characterId, day) as ActionHistoryRow[]
+  async loadActionHistoryForDay(characterId: string, day: number, limit?: number): Promise<ActionHistoryEntry[]> {
+    // Order by time DESC, created_at DESC to get recent first when limit is applied
+    const query = limit
+      ? 'SELECT * FROM action_history WHERE character_id = ? AND day = ? ORDER BY time DESC, created_at DESC LIMIT ?'
+      : 'SELECT * FROM action_history WHERE character_id = ? AND day = ? ORDER BY time DESC, created_at DESC'
+    const stmt = this.db.prepare(query)
+    const rows = (limit ? stmt.all(characterId, day, limit) : stmt.all(characterId, day)) as ActionHistoryRow[]
 
-    return rows.map(row => ({
+    // Reverse to get chronological order (oldest first) after limiting
+    return rows.reverse().map(row => ({
       time: row.time,
       actionId: row.action_id,
       target: row.target ?? undefined,
@@ -874,10 +877,24 @@ export class SqliteStore implements StateStore {
     return {
       affinity: row.affinity,
       mood: row.mood,
-      facts: JSON.parse(row.facts) as string[],
+      facts: this.parseNPCFacts(row.facts),
       conversationCount: row.conversation_count,
       lastConversation: row.last_conversation,
     }
+  }
+
+  // Parse NPC facts with backward compatibility (string[] -> NPCFact[])
+  private parseNPCFacts(factsJson: string): NPCFact[] {
+    const parsed = JSON.parse(factsJson)
+    if (!Array.isArray(parsed)) return []
+    if (parsed.length === 0) return []
+    // Check if first element is string (old format) or object (new format)
+    if (typeof parsed[0] === 'string') {
+      // Old format: convert string[] to NPCFact[] (permanent facts)
+      return parsed.map((content: string) => ({ content, expiresDay: null }))
+    }
+    // New format: already NPCFact[]
+    return parsed as NPCFact[]
   }
 
   async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
@@ -896,7 +913,7 @@ export class SqliteStore implements StateStore {
       result.set(row.npc_id, {
         affinity: row.affinity,
         mood: row.mood,
-        facts: JSON.parse(row.facts) as string[],
+        facts: this.parseNPCFacts(row.facts),
         conversationCount: row.conversation_count,
         lastConversation: row.last_conversation,
       })
@@ -921,6 +938,33 @@ export class SqliteStore implements StateStore {
       expires_day: memory.expiresDay,
       source_npc_id: memory.sourceNpcId ?? null,
     })
+  }
+
+  async replaceMidTermMemories(characterId: string, memories: MidTermMemory[]): Promise<void> {
+    const transaction = this.db.transaction(() => {
+      // Delete all existing memories for this character
+      this.db.prepare('DELETE FROM mid_term_memories WHERE character_id = ?').run(characterId)
+
+      // Insert new consolidated memories
+      const insertStmt = this.db.prepare(`
+        INSERT INTO mid_term_memories (id, character_id, content, importance, created_day, expires_day, source_npc_id)
+        VALUES (@id, @character_id, @content, @importance, @created_day, @expires_day, @source_npc_id)
+      `)
+
+      for (const memory of memories) {
+        insertStmt.run({
+          id: memory.id,
+          character_id: memory.characterId,
+          content: memory.content,
+          importance: memory.importance,
+          created_day: memory.createdDay,
+          expires_day: memory.expiresDay,
+          source_npc_id: memory.sourceNpcId ?? null,
+        })
+      }
+    })
+
+    transaction()
   }
 
   async loadActiveMidTermMemories(characterId: string, currentDay: number): Promise<MidTermMemory[]> {

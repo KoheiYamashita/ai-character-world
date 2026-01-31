@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 import { generateText, generateObject, type LanguageModel } from 'ai'
 import type { z } from 'zod'
 import { getLLMErrorHandler } from './errorHandler'
@@ -59,6 +60,11 @@ function createLanguageModel(
     case 'google': {
       const google = createGoogleGenerativeAI({ apiKey, baseURL })
       return google(modelId)
+    }
+    case 'openrouter': {
+      const openrouter = createOpenRouter({ apiKey })
+      const fullModelId = subType ? `${subType}/${modelId}` : modelId
+      return openrouter.chat(fullModelId)
     }
     default:
       throw new Error(`Unknown provider: ${provider}`)

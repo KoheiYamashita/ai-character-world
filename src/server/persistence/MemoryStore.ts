@@ -163,11 +163,13 @@ export class MemoryStore implements StateStore {
     this.actionHistory.set(key, existing)
   }
 
-  async loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]> {
+  async loadActionHistoryForDay(characterId: string, day: number, limit?: number): Promise<ActionHistoryEntry[]> {
     const key = this.characterDayKey(characterId, day)
     const history = this.actionHistory.get(key)
     if (!history) return []
-    return JSON.parse(JSON.stringify(history))
+    // If limit specified, return only the most recent N entries
+    const result = limit ? history.slice(-limit) : history
+    return JSON.parse(JSON.stringify(result))
   }
 
   async updateActionHistoryEpisode(characterId: string, day: number, time: string, episode: string): Promise<void> {
@@ -276,19 +278,20 @@ export class MemoryStore implements StateStore {
   // NPC State methods
 
   async saveNPCState(npcId: string, state: NPCDynamicState): Promise<void> {
-    this.npcStates.set(npcId, { ...state, facts: [...state.facts] })
+    // Deep copy facts (now NPCFact[] objects)
+    this.npcStates.set(npcId, { ...state, facts: state.facts.map(f => ({ ...f })) })
   }
 
   async loadNPCState(npcId: string): Promise<NPCDynamicState | null> {
     const state = this.npcStates.get(npcId)
     if (!state) return null
-    return { ...state, facts: [...state.facts] }
+    return { ...state, facts: state.facts.map(f => ({ ...f })) }
   }
 
   async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
     const result = new Map<string, NPCDynamicState>()
     for (const [id, state] of this.npcStates) {
-      result.set(id, { ...state, facts: [...state.facts] })
+      result.set(id, { ...state, facts: state.facts.map(f => ({ ...f })) })
     }
     return result
   }
@@ -297,6 +300,13 @@ export class MemoryStore implements StateStore {
 
   async addMidTermMemory(memory: MidTermMemory): Promise<void> {
     this.midTermMemories.push({ ...memory })
+  }
+
+  async replaceMidTermMemories(characterId: string, memories: MidTermMemory[]): Promise<void> {
+    // Remove all existing memories for this character
+    this.midTermMemories = this.midTermMemories.filter(m => m.characterId !== characterId)
+    // Add new consolidated memories
+    this.midTermMemories.push(...memories.map(m => ({ ...m })))
   }
 
   async loadActiveMidTermMemories(characterId: string, currentDay: number): Promise<MidTermMemory[]> {

@@ -248,5 +248,13 @@
   },
   "actionRestrictions": {
     "maxConsecutiveSameAction": 3
+  },
+  "memory": {
+    "midTermLimit": 8,
+    "todayActionsLimit": 10,
+    "factsLimit": 20
+  },
+  "npc": {
+    "conversationCooldownMinutes": 60
   }
 }

@@ -609,4 +609,168 @@ describe('MemoryStore', () => {
       await expect(store.close()).resolves.not.toThrow()
     })
   })
+
+  describe('loadActionHistoryForDay with limit', () => {
+    it('should limit results to specified count', async () => {
+      for (let i = 0; i < 5; i++) {
+        await store.addActionHistory({
+          characterId: 'char-1',
+          day: 1,
+          time: `0${9 + i}:00`,
+          actionId: `action-${i}`,
+        })
+      }
+
+      const limited = await store.loadActionHistoryForDay('char-1', 1, 3)
+      expect(limited).toHaveLength(3)
+    })
+
+    it('should return most recent actions when limited', async () => {
+      await store.addActionHistory({ characterId: 'char-1', day: 1, time: '09:00', actionId: 'first' })
+      await store.addActionHistory({ characterId: 'char-1', day: 1, time: '10:00', actionId: 'second' })
+      await store.addActionHistory({ characterId: 'char-1', day: 1, time: '11:00', actionId: 'third' })
+      await store.addActionHistory({ characterId: 'char-1', day: 1, time: '12:00', actionId: 'fourth' })
+
+      const limited = await store.loadActionHistoryForDay('char-1', 1, 2)
+      expect(limited[0].actionId).toBe('third')
+      expect(limited[1].actionId).toBe('fourth')
+    })
+
+    it('should return all when limit exceeds count', async () => {
+      await store.addActionHistory({ characterId: 'char-1', day: 1, time: '09:00', actionId: 'only' })
+
+      const limited = await store.loadActionHistoryForDay('char-1', 1, 10)
+      expect(limited).toHaveLength(1)
+    })
+  })
+
+  describe('NPC state with NPCFact format', () => {
+    it('should save and load NPC state with NPCFact format', async () => {
+      await store.saveNPCState('npc-1', {
+        affinity: 10,
+        mood: 'happy',
+        facts: [
+          { content: '花屋で働いている', expiresDay: null },
+          { content: '明日は休み', expiresDay: 5 },
+        ],
+        conversationCount: 2,
+        lastConversation: 100,
+      })
+
+      const loaded = await store.loadNPCState('npc-1')
+      expect(loaded).not.toBeNull()
+      expect(loaded!.facts).toHaveLength(2)
+      expect(loaded!.facts[0]).toEqual({ content: '花屋で働いている', expiresDay: null })
+      expect(loaded!.facts[1]).toEqual({ content: '明日は休み', expiresDay: 5 })
+    })
+
+    it('should deep copy facts to avoid mutation', async () => {
+      const originalFacts = [{ content: 'オリジナル', expiresDay: null }]
+      await store.saveNPCState('npc-1', {
+        affinity: 0,
+        mood: 'neutral',
+        facts: originalFacts,
+        conversationCount: 0,
+        lastConversation: null,
+      })
+
+      // Mutate original
+      originalFacts[0].content = '変更後'
+
+      const loaded = await store.loadNPCState('npc-1')
+      expect(loaded!.facts[0].content).toBe('オリジナル')
+    })
+  })
+
+  describe('replaceMidTermMemories', () => {
+    it('should replace all memories for a character', async () => {
+      await store.addMidTermMemory({
+        id: 'old-1',
+        characterId: 'char-1',
+        content: '古い記憶1',
+        importance: 'low',
+        createdDay: 1,
+        expiresDay: 10,
+      })
+      await store.addMidTermMemory({
+        id: 'old-2',
+        characterId: 'char-1',
+        content: '古い記憶2',
+        importance: 'medium',
+        createdDay: 1,
+        expiresDay: 10,
+      })
+
+      await store.replaceMidTermMemories('char-1', [
+        {
+          id: 'new-1',
+          characterId: 'char-1',
+          content: '統合された記憶',
+          importance: 'high',
+          createdDay: 2,
+          expiresDay: 15,
+        },
+      ])
+
+      const memories = await store.loadActiveMidTermMemories('char-1', 2)
+      expect(memories).toHaveLength(1)
+      expect(memories[0].content).toBe('統合された記憶')
+      expect(memories[0].importance).toBe('high')
+      expect(memories[0].createdDay).toBe(2)
+    })
+
+    it('should not affect other characters memories', async () => {
+      await store.addMidTermMemory({
+        id: 'c1-mem',
+        characterId: 'char-1',
+        content: 'char-1の記憶',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 10,
+      })
+      await store.addMidTermMemory({
+        id: 'c2-mem',
+        characterId: 'char-2',
+        content: 'char-2の記憶',
+        importance: 'high',
+        createdDay: 1,
+        expiresDay: 10,
+      })
+
+      await store.replaceMidTermMemories('char-1', [
+        {
+          id: 'c1-new',
+          characterId: 'char-1',
+          content: 'char-1の新しい記憶',
+          importance: 'medium',
+          createdDay: 1,
+          expiresDay: 10,
+        },
+      ])
+
+      const c1Memories = await store.loadActiveMidTermMemories('char-1', 1)
+      const c2Memories = await store.loadActiveMidTermMemories('char-2', 1)
+
+      expect(c1Memories).toHaveLength(1)
+      expect(c1Memories[0].content).toBe('char-1の新しい記憶')
+      expect(c2Memories).toHaveLength(1)
+      expect(c2Memories[0].content).toBe('char-2の記憶')
+    })
+
+    it('should handle empty replacement list', async () => {
+      await store.addMidTermMemory({
+        id: 'mem-1',
+        characterId: 'char-1',
+        content: '消える記憶',
+        importance: 'low',
+        createdDay: 1,
+        expiresDay: 10,
+      })
+
+      await store.replaceMidTermMemories('char-1', [])
+
+      const memories = await store.loadActiveMidTermMemories('char-1', 1)
+      expect(memories).toHaveLength(0)
+    })
+  })
 })

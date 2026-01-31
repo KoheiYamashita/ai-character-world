@@ -60,16 +60,6 @@ export class SimulationEngine {
   private stateStore: StateStore | null = null
   private lastSaveTime: number = 0
   private defaultSchedules: Map<string, ScheduleEntry[]> = new Map()
-  // Schedule cache: key = `${characterId}-${day}`, loaded from DB
-  private scheduleCache: Map<string, ScheduleEntry[]> = new Map()
-  // Action history cache: key = `${characterId}-${day}`, loaded from DB
-  private actionHistoryCache: Map<string, ActionHistoryEntry[]> = new Map()
-  // Mid-term memories cache: key = characterId
-  private midTermMemoriesCache: Map<string, MidTermMemory[]> = new Map()
-  // Recent conversations cache: key = characterId, loaded from npc_summaries for current day
-  private recentConversationsCache: Map<string, RecentConversation[]> = new Map()
-  // Tracks which day the cache was populated for (used to detect day boundary on sleep)
-  private recentConversationsCacheDay: Map<string, number> = new Map()
   // Mini episode generator
   private miniEpisodeGenerator: MiniEpisodeGenerator = new StubMiniEpisodeGenerator()
   // Track characters with pending behavior decisions (prevents duplicate LLM calls)
@@ -80,10 +70,12 @@ export class SimulationEngine {
   private lastDay: number = 1
   // Action restrictions (consecutive action limit)
   private maxConsecutiveSameAction: number = 3
+  // Memory config (prompt size limits)
+  private todayActionsLimit: number = 10
   // Status interrupt threshold (design: 10%)
   private static readonly INTERRUPT_THRESHOLD = 10
-  // System auto-move interval (every N actions)
-  private static readonly SYSTEM_AUTO_MOVE_INTERVAL = 3
+  // System auto-action interval (every N actions)
+  private static readonly SYSTEM_AUTO_ACTION_INTERVAL = 3
   // Status type → forced action mapping (Step 14)
   private static readonly STATUS_INTERRUPT_ACTIONS: Record<string, string> = {
     bladder: 'toilet',
@@ -113,36 +105,16 @@ export class SimulationEngine {
       entry.day = currentTime.day
       entry.time = this.formatTimeString(currentTime)
       if (this.stateStore) await this.stateStore.saveNPCSummary(entry)
-      // Update recentConversationsCache (optimistic)
-      // Use world time (total minutes) for cooldown calculation instead of real time
-      const worldTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
-      const cached = this.recentConversationsCache.get(entry.characterId) ?? []
-      cached.push({
-        npcId: entry.npcId,
-        npcName: entry.npcName,
-        summary: entry.summary,
-        timestamp: worldTimeMinutes,
-      })
-      this.recentConversationsCache.set(entry.characterId, cached)
-      if (!this.recentConversationsCacheDay.has(entry.characterId)) {
-        this.recentConversationsCacheDay.set(entry.characterId, currentTime.day)
-      }
       // Notify log subscribers
       this.notifyLogSubscribersConversation(entry)
     })
     this.conversationPostProcessor.setOnNPCStatePersist(async (npcId, state) => {
       if (this.stateStore) await this.stateStore.saveNPCState(npcId, state)
     })
-    this.conversationPostProcessor.setOnMemoryPersist(async (memories) => {
-      if (!this.stateStore || memories.length === 0) return
-      // Update cache first (optimistic) - DB failure won't block behavior decisions
-      const characterId = memories[0].characterId
-      const cached = this.midTermMemoriesCache.get(characterId) ?? []
-      cached.push(...memories)
-      this.midTermMemoriesCache.set(characterId, cached)
-      // Persist to DB
-      for (const memory of memories) {
-        await this.stateStore.addMidTermMemory(memory)
+    this.conversationPostProcessor.setOnMemoryReplace(async (characterId, memories) => {
+      // Persist to DB (replace all memories for this character)
+      if (this.stateStore) {
+        await this.stateStore.replaceMidTermMemories(characterId, memories)
       }
     })
     this.conversationExecutor.setPostProcessor(this.conversationPostProcessor)
@@ -172,18 +144,6 @@ export class SimulationEngine {
     // Set action completion callback for behavior decision trigger
     this.actionExecutor.setOnActionComplete((characterId, actionId) => {
       console.log(`[SimulationEngine] Action complete callback: ${characterId} finished ${actionId}`)
-
-      // On sleep completion: clear recent conversations if day has changed
-      if (actionId === 'sleep') {
-        const currentDay = this.worldState.getTime().day
-        const cacheDay = this.recentConversationsCacheDay.get(characterId)
-        if (cacheDay !== undefined && currentDay > cacheDay) {
-          this.recentConversationsCache.delete(characterId)
-          this.recentConversationsCacheDay.delete(characterId)
-          console.log(`[SimulationEngine] Cleared recentConversations for ${characterId} (slept across day boundary: ${cacheDay} -> ${currentDay})`)
-        }
-      }
-
       // Note: talk action is completed by ConversationExecutor, not by timer
       this.onActionComplete(characterId)
     })
@@ -404,6 +364,36 @@ export class SimulationEngine {
     npc.lastConversation = state.lastConversation
   }
 
+  // Clean up expired NPC facts on day change
+  private cleanupExpiredNPCFacts(currentDay: number): void {
+    let totalRemoved = 0
+    for (const [npcId, npc] of this.fullNPCs) {
+      const beforeCount = npc.facts.length
+      // Filter out expired facts (keep those with null expiresDay or expiresDay >= currentDay)
+      npc.facts = npc.facts.filter(f => f.expiresDay === null || f.expiresDay >= currentDay)
+      const removed = beforeCount - npc.facts.length
+      if (removed > 0) {
+        totalRemoved += removed
+        // Persist updated NPC state
+        if (this.stateStore) {
+          const state: NPCDynamicState = {
+            affinity: npc.affinity,
+            mood: npc.mood,
+            facts: npc.facts,
+            conversationCount: npc.conversationCount,
+            lastConversation: npc.lastConversation,
+          }
+          this.stateStore.saveNPCState(npcId, state).catch(err => {
+            console.error(`[SimulationEngine] Error saving NPC state after facts cleanup:`, err)
+          })
+        }
+      }
+    }
+    if (totalRemoved > 0) {
+      console.log(`[SimulationEngine] Cleaned up ${totalRemoved} expired NPC facts`)
+    }
+  }
+
   // Main tick function
   private tick(): void {
     const now = Date.now()
@@ -420,25 +410,17 @@ export class SimulationEngine {
       return
     }
 
-    // Check for day change and refresh caches
+    // Check for day change
     const currentDay = realTime.day
     if (currentDay !== this.lastDay) {
       console.log(`[SimulationEngine] Day changed: ${this.lastDay} -> ${currentDay}`)
-      const previousDay = this.lastDay
       this.lastDay = currentDay
-      // Async seed + reload, then clear old entries
-      // Note: Don't clear cache before loading - this causes race condition
-      // where getScheduleForCharacter() returns null during async operation
-      this.seedDefaultSchedules()
-        .then(() => this.loadScheduleCache())
-        .then(() => {
-          // Clear only previous day's entries (new day's data is already loaded)
-          this.clearScheduleCacheForDay(previousDay)
-          this.clearActionHistoryCacheForDay(previousDay)
-        })
-        .catch(err => {
-          console.error('[SimulationEngine] Error seeding/reloading schedule cache:', err)
-        })
+      // Seed default schedules for new day (DB reads are done on-demand)
+      this.seedDefaultSchedules().catch(err => {
+        console.error('[SimulationEngine] Error seeding default schedules:', err)
+      })
+      // Clean up expired NPC facts
+      this.cleanupExpiredNPCFacts(currentDay)
     }
 
     // Check for status decay with elapsed time scaling
@@ -473,8 +455,8 @@ export class SimulationEngine {
       this.updateActiveActionsProgress().catch(err => {
         console.error('[SimulationEngine] Error updating active actions:', err)
       })
-      // Delete expired mid-term memories and reload cache
-      this.cleanupAndReloadMidTermMemories(realTime.day).catch(err => {
+      // Delete expired mid-term memories from DB
+      this.cleanupExpiredMidTermMemories(realTime.day).catch(err => {
         console.error('[SimulationEngine] Error cleaning up mid-term memories:', err)
       })
       this.lastSaveTime = now
@@ -623,6 +605,19 @@ export class SimulationEngine {
            !character.navigation.isMoving
   }
 
+  // Helper: Increment action counter and check for system auto-action
+  // Returns true if auto-action was triggered (caller should skip normal decision)
+  private incrementActionCounterAndCheck(character: SimCharacter): boolean {
+    const newCounter = character.actionCounter + 1
+    this.worldState.updateCharacter(character.id, { actionCounter: newCounter })
+
+    // Check for system auto-action (every N actions)
+    if (this.checkSystemAutoAction(character, newCounter)) {
+      return true // auto-action triggered
+    }
+    return false
+  }
+
   // Callback when action completes (triggers next behavior decision)
   private onActionComplete(characterId: string): void {
     const character = this.worldState.getCharacter(characterId)
@@ -630,14 +625,9 @@ export class SimulationEngine {
     if (this.pendingDecisions.has(characterId)) return
     if (!this.isCharacterIdle(character)) return
 
-    // Increment action counter
-    const newCounter = character.actionCounter + 1
-    this.worldState.updateCharacter(characterId, { actionCounter: newCounter })
-
-    // Check for system auto-move (every 5 actions)
-    // If triggered, skip normal behavior decision
-    if (this.checkSystemAutoMove(character, newCounter)) {
-      return
+    // Use helper method to increment counter and check auto-action
+    if (this.incrementActionCounterAndCheck(character)) {
+      return // auto-action triggered
     }
 
     const currentTime = this.worldState.getTime()
@@ -653,6 +643,11 @@ export class SimulationEngine {
 
     // Skip if pending action exists (will be handled by checkPendingActions)
     if (character.pendingAction) return
+
+    // Pure move completed - increment counter and check auto-action
+    if (this.incrementActionCounterAndCheck(character)) {
+      return // auto-action triggered
+    }
 
     const currentTime = this.worldState.getTime()
     this.makeBehaviorDecision(character, currentTime)
@@ -698,11 +693,11 @@ export class SimulationEngine {
     return nearbyMapIds[randomIndex]
   }
 
-  // Start system auto-move to a target map
-  private startSystemAutoMove(character: SimCharacter, targetMapId: string): boolean {
+  // Start system auto-action (move to a target map)
+  private startSystemAutoAction(character: SimCharacter, targetMapId: string): boolean {
     const targetMap = this.worldState.getMap(targetMapId)
     if (!targetMap?.spawnNodeId) {
-      console.log(`[SimulationEngine] System auto-move failed: no spawn node for map ${targetMapId}`)
+      console.log(`[SimulationEngine] System auto-action failed: no spawn node for map ${targetMapId}`)
       return false
     }
 
@@ -713,42 +708,42 @@ export class SimulationEngine {
     )
 
     if (success) {
-      // Set flag to disable 'talk' action after system auto-move completes
-      this.worldState.updateCharacter(character.id, { afterSystemAutoMove: true })
-      console.log(`[SimulationEngine] System auto-move: ${character.name} -> ${targetMapId}`)
+      // Set flag to disable 'talk' action after system auto-action completes
+      this.worldState.updateCharacter(character.id, { afterSystemAutoAction: true })
+      console.log(`[SimulationEngine] System auto-action: ${character.name} -> ${targetMapId}`)
     } else {
-      console.log(`[SimulationEngine] System auto-move failed: ${character.name} -> ${targetMapId}`)
+      console.log(`[SimulationEngine] System auto-action failed: ${character.name} -> ${targetMapId}`)
     }
 
     return success
   }
 
-  // Check and execute system auto-move (called after action completion)
-  private checkSystemAutoMove(character: SimCharacter, actionCounter: number): boolean {
+  // Check and execute system auto-action (called after action/move/idle completion)
+  private checkSystemAutoAction(character: SimCharacter, actionCounter: number): boolean {
     // Not yet at interval threshold
-    if (actionCounter < SimulationEngine.SYSTEM_AUTO_MOVE_INTERVAL) {
+    if (actionCounter < SimulationEngine.SYSTEM_AUTO_ACTION_INTERVAL) {
       return false
     }
 
-    // Status interrupt active (any status < 10%) - skip auto-move but count progresses
+    // Status interrupt active (any status < 10%) - skip auto-action but count progresses
     // Don't reset counter - will check again after interrupt is resolved
     if (this.hasLowStatus(character)) {
-      console.log(`[SimulationEngine] System auto-move skipped (status interrupt): ${character.name}`)
+      console.log(`[SimulationEngine] System auto-action skipped (status interrupt): ${character.name}`)
       return false
     }
 
-    // Reset counter (regardless of whether auto-move succeeds)
+    // Reset counter (regardless of whether auto-action succeeds)
     this.worldState.updateCharacter(character.id, { actionCounter: 0 })
 
     // Select random nearby map (within 3 hops)
     const targetMapId = this.selectRandomNearbyMap(character.currentMapId)
     if (!targetMapId) {
-      console.log(`[SimulationEngine] System auto-move skipped (no nearby maps): ${character.name}`)
+      console.log(`[SimulationEngine] System auto-action skipped (no nearby maps): ${character.name}`)
       return false
     }
 
     // Start navigation to target map
-    return this.startSystemAutoMove(character, targetMapId)
+    return this.startSystemAutoAction(character, targetMapId)
   }
 
   // Trigger status interrupt for a character (called when status drops below threshold)
@@ -782,48 +777,52 @@ export class SimulationEngine {
    * @param character The character to build context for
    * @param includeTodayActions Whether to include today's action history (for normal decisions)
    */
-  private buildBehaviorContext(character: SimCharacter, includeTodayActions: boolean = true): BehaviorContext {
+  private async buildBehaviorContext(character: SimCharacter, includeTodayActions: boolean = true): Promise<BehaviorContext> {
     const currentTime = this.worldState.getTime()
 
     // Calculate current world time in minutes for cooldown calculation
     const currentTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
 
-    // Get recent conversations for this character
-    const recentConversations = this.recentConversationsCache.get(character.id)
+    // Load data from DB (parallel for performance)
+    const [recentConversations, todayActions, schedule, midTermMemories] = await Promise.all([
+      this.getRecentConversationsFromDB(character.id),
+      this.getActionHistoryFromDB(character.id),
+      this.getScheduleFromDB(character.id),
+      this.getMidTermMemoriesFromDB(character.id),
+    ])
 
     // Get NPCs on current map with cooldown info
-    // After system auto-move, don't show NPCs (talk is disabled anyway)
+    // After system auto-action, don't show NPCs (talk is disabled anyway)
     const allNPCs = this.worldState.getNPCsOnMap(character.currentMapId)
-    const npcsWithCooldown = character.afterSystemAutoMove
+    const npcsWithCooldown = character.afterSystemAutoAction
       ? []
       : addCooldownInfoToNPCs(allNPCs, recentConversations, currentTimeMinutes)
 
-    // Get available actions, then remove 'talk' if afterSystemAutoMove flag is set
+    // Get available actions, then remove 'talk' if afterSystemAutoAction flag is set
     let availableActions = this.actionExecutor.getAvailableActions(character.id)
-    if (character.afterSystemAutoMove) {
+    if (character.afterSystemAutoAction) {
       availableActions = availableActions.filter(action => action !== 'talk')
     }
 
     // Apply consecutive action limit filter
-    const todayActions = this.getActionHistoryForCharacter(character.id)
     availableActions = this.filterActionsByConsecutiveLimit(availableActions, todayActions)
 
-    // After system auto-move, don't allow pure 'move' action (which would trigger another behavior decision)
+    // After system auto-action, don't allow pure 'move' action (which would trigger another behavior decision)
     // But allow nearbyFacilities (action + move is atomic, no talk can occur in between)
-    const nearbyMaps = character.afterSystemAutoMove ? [] : this.buildNearbyMaps(character.currentMapId)
+    const nearbyMaps = character.afterSystemAutoAction ? [] : this.buildNearbyMaps(character.currentMapId)
 
     return {
       character,
       currentTime,
       currentFacility: this.actionExecutor.getCurrentFacility(character.id),
-      schedule: this.getScheduleForCharacter(character.id),
+      schedule,
       availableActions,
       nearbyNPCs: npcsWithCooldown,
       currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
       nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
       nearbyMaps,
       recentConversations: filterForBehaviorDecision(recentConversations),
-      midTermMemories: this.midTermMemoriesCache.get(character.id),
+      midTermMemories,
       todayActions: includeTodayActions ? todayActions : undefined,
     }
   }
@@ -831,11 +830,11 @@ export class SimulationEngine {
   /**
    * Apply a behavior decision (shared logic for normal and interrupt decisions)
    */
-  private applyBehaviorDecision(
+  private async applyBehaviorDecision(
     character: SimCharacter,
     decision: BehaviorDecision,
     logContext: string
-  ): void {
+  ): Promise<void> {
     switch (decision.type) {
       case 'action':
         if (decision.actionId) {
@@ -890,15 +889,22 @@ export class SimulationEngine {
         this.worldState.updateCharacter(character.id, {
           displayEmoji: isInterrupt ? SPECIAL_EMOJI.interrupt : SPECIAL_EMOJI.idle,
         })
-        // Record idle only if last entry is not already idle (prevents spam from 2s retry)
-        const history = this.getActionHistoryForCharacter(character.id)
+        // Check if this is a new idle (not a retry)
+        const history = await this.getActionHistoryFromDB(character.id)
         const lastEntry = history[history.length - 1]
-        if (!lastEntry || lastEntry.actionId !== 'idle') {
+        const isNewIdle = !lastEntry || lastEntry.actionId !== 'idle'
+
+        if (isNewIdle) {
+          // Record idle only on first occurrence (prevents spam from 2s retry)
           this.recordActionHistory({
             characterId: character.id,
             actionId: 'idle',
             reason: decision.reason,
           })
+          // Increment counter for new idle (counts as a "cycle")
+          if (this.incrementActionCounterAndCheck(character)) {
+            return // auto-action triggered
+          }
         }
         // Longer retry for interrupt (emergency with no solution)
         this.scheduleNextDecision(character.id, isInterrupt ? 5000 : 2000)
@@ -908,24 +914,24 @@ export class SimulationEngine {
   }
 
   // Make interrupt behavior decision (forced action, LLM selects facility only)
-  private makeInterruptBehaviorDecision(character: SimCharacter, forcedAction: string): void {
+  private async makeInterruptBehaviorDecision(character: SimCharacter, forcedAction: string): Promise<void> {
     this.pendingDecisions.add(character.id)
     this.actionExecutor.startAction(character.id, 'thinking')
 
-    const context = this.buildBehaviorContext(character, false)
+    const context = await this.buildBehaviorContext(character, false)
 
-    this.behaviorDecider.decideInterruptFacility(forcedAction, context).then((decision) => {
+    this.behaviorDecider.decideInterruptFacility(forcedAction, context).then(async (decision) => {
       this.actionExecutor.forceCompleteAction(character.id)
 
       const currentChar = this.worldState.getCharacter(character.id)
       if (!currentChar || !this.isCharacterIdle(currentChar)) return
 
       console.log(`[SimulationEngine] Interrupt decision for ${character.name}: ${decision.type} (${decision.reason})`)
-      this.applyBehaviorDecision(currentChar, decision, 'interrupt')
+      await this.applyBehaviorDecision(currentChar, decision, 'interrupt')
 
-      // Reset afterSystemAutoMove flag after decision is applied
-      if (currentChar.afterSystemAutoMove) {
-        this.worldState.updateCharacter(character.id, { afterSystemAutoMove: false })
+      // Reset afterSystemAutoAction flag after decision is applied
+      if (currentChar.afterSystemAutoAction) {
+        this.worldState.updateCharacter(character.id, { afterSystemAutoAction: false })
       }
     }).catch((error) => {
       this.actionExecutor.forceCompleteAction(character.id)
@@ -940,28 +946,28 @@ export class SimulationEngine {
   }
 
   // Make behavior decision for a single character
-  private makeBehaviorDecision(character: SimCharacter, _currentTime: WorldTime): void {
+  private async makeBehaviorDecision(character: SimCharacter, _currentTime: WorldTime): Promise<void> {
     this.pendingDecisions.add(character.id)
     this.actionExecutor.startAction(character.id, 'thinking')
 
-    const context = this.buildBehaviorContext(character, true)
+    const context = await this.buildBehaviorContext(character, true)
 
-    this.behaviorDecider.decide(context).then((decision) => {
+    this.behaviorDecider.decide(context).then(async (decision) => {
       this.actionExecutor.forceCompleteAction(character.id)
 
       const currentChar = this.worldState.getCharacter(character.id)
       if (!currentChar || !this.isCharacterIdle(currentChar)) return
 
-      this.applyBehaviorDecision(currentChar, decision, 'normal')
+      await this.applyBehaviorDecision(currentChar, decision, 'normal')
 
-      // Reset afterSystemAutoMove flag after decision is applied
-      if (currentChar.afterSystemAutoMove) {
-        this.worldState.updateCharacter(character.id, { afterSystemAutoMove: false })
+      // Reset afterSystemAutoAction flag after decision is applied
+      if (currentChar.afterSystemAutoAction) {
+        this.worldState.updateCharacter(character.id, { afterSystemAutoAction: false })
       }
 
       // Apply schedule update if LLM proposed one
       if (decision.scheduleUpdate) {
-        this.applyScheduleUpdate(character.id, decision.scheduleUpdate)
+        await this.applyScheduleUpdate(character.id, decision.scheduleUpdate)
       }
     }).catch((error) => {
       this.actionExecutor.forceCompleteAction(character.id)
@@ -1129,7 +1135,7 @@ export class SimulationEngine {
   }
 
   // Start conversation session and execute conversation loop
-  private startConversationWithExecutor(characterId: string, npcId: string, goal: ConversationGoal): void {
+  private async startConversationWithExecutor(characterId: string, npcId: string, goal: ConversationGoal): Promise<void> {
     const session = this.conversationManager.startConversation(characterId, npcId, goal)
     if (!session) {
       console.log(`[SimulationEngine] Failed to start conversation for ${characterId}`)
@@ -1149,12 +1155,20 @@ export class SimulationEngine {
       return
     }
 
+    // Load context data from DB
+    const [recentConversations, midTermMemories, todayActions, schedule] = await Promise.all([
+      this.getRecentConversationsFromDB(characterId),
+      this.getMidTermMemoriesFromDB(characterId),
+      this.getActionHistoryFromDB(characterId),
+      this.getScheduleFromDB(characterId),
+    ])
+
     // Build conversation context
     const context: ConversationContext = {
-      recentConversations: filterForConversation(this.recentConversationsCache.get(characterId), npcId),
-      midTermMemories: this.midTermMemoriesCache.get(characterId) ?? [],
-      todayActions: this.getActionHistoryForCharacter(characterId),
-      schedule: this.getScheduleForCharacter(characterId),
+      recentConversations: filterForConversation(recentConversations, npcId),
+      midTermMemories,
+      todayActions,
+      schedule,
       currentTime: this.worldState.getTime(),
       nearbyMaps: this.buildNearbyMaps(character.currentMapId),
     }
@@ -1303,18 +1317,52 @@ export class SimulationEngine {
     }, delayMs)
   }
 
-  // Generate cache key for character-day based data
-  private characterDayCacheKey(characterId: string, day: number): string {
-    return `${characterId}-${day}`
+  // === DB Direct Access Methods ===
+
+  // Get schedule directly from DB
+  private async getScheduleFromDB(characterId: string): Promise<ScheduleEntry[] | null> {
+    if (!this.stateStore) return null
+    const currentDay = this.worldState.getTime().day
+    const schedule = await this.stateStore.loadSchedule(characterId, currentDay)
+    return schedule?.entries ?? null
   }
 
-  // Get schedule for a character (DB cache only, seeded on startup)
-  private getScheduleForCharacter(characterId: string): ScheduleEntry[] | null {
+  // Get action history directly from DB with limit
+  private async getActionHistoryFromDB(characterId: string): Promise<ActionHistoryEntry[]> {
+    if (!this.stateStore) return []
     const currentDay = this.worldState.getTime().day
-    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
+    return await this.stateStore.loadActionHistoryForDay(characterId, currentDay, this.todayActionsLimit)
+  }
 
-    // Return from DB cache (seeded on startup/day-change)
-    return this.scheduleCache.get(cacheKey) ?? null
+  // Get mid-term memories directly from DB (expired ones filtered by loadActiveMidTermMemories)
+  private async getMidTermMemoriesFromDB(characterId: string): Promise<MidTermMemory[]> {
+    if (!this.stateStore) return []
+    const currentDay = this.worldState.getTime().day
+    return await this.stateStore.loadActiveMidTermMemories(characterId, currentDay)
+  }
+
+  // Get recent conversations directly from DB
+  private async getRecentConversationsFromDB(characterId: string): Promise<RecentConversation[]> {
+    if (!this.stateStore) return []
+    const currentDay = this.worldState.getTime().day
+    const summaries = await this.stateStore.loadNPCSummariesForDay(currentDay)
+
+    // Filter by character and convert time string to worldTimeMinutes
+    return summaries
+      .filter(s => s.characterId === characterId)
+      .map(entry => {
+        let worldTimeMinutes = currentDay * 24 * 60
+        if (entry.time) {
+          const [hours, minutes] = entry.time.split(':').map(Number)
+          worldTimeMinutes = currentDay * 24 * 60 + hours * 60 + minutes
+        }
+        return {
+          npcId: entry.npcId,
+          npcName: entry.npcName,
+          summary: entry.summary,
+          timestamp: worldTimeMinutes,
+        }
+      })
   }
 
   /**
@@ -1437,12 +1485,12 @@ export class SimulationEngine {
   }
 
   // Apply schedule update proposed by LLM
-  private applyScheduleUpdate(characterId: string, update: ScheduleUpdate): void {
+  private async applyScheduleUpdate(characterId: string, update: ScheduleUpdate): Promise<void> {
     const currentDay = this.worldState.getTime().day
-    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
 
-    // Clone entries from DB cache (seeded on startup/day-change)
-    const entries = [...(this.scheduleCache.get(cacheKey) ?? [])]
+    // Load current schedule from DB
+    const schedule = await this.stateStore?.loadSchedule(characterId, currentDay)
+    const entries = [...(schedule?.entries ?? [])]
 
     const { type, entry } = update
 
@@ -1482,19 +1530,14 @@ export class SimulationEngine {
         break
     }
 
-    // Update cache
-    this.scheduleCache.set(cacheKey, entries)
-
-    // Persist to DB (async, non-blocking)
+    // Persist to DB
     if (this.stateStore) {
-      const schedule: DailySchedule = {
+      const updatedSchedule: DailySchedule = {
         characterId,
         day: currentDay,
         entries,
       }
-      this.stateStore.saveSchedule(schedule).catch(error => {
-        console.error(`[SimulationEngine] Error saving schedule update:`, error)
-      })
+      await this.stateStore.saveSchedule(updatedSchedule)
     }
   }
 
@@ -1519,57 +1562,6 @@ export class SimulationEngine {
     }
   }
 
-  // Load schedules from DB into cache for all characters on current day
-  async loadScheduleCache(): Promise<void> {
-    if (!this.stateStore) return
-
-    const currentDay = this.worldState.getTime().day
-    const characters = this.worldState.getAllCharacters()
-
-    for (const char of characters) {
-      try {
-        const schedule = await this.stateStore.loadSchedule(char.id, currentDay)
-        if (schedule) {
-          const cacheKey = this.characterDayCacheKey(char.id, currentDay)
-          this.scheduleCache.set(cacheKey, schedule.entries)
-          console.log(`[SimulationEngine] Loaded schedule for ${char.name} (day ${currentDay}) from DB`)
-        }
-      } catch (error) {
-        console.error(`[SimulationEngine] Error loading schedule for ${char.id}:`, error)
-      }
-    }
-  }
-
-  // Clear schedule cache (called when day changes)
-  clearScheduleCache(): void {
-    this.scheduleCache.clear()
-  }
-
-  // Clear schedule cache entries for a specific day only
-  private clearScheduleCacheForDay(day: number): void {
-    const suffix = `-${day}`
-    for (const key of this.scheduleCache.keys()) {
-      if (key.endsWith(suffix)) {
-        this.scheduleCache.delete(key)
-      }
-    }
-  }
-
-  // Clear action history cache (called when day changes)
-  clearActionHistoryCache(): void {
-    this.actionHistoryCache.clear()
-  }
-
-  // Clear action history cache entries for a specific day only
-  private clearActionHistoryCacheForDay(day: number): void {
-    const suffix = `-${day}`
-    for (const key of this.actionHistoryCache.keys()) {
-      if (key.endsWith(suffix)) {
-        this.actionHistoryCache.delete(key)
-      }
-    }
-  }
-
   // Record action history (for instant actions: move, idle, talk summary)
   private recordActionHistory(entry: {
     characterId: string
@@ -1585,19 +1577,7 @@ export class SimulationEngine {
     const timeStr = this.formatTimeString(currentTime)
     const target = entry.target ?? entry.facilityId ?? entry.targetNpcId
 
-    // Update cache (completed action)
-    const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
-    const cached = this.actionHistoryCache.get(cacheKey) ?? []
-    cached.push({
-      time: timeStr,
-      actionId: entry.actionId,
-      target,
-      durationMinutes: entry.durationMinutes,
-      reason: entry.reason,
-    })
-    this.actionHistoryCache.set(cacheKey, cached)
-
-    // Persist to DB (async, non-blocking) - these are instant actions, use legacy API
+    // Persist to DB (async, non-blocking) - these are instant actions
     if (this.stateStore) {
       this.stateStore.addActionHistory({
         characterId: entry.characterId,
@@ -1687,18 +1667,6 @@ export class SimulationEngine {
     const timeStr = this.formatTimeString(currentTime)
     const target = entry.facilityId ?? entry.targetNpcId
 
-    // Update cache (completed action)
-    const cacheKey = this.characterDayCacheKey(entry.characterId, currentDay)
-    const cached = this.actionHistoryCache.get(cacheKey) ?? []
-    cached.push({
-      time: timeStr,
-      actionId: entry.actionId,
-      target,
-      durationMinutes: entry.durationMinutes,
-      reason: entry.reason,
-    })
-    this.actionHistoryCache.set(cacheKey, cached)
-
     // Complete in DB using stored rowId
     const rowId = this.activeActionRowIds.get(entry.characterId)
     if (rowId && this.stateStore) {
@@ -1773,18 +1741,6 @@ export class SimulationEngine {
       this.worldState.updateCharacter(characterId, statUpdates)
     }
 
-    // Update cache: add episode to the last matching entry
-    const cacheKey = this.characterDayCacheKey(characterId, day)
-    const cached = this.actionHistoryCache.get(cacheKey)
-    if (cached) {
-      for (let i = cached.length - 1; i >= 0; i--) {
-        if (cached[i].time === time) {
-          cached[i].episode = result.episode
-          break
-        }
-      }
-    }
-
     // Update DB
     if (this.stateStore) {
       this.stateStore.updateActionHistoryEpisode(characterId, day, time, result.episode)
@@ -1815,13 +1771,6 @@ export class SimulationEngine {
       episode,
       statChanges,
     })
-  }
-
-  // Get action history for a character (cache priority, fallback to empty)
-  private getActionHistoryForCharacter(characterId: string): ActionHistoryEntry[] {
-    const currentDay = this.worldState.getTime().day
-    const cacheKey = this.characterDayCacheKey(characterId, currentDay)
-    return this.actionHistoryCache.get(cacheKey) ?? []
   }
 
   /**
@@ -1855,49 +1804,6 @@ export class SimulationEngine {
     })
   }
 
-  // Load action history from DB into cache for all characters on current day
-  async loadActionHistoryCache(): Promise<void> {
-    if (!this.stateStore) return
-
-    const currentDay = this.worldState.getTime().day
-    const characters = this.worldState.getAllCharacters()
-
-    for (const char of characters) {
-      try {
-        const history = await this.stateStore.loadActionHistoryForDay(char.id, currentDay)
-        if (history.length > 0) {
-          const cacheKey = this.characterDayCacheKey(char.id, currentDay)
-          this.actionHistoryCache.set(cacheKey, history)
-          console.log(`[SimulationEngine] Loaded ${history.length} action history entries for ${char.name} (day ${currentDay})`)
-        }
-      } catch (error) {
-        console.error(`[SimulationEngine] Error loading action history for ${char.id}:`, error)
-      }
-    }
-  }
-
-  // Load mid-term memories from DB into cache for all characters
-  async loadMidTermMemoriesCache(): Promise<void> {
-    if (!this.stateStore) return
-
-    const currentDay = this.worldState.getTime().day
-    const characters = this.worldState.getAllCharacters()
-
-    this.midTermMemoriesCache.clear()
-
-    for (const char of characters) {
-      try {
-        const memories = await this.stateStore.loadActiveMidTermMemories(char.id, currentDay)
-        if (memories.length > 0) {
-          this.midTermMemoriesCache.set(char.id, memories)
-          console.log(`[SimulationEngine] Loaded ${memories.length} mid-term memories for ${char.name}`)
-        }
-      } catch (error) {
-        console.error(`[SimulationEngine] Error loading mid-term memories for ${char.id}:`, error)
-      }
-    }
-  }
-
   // Update active action progress in DB (30秒ごと)
   private async updateActiveActionsProgress(): Promise<void> {
     if (!this.stateStore) return
@@ -1924,17 +1830,14 @@ export class SimulationEngine {
     }
   }
 
-  // Delete expired mid-term memories and reload cache
-  private async cleanupAndReloadMidTermMemories(currentDay: number): Promise<void> {
+  // Delete expired mid-term memories from DB
+  private async cleanupExpiredMidTermMemories(currentDay: number): Promise<void> {
     if (!this.stateStore) return
 
     const deleted = await this.stateStore.deleteExpiredMidTermMemories(currentDay)
     if (deleted > 0) {
       console.log(`[SimulationEngine] Deleted ${deleted} expired mid-term memories`)
     }
-
-    // Reload cache from DB (reflects deletions)
-    await this.loadMidTermMemoriesCache()
   }
 
   // Restore active actions from DB (called on startup)
@@ -2002,62 +1905,32 @@ export class SimulationEngine {
     }
   }
 
-  // Load recent conversations from DB for current day
-  async loadRecentConversationsCache(): Promise<void> {
-    if (!this.stateStore) return
-    const currentDay = this.worldState.getTime().day
-    const summaries = await this.stateStore.loadNPCSummariesForDay(currentDay)
-
-    this.recentConversationsCache.clear()
-    this.recentConversationsCacheDay.clear()
-    for (const entry of summaries) {
-      // Convert time string (HH:MM) to world time minutes for cooldown calculation
-      // entry.time is set by onSummaryPersist callback, format: "HH:MM"
-      let worldTimeMinutes = currentDay * 24 * 60 // Default to start of day
-      if (entry.time) {
-        const [hours, minutes] = entry.time.split(':').map(Number)
-        worldTimeMinutes = currentDay * 24 * 60 + hours * 60 + minutes
-      }
-      const cached = this.recentConversationsCache.get(entry.characterId) ?? []
-      cached.push({
-        npcId: entry.npcId,
-        npcName: entry.npcName,
-        summary: entry.summary,
-        timestamp: worldTimeMinutes,
-      })
-      this.recentConversationsCache.set(entry.characterId, cached)
-      this.recentConversationsCacheDay.set(entry.characterId, currentDay)
-    }
-    let totalEntries = 0
-    for (const arr of this.recentConversationsCache.values()) {
-      totalEntries += arr.length
-    }
-    if (totalEntries > 0) {
-      console.log(`[SimulationEngine] Loaded ${totalEntries} recent conversations for day ${currentDay}`)
-    }
-  }
-
-  // Get today's logs from cache and DB (for initial load)
+  // Get today's logs from DB (for initial load)
   async getTodayLogs(): Promise<ActivityLogEntry[]> {
     const currentDay = this.worldState.getTime().day
     const logs: ActivityLogEntry[] = []
 
-    // Collect action logs from cache (completed actions)
-    for (const [key, entries] of this.actionHistoryCache) {
-      if (!key.endsWith(`-${currentDay}`)) continue
-      const characterId = key.slice(0, key.lastIndexOf('-'))
-      const character = this.worldState.getCharacter(characterId)
-      for (const entry of entries) {
-        logs.push({
-          type: 'action',
-          characterId,
-          characterName: character?.name ?? characterId,
-          time: entry.time,
-          actionId: entry.actionId,
-          target: entry.target,
-          durationMinutes: entry.durationMinutes,
-          reason: entry.reason,
-        })
+    // Collect action logs from DB (completed actions)
+    if (this.stateStore) {
+      const characters = this.worldState.getAllCharacters()
+      for (const character of characters) {
+        try {
+          const history = await this.stateStore.loadActionHistoryForDay(character.id, currentDay)
+          for (const entry of history) {
+            logs.push({
+              type: 'action',
+              characterId: character.id,
+              characterName: character.name,
+              time: entry.time,
+              actionId: entry.actionId,
+              target: entry.target,
+              durationMinutes: entry.durationMinutes,
+              reason: entry.reason,
+            })
+          }
+        } catch (error) {
+          console.error(`[SimulationEngine] Error loading action history for ${character.id}:`, error)
+        }
       }
     }
 
@@ -2332,6 +2205,14 @@ export class SimulationEngine {
     console.log(`[SimulationEngine] Action restrictions set (maxConsecutiveSameAction: ${this.maxConsecutiveSameAction})`)
   }
 
+  // Set memory config (prompt size limits)
+  setMemoryConfig(config: import('@/types').MemoryConfig): void {
+    this.todayActionsLimit = config.todayActionsLimit
+    this.conversationPostProcessor.setMidTermLimit(config.midTermLimit)
+    this.conversationPostProcessor.setFactsLimit(config.factsLimit)
+    console.log(`[SimulationEngine] Memory config set (todayActionsLimit: ${this.todayActionsLimit}, midTermLimit: ${config.midTermLimit}, factsLimit: ${config.factsLimit})`)
+  }
+
   // Set mini episode config (creates LLMMiniEpisodeGenerator if LLM is available)
   async setMiniEpisodeConfig(config: MiniEpisodeConfig): Promise<void> {
     const { isLLMAvailable } = await import('../llm')
@@ -2508,18 +2389,19 @@ export async function ensureEngineInitialized(logPrefix: string = '[Engine]'): P
         engine.setActionRestrictions(config.actionRestrictions)
       }
 
+      // Set memory config
+      if (config.memory) {
+        engine.setMemoryConfig(config.memory)
+      }
+
       // Set mini episode config
       if (config.miniEpisode) {
         await engine.setMiniEpisodeConfig(config.miniEpisode)
       }
 
-      // Load schedules, action history, and mid-term memories BEFORE starting engine
-      // This prevents race condition where ticks fire before data is loaded
+      // Seed default schedules to DB BEFORE starting engine
+      // (DB reads are done on-demand, no cache loading needed)
       await engine.seedDefaultSchedules()
-      await engine.loadScheduleCache()
-      await engine.loadActionHistoryCache()
-      await engine.loadMidTermMemoriesCache()
-      await engine.loadRecentConversationsCache()
       engine.initializeLastDay()
 
       // Restore active actions from DB (actions in progress when server stopped)

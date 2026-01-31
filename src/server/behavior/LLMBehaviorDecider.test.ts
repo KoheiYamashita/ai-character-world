@@ -37,7 +37,7 @@ function createTestContext(overrides: Partial<BehaviorContext> = {}): BehaviorCo
     currentAction: null,
     pendingAction: null,
     actionCounter: 0,
-    afterSystemAutoMove: false,
+    afterSystemAutoAction: false,
   }
 
   return {

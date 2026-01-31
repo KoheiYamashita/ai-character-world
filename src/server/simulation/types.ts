@@ -36,10 +36,10 @@ export interface SimCharacter extends Character {
   displayEmoji?: string
   // Pending action to execute after movement completes
   pendingAction: PendingAction | null
-  // System auto-move counter (resets after 5 actions)
+  // System auto-action counter (resets after N actions)
   actionCounter: number
-  // Flag: true after system auto-move completes (reset on behavior decision)
-  afterSystemAutoMove: boolean
+  // Flag: true after system auto-action completes (reset on behavior decision)
+  afterSystemAutoAction: boolean
 }
 
 export interface SimNavigationState {
@@ -160,7 +160,7 @@ export function createSimCharacter(char: Character): SimCharacter {
     currentAction: null,
     pendingAction: null,
     actionCounter: 0,
-    afterSystemAutoMove: false,
+    afterSystemAutoAction: false,
   }
 }
 

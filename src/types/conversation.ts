@@ -39,10 +39,12 @@ export interface ConversationSummaryEntry {
   mood?: string
 }
 
+import type { NPCFact } from './npc'
+
 export interface NPCDynamicState {
   affinity: number
   mood: string
-  facts: string[]
+  facts: NPCFact[]
   conversationCount: number
   lastConversation: number | null
 }

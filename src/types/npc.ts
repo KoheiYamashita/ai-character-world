@@ -1,5 +1,12 @@
 import type { Position, Direction, SpriteConfig } from './character'
 
+// NPCが保持する知識・事実（期限付き）
+export interface NPCFact {
+  content: string
+  /** 有効期限（ワールド日数）。nullは永続 */
+  expiresDay: number | null
+}
+
 // Maps.json NPC config
 export interface NPCConfigJson {
   id: string
@@ -9,7 +16,7 @@ export interface NPCConfigJson {
   personality: string           // 性格描写
   tendencies: string[]          // 行動傾向
   customPrompt?: string         // 自由形式のプロンプト
-  facts: string[]               // NPCが一貫して保つ事実
+  facts: string[]               // NPCが一貫して保つ事実（後方互換: string[] | NPCFact[]）
 }
 
 // Runtime NPC
@@ -26,7 +33,7 @@ export interface NPC {
   personality: string
   tendencies: string[]
   customPrompt?: string
-  facts: string[]
+  facts: NPCFact[]
   // 動的ステータス
   affinity: number              // 好感度（初期値0）
   mood: string                  // 気分（初期値"neutral"）

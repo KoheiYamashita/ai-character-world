@@ -74,7 +74,10 @@ function createTestNPC(): NPC {
     direction: 'down',
     personality: '温厚で優しい店主',
     tendencies: ['お客さんに親切'],
-    facts: ['この店は10年営業している', '名物はカレーライス'],
+    facts: [
+      { content: 'この店は10年営業している', expiresDay: null },
+      { content: '名物はカレーライス', expiresDay: null },
+    ],
     affinity: 5,
     mood: 'happy',
     conversationCount: 3,

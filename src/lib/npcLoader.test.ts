@@ -85,7 +85,11 @@ describe('npcLoader', () => {
 
     it('should include facts from config', () => {
       const npc = createNPCFromConfig(baseConfig, 'test-map', { x: 0, y: 0 })
-      expect(npc.facts).toEqual(['花屋で働いている', '猫が好き'])
+      // Facts are converted to NPCFact[] format with expiresDay: null (permanent)
+      expect(npc.facts).toEqual([
+        { content: '花屋で働いている', expiresDay: null },
+        { content: '猫が好き', expiresDay: null },
+      ])
     })
 
     it('should initialize dynamic status fields to defaults', () => {

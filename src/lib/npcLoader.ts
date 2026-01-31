@@ -1,4 +1,13 @@
-import type { NPC, NPCConfigJson, Position, WorldMap } from '@/types'
+import type { NPC, NPCConfigJson, NPCFact, Position, WorldMap } from '@/types'
+
+// Convert string facts to NPCFact format (permanent facts from config)
+function convertToNPCFacts(facts: string[] | undefined): NPCFact[] {
+  if (!facts || facts.length === 0) return []
+  return facts.map(content => ({
+    content,
+    expiresDay: null,  // Initial facts from config are permanent
+  }))
+}
 
 export function createNPCFromConfig(
   config: NPCConfigJson,
@@ -17,7 +26,7 @@ export function createNPCFromConfig(
     personality: config.personality,
     tendencies: config.tendencies,
     customPrompt: config.customPrompt,
-    facts: config.facts,
+    facts: convertToNPCFacts(config.facts),
     // 動的ステータス（初期値）
     affinity: 0,
     mood: 'neutral',

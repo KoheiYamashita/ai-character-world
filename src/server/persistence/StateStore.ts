@@ -153,8 +153,9 @@ export interface StateStore {
 
   /**
    * Load action history for a character on a specific day
+   * @param limit Optional limit on number of results (default: no limit)
    */
-  loadActionHistoryForDay(characterId: string, day: number): Promise<ActionHistoryEntry[]>
+  loadActionHistoryForDay(characterId: string, day: number, limit?: number): Promise<ActionHistoryEntry[]>
 
   /**
    * Update the episode field of the most recent action history entry
@@ -195,6 +196,12 @@ export interface StateStore {
    * Add a mid-term memory
    */
   addMidTermMemory(memory: MidTermMemory): Promise<void>
+
+  /**
+   * Replace all mid-term memories for a character
+   * (Used for memory consolidation after conversation)
+   */
+  replaceMidTermMemories(characterId: string, memories: MidTermMemory[]): Promise<void>
 
   /**
    * Load active mid-term memories for a character (not expired)

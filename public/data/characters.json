@@ -26,7 +26,7 @@
         "fitness": 80
       },
       "employment": {
-        "jobId": "freelance-writer",
+        "jobId": "freelance-engineer",
         "workplaces": [
           { "workplaceLabel": "書斎", "mapId": "home" },
           { "workplaceLabel": "作業エリア", "mapId": "office" }

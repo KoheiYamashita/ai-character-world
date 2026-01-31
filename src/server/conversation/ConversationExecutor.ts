@@ -210,7 +210,14 @@ export class ConversationExecutor {
     // 同期で後処理（次の行動決定に必要な情報を更新）
     if (this.postProcessor) {
       try {
-        await this.postProcessor.process(completedSession, npc, character, context.currentTime)
+        // Pass existing memories for consolidation
+        await this.postProcessor.process(
+          completedSession,
+          npc,
+          character,
+          context.currentTime,
+          context.midTermMemories
+        )
       } catch (error) {
         console.error(`[ConversationExecutor] PostProcessor error for ${character.name}:`, error)
       }
@@ -446,7 +453,7 @@ export class ConversationExecutor {
     // NPCが保つ事実
     if (npc.facts && npc.facts.length > 0) {
       parts.push('【あなたの知識・事実】')
-      parts.push(npc.facts.map(f => `- ${f}`).join('\n'))
+      parts.push(npc.facts.map(f => `- ${f.content}`).join('\n'))
       parts.push('')
     }
 
