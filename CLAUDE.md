@@ -290,6 +290,7 @@ Character型を拡張:
 - どのレストランで食べるか、どの寝室で寝るか等を選択
 
 ### 環境変数
+詳細は `example.env.local` を参照。
 ```
 LLM_MODEL=anthropic/claude-sonnet-4    # or openai/gpt-4o-mini, google/gemini-2.0, openrouter/anthropic/claude-3.5-sonnet
 LLM_API_KEY=sk-...

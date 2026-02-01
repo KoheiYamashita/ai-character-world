@@ -20,13 +20,21 @@ npm install
 
 ### 環境変数
 
-`.env.local` を作成:
+`example.env.local` をコピーして `.env.local` を作成:
 
-```env
-LLM_MODEL=anthropic/claude-sonnet-4    # or openai/gpt-4o-mini, google/gemini-2.0
-LLM_API_KEY=sk-...
-LLM_BASE_URL=http://localhost:5001     # 省略可
+```bash
+cp example.env.local .env.local
 ```
+
+必須の環境変数:
+- `LLM_MODEL`: LLMプロバイダー/モデル（例: `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`）
+- `LLM_API_KEY`: APIキー
+
+オプション:
+- `LLM_BASE_URL`: カスタムエンドポイント（OpenAI互換API使用時）
+- `ERROR_WEBHOOK_URL`: エラー通知用Webhook
+- `DEBUG_MODE`: デバッグログ有効化
+- Discord Gateway/チャット関連: `example.env.local` を参照
 
 ## 開発
 
