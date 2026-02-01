@@ -80,6 +80,21 @@ node scripts/validate-maps.mjs                # マップデータ検証
 - SQLiteで状態を30秒ごとに自動保存
 - サーバー再起動時に前回状態を復元
 
+## カスタマイズ
+
+このプロジェクトでは以下の要素をカスタマイズできます：
+
+| 要素 | 設定ファイル | 主な設定項目 |
+|------|-------------|-------------|
+| キャラクター | `public/data/characters.json` | 名前、性格、スケジュール、雇用 |
+| NPC | `public/data/maps.json` | 名前、性格、知識（facts） |
+| マップ | `public/data/maps.json` | 障害物、施設、入口、背景色 |
+| ワールド設定 | `public/data/world-config.json` | 時間、アクション効果、テーマ |
+| スプライト | `public/assets/sprites/` | キャラクター・NPC画像 |
+| LLM | `.env.local` | プロバイダー、モデル |
+
+詳細は [docs/customization.md](./docs/customization.md) を参照。
+
 ## プレビュー
 
 ```
@@ -108,4 +123,5 @@ node scripts/validate-maps.mjs                # マップデータ検証
 ## ドキュメント
 
 - [CLAUDE.md](./CLAUDE.md) - 詳細なアーキテクチャ・実装ガイド
+- [docs/customization.md](./docs/customization.md) - カスタマイズガイド
 - [docs/implementation-plan.md](./docs/implementation-plan.md) - 実装計画
