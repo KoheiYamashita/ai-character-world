@@ -6,6 +6,7 @@ vi.mock('../behavior/LLMBehaviorDecider', () => ({
     decide = vi.fn().mockResolvedValue({ type: 'idle', reason: 'test' })
     decideInterruptFacility = vi.fn().mockResolvedValue({ type: 'idle', reason: 'test interrupt' })
     setActionConfigs = vi.fn()
+    setOnDebugLog = vi.fn()
   },
 }))
 
@@ -16,6 +17,7 @@ vi.mock('../conversation/ConversationExecutor', () => ({
     setOnConversationComplete = vi.fn()
     setOnMessageEmit = vi.fn()
     setTurnIntervalMs = vi.fn()
+    setOnDebugLog = vi.fn()
     executeConversation = vi.fn().mockResolvedValue(undefined)
   },
 }))

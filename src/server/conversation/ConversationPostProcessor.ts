@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { z } from 'zod'
-import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC, NPCFact, WorldTime } from '@/types'
+import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC, WorldTime } from '@/types'
 import type { SimCharacter } from '@/server/simulation/types'
 import type { MidTermMemory } from '@/types/behavior'
 import { llmGenerateObject } from '@/server/llm'
