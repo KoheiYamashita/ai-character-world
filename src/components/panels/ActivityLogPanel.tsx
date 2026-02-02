@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useActivityLogStore } from '@/stores'
-import type { ActivityLogEntry, ActionLogEntry, ConversationLogEntry, ConversationMessageLogEntry, MiniEpisodeLogEntry } from '@/types'
+import type { ActivityLogEntry, ActionLogEntry, ConversationLogEntry, ConversationMessageLogEntry, MiniEpisodeLogEntry, DebugLLMBehaviorLogEntry, DebugConversationTurnLogEntry } from '@/types'
 import { getActionLabel } from '@/lib/uiLabels'
 
 function ActionLogLine({ entry }: { entry: ActionLogEntry }) {
@@ -93,6 +93,84 @@ function MiniEpisodeLogLine({ entry }: { entry: MiniEpisodeLogEntry }) {
   )
 }
 
+function DebugLLMBehaviorLogLine({ entry }: { entry: DebugLLMBehaviorLogEntry }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const stageLabel = {
+    action_decision: '行動決定',
+    facility_selection: '施設選択',
+    interrupt_facility: '緊急施設選択',
+  }[entry.stage] || entry.stage
+
+  return (
+    <div className="text-sm text-slate-300 py-0.5 pl-4 border-l-2 border-orange-500/30">
+      <div
+        className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/30 rounded px-1"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="text-orange-500">{expanded ? '▼' : '▶'}</span>
+        <span className="text-slate-500">[{entry.time}]</span>{' '}
+        <span className="text-blue-300 font-medium">{entry.characterName}</span>{' '}
+        <span className="text-orange-400 text-xs px-1 bg-orange-900/30 rounded">🔧 {stageLabel}</span>
+      </div>
+      {expanded && (
+        <div className="mt-2 ml-4 space-y-2">
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Prompt:</div>
+            <pre className="text-xs bg-slate-900 p-2 rounded overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap text-slate-400">
+              {entry.prompt}
+            </pre>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Response:</div>
+            <pre className="text-xs bg-slate-900 p-2 rounded overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap text-green-400">
+              {entry.response}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DebugConversationTurnLogLine({ entry }: { entry: DebugConversationTurnLogEntry }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const speakerLabel = entry.speaker === 'character' ? entry.characterName : entry.npcName
+
+  return (
+    <div className="text-sm text-slate-300 py-0.5 pl-4 border-l-2 border-purple-500/30">
+      <div
+        className="flex items-center gap-2 cursor-pointer hover:bg-slate-700/30 rounded px-1"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="text-purple-500">{expanded ? '▼' : '▶'}</span>
+        <span className="text-slate-500">[{entry.time}]</span>{' '}
+        <span className="text-purple-400 text-xs px-1 bg-purple-900/30 rounded">💬 Turn {entry.turn}</span>{' '}
+        <span className={entry.speaker === 'character' ? 'text-blue-300' : 'text-green-300'}>
+          {speakerLabel}
+        </span>
+      </div>
+      {expanded && (
+        <div className="mt-2 ml-4 space-y-2">
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Prompt:</div>
+            <pre className="text-xs bg-slate-900 p-2 rounded overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap text-slate-400">
+              {entry.prompt}
+            </pre>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500 mb-1">Response:</div>
+            <pre className="text-xs bg-slate-900 p-2 rounded overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap text-green-400">
+              {entry.response}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LogEntry({ entry }: { entry: ActivityLogEntry }) {
   switch (entry.type) {
     case 'action':
@@ -103,6 +181,10 @@ function LogEntry({ entry }: { entry: ActivityLogEntry }) {
       return <ConversationMessageLogLine entry={entry} />
     case 'mini_episode':
       return <MiniEpisodeLogLine entry={entry} />
+    case 'debug_llm_behavior':
+      return <DebugLLMBehaviorLogLine entry={entry} />
+    case 'debug_conversation_turn':
+      return <DebugConversationTurnLogLine entry={entry} />
   }
 }
 

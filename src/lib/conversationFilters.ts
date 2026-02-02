@@ -57,6 +57,34 @@ export function filterForConversation(
 }
 
 /**
+ * チャット用フィルタ: 全NPC各1件ずつ（直近のもの）
+ * NPCとの対面会話がないため、全NPCを平等に扱う
+ */
+export function filterLatestPerNPC(
+  conversations: RecentConversation[] | undefined
+): RecentConversation[] {
+  if (!conversations || conversations.length === 0) {
+    return []
+  }
+
+  // NPCごとに最新1件を取得
+  const seenNpcIds = new Set<string>()
+  const result: RecentConversation[] = []
+
+  // timestampで降順ソート（新しい順）
+  const sorted = [...conversations].sort((a, b) => b.timestamp - a.timestamp)
+
+  for (const conv of sorted) {
+    if (!seenNpcIds.has(conv.npcId)) {
+      seenNpcIds.add(conv.npcId)
+      result.push(conv)
+    }
+  }
+
+  return result
+}
+
+/**
  * NPCごとの最新会話タイムスタンプを取得
  */
 function getLatestConversationTimes(

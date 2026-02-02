@@ -1,6 +1,7 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
 
 /**
  * Active action entry (for restoring in-progress actions on restart)
@@ -214,6 +215,54 @@ export interface StateStore {
    */
   deleteExpiredMidTermMemories(currentDay: number): Promise<number>
 
+  // ==========================================================================
+  // Debug log methods (DEBUG_MODE=true 時のみ使用)
+  // ==========================================================================
+
+  /**
+   * Add a debug log entry
+   */
+  addDebugLog(entry: {
+    type: 'llm_behavior' | 'conversation_turn'
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+  }): Promise<void>
+
+  /**
+   * Load debug logs for a specific day
+   */
+  loadDebugLogsForDay(day: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>>
+
+  /**
+   * Load debug logs for a character
+   */
+  loadDebugLogsForCharacter(characterId: string, day?: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>>
+
+  /**
+   * Delete old debug logs
+   * @param keepDays Days to keep (delete older than this)
+   * Returns number of deleted records
+   */
+  deleteOldDebugLogs(keepDays: number): Promise<number>
+
   /**
    * Check if store has been initialized with data
    */
@@ -228,6 +277,55 @@ export interface StateStore {
    * Close the connection (for cleanup)
    */
   close(): Promise<void>
+
+  // ==========================================================================
+  // Chat message methods
+  // ==========================================================================
+
+  /**
+   * Save a chat message
+   */
+  saveChatMessage(message: ChatMessageRecord): Promise<void>
+
+  /**
+   * Load recent chat messages for a channel
+   * @param limit Number of messages to load (default: 10)
+   */
+  loadRecentChatMessages(
+    providerId: ChatProviderId,
+    channelId: string,
+    limit?: number
+  ): Promise<ChatMessageRecord[]>
+
+  /**
+   * Delete old chat messages
+   * @param retentionDays Days to keep (delete older than this)
+   * Returns number of deleted records
+   */
+  deleteOldChatMessages(retentionDays: number): Promise<number>
+
+  // ==========================================================================
+  // Chat summary methods
+  // ==========================================================================
+
+  /**
+   * Save or update a chat summary
+   */
+  saveChatSummary(summary: ChatSummary): Promise<void>
+
+  /**
+   * Load a chat summary for a character and channel
+   */
+  loadChatSummary(
+    characterId: string,
+    providerId: ChatProviderId,
+    channelId: string
+  ): Promise<ChatSummary | null>
+
+  /**
+   * Load all chat summaries for a character
+   */
+  loadChatSummariesForCharacter(characterId: string): Promise<ChatSummary[]>
 }
 
 /**

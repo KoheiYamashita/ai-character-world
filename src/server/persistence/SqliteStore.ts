@@ -3,6 +3,7 @@ import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, NPCFact, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -201,6 +202,63 @@ export class SqliteStore implements StateStore {
         last_conversation INTEGER,
         updated_at INTEGER NOT NULL
       );
+
+      -- Debug logs (DEBUG_MODE=true 時のみ使用)
+      CREATE TABLE IF NOT EXISTS debug_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        character_id TEXT NOT NULL,
+        day INTEGER NOT NULL,
+        time TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_debug_logs_char_day
+        ON debug_logs(character_id, day);
+
+      CREATE INDEX IF NOT EXISTS idx_debug_logs_type
+        ON debug_logs(type, day);
+
+      -- Chat messages (7日間保持)
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        is_from_character INTEGER NOT NULL DEFAULT 0,
+        character_id TEXT,
+        timestamp INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(provider_id, message_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_channel
+        ON chat_messages(provider_id, channel_id, timestamp DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_created
+        ON chat_messages(created_at);
+
+      -- Chat summaries (チャンネルごとの要約)
+      CREATE TABLE IF NOT EXISTS chat_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        last_interaction_at INTEGER NOT NULL,
+        total_messages INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(character_id, provider_id, channel_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_chat_summaries_character
+        ON chat_summaries(character_id);
     `)
 
     // Migration: add episode column to action_history
@@ -1014,7 +1072,283 @@ export class SqliteStore implements StateStore {
       DELETE FROM npc_summaries;
       DELETE FROM npc_states;
       DELETE FROM mid_term_memories;
+      DELETE FROM debug_logs;
     `)
+  }
+
+  // Debug log CRUD methods
+
+  async addDebugLog(entry: {
+    type: 'llm_behavior' | 'conversation_turn'
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+  }): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO debug_logs (type, character_id, day, time, data, created_at)
+      VALUES (@type, @character_id, @day, @time, @data, @created_at)
+    `)
+
+    stmt.run({
+      type: entry.type,
+      character_id: entry.characterId,
+      day: entry.day,
+      time: entry.time,
+      data: JSON.stringify(entry.data),
+      created_at: Date.now(),
+    })
+  }
+
+  async loadDebugLogsForDay(day: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>> {
+    const stmt = this.db.prepare(
+      'SELECT * FROM debug_logs WHERE day = ? ORDER BY time, created_at'
+    )
+    const rows = stmt.all(day) as Array<{
+      id: number
+      type: string
+      character_id: string
+      day: number
+      time: string
+      data: string
+      created_at: number
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      type: row.type,
+      characterId: row.character_id,
+      day: row.day,
+      time: row.time,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+      createdAt: row.created_at,
+    }))
+  }
+
+  async loadDebugLogsForCharacter(characterId: string, day?: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>> {
+    const query = day !== undefined
+      ? 'SELECT * FROM debug_logs WHERE character_id = ? AND day = ? ORDER BY time, created_at'
+      : 'SELECT * FROM debug_logs WHERE character_id = ? ORDER BY day DESC, time DESC, created_at DESC LIMIT 100'
+
+    const stmt = this.db.prepare(query)
+    const rows = (day !== undefined ? stmt.all(characterId, day) : stmt.all(characterId)) as Array<{
+      id: number
+      type: string
+      character_id: string
+      day: number
+      time: string
+      data: string
+      created_at: number
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      type: row.type,
+      characterId: row.character_id,
+      day: row.day,
+      time: row.time,
+      data: JSON.parse(row.data) as Record<string, unknown>,
+      createdAt: row.created_at,
+    }))
+  }
+
+  async deleteOldDebugLogs(keepDays: number): Promise<number> {
+    // keepDays 日より古いログを削除
+    const stmt = this.db.prepare('DELETE FROM debug_logs WHERE day < ?')
+    const result = stmt.run(keepDays)
+    return result.changes
+  }
+
+  // ==========================================================================
+  // Chat message methods
+  // ==========================================================================
+
+  async saveChatMessage(message: ChatMessageRecord): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO chat_messages (
+        provider_id, channel_id, channel_name, message_id, sender_id, sender_name,
+        content, is_from_character, character_id, timestamp, created_at
+      ) VALUES (
+        @provider_id, @channel_id, @channel_name, @message_id, @sender_id, @sender_name,
+        @content, @is_from_character, @character_id, @timestamp, @created_at
+      )
+    `)
+
+    stmt.run({
+      provider_id: message.providerId,
+      channel_id: message.channelId,
+      channel_name: message.channelName,
+      message_id: message.messageId,
+      sender_id: message.senderId,
+      sender_name: message.senderName,
+      content: message.content,
+      is_from_character: message.isFromCharacter ? 1 : 0,
+      character_id: message.characterId ?? null,
+      timestamp: message.timestamp,
+      created_at: message.createdAt,
+    })
+  }
+
+  async loadRecentChatMessages(
+    providerId: ChatProviderId,
+    channelId: string,
+    limit: number = 10
+  ): Promise<ChatMessageRecord[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_messages
+      WHERE provider_id = ? AND channel_id = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `)
+    const rows = stmt.all(providerId, channelId, limit) as Array<{
+      id: number
+      provider_id: string
+      channel_id: string
+      channel_name: string
+      message_id: string
+      sender_id: string
+      sender_name: string
+      content: string
+      is_from_character: number
+      character_id: string | null
+      timestamp: number
+      created_at: number
+    }>
+
+    // Reverse to get chronological order (oldest first)
+    return rows.reverse().map(row => ({
+      id: row.id,
+      providerId: row.provider_id as ChatProviderId,
+      channelId: row.channel_id,
+      channelName: row.channel_name,
+      messageId: row.message_id,
+      senderId: row.sender_id,
+      senderName: row.sender_name,
+      content: row.content,
+      isFromCharacter: row.is_from_character === 1,
+      characterId: row.character_id ?? undefined,
+      timestamp: row.timestamp,
+      createdAt: row.created_at,
+    }))
+  }
+
+  async deleteOldChatMessages(retentionDays: number): Promise<number> {
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+    const stmt = this.db.prepare('DELETE FROM chat_messages WHERE created_at < ?')
+    const result = stmt.run(cutoff)
+    return result.changes
+  }
+
+  // ==========================================================================
+  // Chat summary methods
+  // ==========================================================================
+
+  async saveChatSummary(summary: ChatSummary): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO chat_summaries (
+        character_id, provider_id, channel_id, channel_name, summary,
+        last_interaction_at, total_messages, updated_at
+      ) VALUES (
+        @character_id, @provider_id, @channel_id, @channel_name, @summary,
+        @last_interaction_at, @total_messages, @updated_at
+      )
+      ON CONFLICT(character_id, provider_id, channel_id) DO UPDATE SET
+        channel_name = @channel_name,
+        summary = @summary,
+        last_interaction_at = @last_interaction_at,
+        total_messages = @total_messages,
+        updated_at = @updated_at
+    `)
+
+    stmt.run({
+      character_id: summary.characterId,
+      provider_id: summary.providerId,
+      channel_id: summary.channelId,
+      channel_name: summary.channelName,
+      summary: summary.summary,
+      last_interaction_at: summary.lastInteractionAt,
+      total_messages: summary.totalMessages,
+      updated_at: summary.updatedAt,
+    })
+  }
+
+  async loadChatSummary(
+    characterId: string,
+    providerId: ChatProviderId,
+    channelId: string
+  ): Promise<ChatSummary | null> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_summaries
+      WHERE character_id = ? AND provider_id = ? AND channel_id = ?
+    `)
+    const row = stmt.get(characterId, providerId, channelId) as {
+      character_id: string
+      provider_id: string
+      channel_id: string
+      channel_name: string
+      summary: string
+      last_interaction_at: number
+      total_messages: number
+      updated_at: number
+    } | undefined
+
+    if (!row) return null
+
+    return {
+      characterId: row.character_id,
+      providerId: row.provider_id as ChatProviderId,
+      channelId: row.channel_id,
+      channelName: row.channel_name,
+      summary: row.summary,
+      lastInteractionAt: row.last_interaction_at,
+      totalMessages: row.total_messages,
+      updatedAt: row.updated_at,
+    }
+  }
+
+  async loadChatSummariesForCharacter(characterId: string): Promise<ChatSummary[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM chat_summaries
+      WHERE character_id = ?
+      ORDER BY last_interaction_at DESC
+    `)
+    const rows = stmt.all(characterId) as Array<{
+      character_id: string
+      provider_id: string
+      channel_id: string
+      channel_name: string
+      summary: string
+      last_interaction_at: number
+      total_messages: number
+      updated_at: number
+    }>
+
+    return rows.map(row => ({
+      characterId: row.character_id,
+      providerId: row.provider_id as ChatProviderId,
+      channelId: row.channel_id,
+      channelName: row.channel_name,
+      summary: row.summary,
+      lastInteractionAt: row.last_interaction_at,
+      totalMessages: row.total_messages,
+      updatedAt: row.updated_at,
+    }))
   }
 
   async close(): Promise<void> {

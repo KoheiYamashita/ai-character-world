@@ -6,7 +6,21 @@ import type { NPCWithCooldown } from '@/types/behavior'
 import type { ScheduleEntry, ActionConfig, WorldTime } from '@/types'
 import type { EffectPerMinute } from '@/types/action'
 import { llmGenerateObject } from '@/server/llm'
-import { getActionLabel as getActionLabelFromUI, NON_ACTION_LABELS } from '@/lib/uiLabels'
+import { getActionLabel as getActionLabelFromUI } from '@/lib/uiLabels'
+import { isDebugMode } from '@/lib/debugConfig'
+
+// =============================================================================
+// デバッグログコールバック型
+// =============================================================================
+
+export type DebugLogCallback = (entry: {
+  characterId: string
+  characterName: string
+  stage: 'action_decision' | 'facility_selection' | 'interrupt_facility'
+  prompt: string
+  response: string
+  decision?: string
+}) => void
 
 // =============================================================================
 // 定数定義
@@ -54,6 +68,8 @@ const ALLOWED_ACTIONS = [
   'massage', 'haircut',
   // 家事系
   'clean',
+  // チャット連携系
+  'reply_chat', 'check_chat', 'send_chat',
   // 移動・待機
   'move', 'idle'
 ] as const
@@ -95,6 +111,7 @@ const FacilitySelectionSchema = z.object({
  */
 export class LLMBehaviorDecider implements BehaviorDecider {
   private actionConfigs: Record<string, ActionConfig> = {}
+  private onDebugLog: DebugLogCallback | null = null
 
   /**
    * アクション設定を設定（world-config.json の actions セクション）
@@ -102,6 +119,32 @@ export class LLMBehaviorDecider implements BehaviorDecider {
   setActionConfigs(configs: Record<string, ActionConfig>): void {
     this.actionConfigs = configs
     console.log(`[LLMBehaviorDecider] Loaded action configs for: ${Object.keys(configs).join(', ')}`)
+  }
+
+  /**
+   * デバッグログコールバックを設定
+   */
+  setOnDebugLog(callback: DebugLogCallback): void {
+    this.onDebugLog = callback
+  }
+
+  /**
+   * デバッグログを送信（DEBUG_MODE有効時のみ）
+   */
+  private emitDebugLog(entry: {
+    characterId: string
+    characterName: string
+    stage: 'action_decision' | 'facility_selection' | 'interrupt_facility'
+    prompt: string
+    response: string
+    decision?: string
+  }): void {
+    if (!isDebugMode() || !this.onDebugLog) return
+    try {
+      this.onDebugLog(entry)
+    } catch (error) {
+      console.error('[LLMBehaviorDecider] Error emitting debug log:', error)
+    }
   }
 
   /**
@@ -155,6 +198,16 @@ export class LLMBehaviorDecider implements BehaviorDecider {
         system: 'あなたはキャラクターとして、次の行動を決定してください。JSON形式で回答してください。',
       }
     )
+
+    // デバッグログを送信
+    this.emitDebugLog({
+      characterId: context.character.id,
+      characterName: context.character.name,
+      stage: 'action_decision',
+      prompt,
+      response: JSON.stringify(decision, null, 2),
+      decision: JSON.stringify(decision),
+    })
 
     return decision
   }
@@ -229,7 +282,8 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     facilities: NearbyFacility[],
     prompt: string,
     systemMessage: string,
-    logContext: string
+    logContext: string,
+    debugInfo?: { characterId: string; characterName: string; stage: 'facility_selection' | 'interrupt_facility' }
   ): Promise<{ facility: NearbyFacility; reason: string }> {
     console.log(`[LLMBehaviorDecider] ${logContext} prompt:`, prompt)
 
@@ -240,6 +294,18 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     )
 
     console.log(`[LLMBehaviorDecider] ${logContext}: ${selection.facilityId} (${selection.reason})`)
+
+    // デバッグログを送信
+    if (debugInfo) {
+      this.emitDebugLog({
+        characterId: debugInfo.characterId,
+        characterName: debugInfo.characterName,
+        stage: debugInfo.stage,
+        prompt,
+        response: JSON.stringify(selection, null, 2),
+        decision: JSON.stringify(selection),
+      })
+    }
 
     const facility = facilities.find(f => f.id === selection.facilityId) ?? facilities[0]
     return { facility, reason: selection.reason }
@@ -276,7 +342,8 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       relevantFacilities,
       prompt,
       'キャラクターとして、利用する施設を選んでください。JSON形式で回答してください。',
-      'Facility selection'
+      'Facility selection',
+      { characterId: context.character.id, characterName: context.character.name, stage: 'facility_selection' }
     )
 
     return this.buildFacilityDecision(facility, reason)
@@ -529,6 +596,29 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       parts.push('なし')
     }
     parts.push('')
+
+    // チャット関連情報
+    const { hasPendingChat, pendingChatNotifications, chatSummaries } = context
+    if (hasPendingChat && pendingChatNotifications && pendingChatNotifications.length > 0) {
+      parts.push('【📱 未読チャット通知】')
+      for (const notif of pendingChatNotifications.slice(0, 3)) { // 最大3件表示
+        parts.push(`- ${notif.channelName}で${notif.senderName}から: "${notif.content.substring(0, 50)}${notif.content.length > 50 ? '...' : ''}"`)
+      }
+      if (pendingChatNotifications.length > 3) {
+        parts.push(`  ...他${pendingChatNotifications.length - 3}件の通知`)
+      }
+      parts.push('→ reply_chat を選択して返信できます（check_chat は返信しない確認のみ）')
+      parts.push('')
+    }
+
+    if (chatSummaries && chatSummaries.length > 0) {
+      parts.push('【チャットでの関係】')
+      for (const summary of chatSummaries.slice(0, 3)) { // 最大3件表示
+        parts.push(`- ${summary.channelName}: ${summary.summary}`)
+      }
+      parts.push('→ send_chat を選ぶ場合、target にチャンネル名を指定してください')
+      parts.push('')
+    }
 
     // 今日の行動
     parts.push('【今日の行動】')
@@ -850,6 +940,26 @@ ${facilityList}
     const base = getActionLabelFromUI(actionType)
     const config = this.actionConfigs[actionType]
 
+    // チャットアクションの特別な説明
+    if (actionType === 'reply_chat') {
+      const effectStr = config?.effects ? this.formatFixedEffects(config.effects) : ''
+      return effectStr
+        ? `未読通知に返信する（${effectStr}）`
+        : '未読通知に返信する'
+    }
+    if (actionType === 'check_chat') {
+      const effectStr = config?.effects ? this.formatFixedEffects(config.effects) : ''
+      return effectStr
+        ? `チャットを確認する（返信しない）（${effectStr}）`
+        : 'チャットを確認する（返信しない）'
+    }
+    if (actionType === 'send_chat') {
+      const effectStr = config?.effects ? this.formatFixedEffects(config.effects) : ''
+      return effectStr
+        ? `自発的にメッセージを送信する（${effectStr}）`
+        : '自発的にメッセージを送信する'
+    }
+
     // 設定がない場合は基本説明のみ
     if (!config) {
       return base
@@ -962,7 +1072,8 @@ ${facilityList}
       relevantFacilities,
       prompt,
       '緊急状況です。施設を選んでください。JSON形式で回答してください。',
-      'Interrupt facility selection'
+      'Interrupt facility selection',
+      { characterId: context.character.id, characterName: context.character.name, stage: 'interrupt_facility' }
     )
 
     return this.buildFacilityDecision(facility, `緊急: ${reason}`, true, forcedAction)

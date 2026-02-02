@@ -131,6 +131,7 @@ export class ActionExecutor {
    * @param targetNpcId 対象NPC ID（talkアクション用）
    * @param durationMinutes 実行時間（分）- 可変時間アクションの場合にLLMが指定
    * @param reason 行動理由（LLMが出力したもの）
+   * @param skipCanExecuteCheck チャットアクション等、SimulationEngineが管理するアクションでチェックをスキップ
    */
   startAction(
     characterId: string,
@@ -138,17 +139,20 @@ export class ActionExecutor {
     facilityId?: string,
     targetNpcId?: string,
     durationMinutes?: number,
-    reason?: string
+    reason?: string,
+    skipCanExecuteCheck?: boolean
   ): boolean {
     // 前提条件チェック (6-2)
-    const checkResult = this.canExecuteAction(characterId, actionId)
-    if (!checkResult.canExecute) {
-      console.log(`[ActionExecutor] Cannot start action ${actionId}: ${checkResult.reason}`)
-      return false
+    // チャットアクション等はSimulationEngineが管理するためスキップ可能
+    if (!skipCanExecuteCheck) {
+      const checkResult = this.canExecuteAction(characterId, actionId)
+      if (!checkResult.canExecute) {
+        console.log(`[ActionExecutor] Cannot start action ${actionId}: ${checkResult.reason}`)
+        return false
+      }
     }
 
     const character = this.worldState.getCharacter(characterId)!
-    const actionDef = ACTIONS[actionId]!
     const actionConfig = this.actionConfigs[actionId]
 
     // コストの支払い（施設にcostが設定されていれば支払う）
@@ -290,8 +294,10 @@ export class ActionExecutor {
     const action = character.currentAction
     if (!action) return
 
-    // thinking, talk アクションは手動完了のみ（duration: 0 だが自動完了しない）
-    if (action.actionId === 'thinking' || action.actionId === 'talk') return
+    // 手動完了アクション（duration: 0 だが自動完了しない）
+    // thinking, talk, チャットアクションはSimulationEngineが完了を管理
+    const manualCompleteActions: string[] = ['thinking', 'talk', 'reply_chat', 'check_chat', 'send_chat']
+    if (manualCompleteActions.includes(action.actionId)) return
 
     // 終了時刻に達したら完了
     if (currentTime >= action.targetEndTime) {
@@ -480,6 +486,15 @@ export class ActionExecutor {
     }
 
     const requirements = actionDef.requirements
+
+    // Chat actions require special handling
+    // These are only enabled when chat system is active and don't require facilities
+    const chatActions: ActionId[] = ['reply_chat', 'check_chat', 'send_chat']
+    if (chatActions.includes(actionId)) {
+      // Chat actions are handled by SimulationEngine, always return canExecute=false here
+      // The actual availability is determined by buildBehaviorContext in SimulationEngine
+      return { canExecute: false, reason: 'Chat actions require chat system (handled by SimulationEngine)' }
+    }
 
     // Check if map has an accessible facility that supports this action
     // Skip this check for actions that don't require facilities (talk, thinking)

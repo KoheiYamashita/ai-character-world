@@ -1,5 +1,6 @@
 import type { WorldMap, Character, WorldTime, NPC, TimeConfig, ScheduleEntry, DailySchedule, CharacterConfig, ConversationGoal, NPCDynamicState, ActivityLogEntry, ConversationSummaryEntry, MiniEpisodeConfig } from '@/types'
 import type { BehaviorContext, BehaviorDecision, NearbyFacility, NearbyMap, ScheduleUpdate, CurrentMapFacility, ActionHistoryEntry, MidTermMemory, RecentConversation } from '@/types/behavior'
+import type { ChatIncomingMessage, ChatSummary, ChatContext, PendingNotification } from '@/types/chat'
 import type {
   SimulationConfig,
   SerializedWorldState,
@@ -23,8 +24,10 @@ import { StubMiniEpisodeGenerator } from '../episode/StubMiniEpisodeGenerator'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
 import { calculateStatChange } from '@/lib/statusUtils'
 import { getDirection } from '@/lib/movement'
-import { filterForBehaviorDecision, filterForConversation, addCooldownInfoToNPCs } from '@/lib/conversationFilters'
+import { filterForBehaviorDecision, filterForConversation, filterLatestPerNPC, addCooldownInfoToNPCs } from '@/lib/conversationFilters'
 import { SPECIAL_EMOJI, getActionEmoji } from '@/lib/uiLabels'
+import { isDebugMode } from '@/lib/debugConfig'
+import { ChatManager, ChatExecutor, ChatPostProcessor as ChatPostProc, isChatEnabled, getCharactersForChannel, initializeChatProviders } from '../chat'
 
 export type StateChangeCallback = (state: SerializedWorldState) => void
 export type LogEventCallback = (entry: ActivityLogEntry) => void
@@ -83,6 +86,11 @@ export class SimulationEngine {
     energy: 'sleep',  // Could also be 'rest', but sleep is more effective
     hygiene: 'bathe',
   }
+  // Chat system
+  private chatManager: ChatManager | null = null
+  private chatExecutor: ChatExecutor | null = null
+  private chatPostProcessor: ChatPostProc | null = null
+  private chatEnabled: boolean = false
 
   constructor(config: Partial<SimulationConfig> = {}, stateStore?: StateStore) {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
@@ -163,6 +171,96 @@ export class SimulationEngine {
     this.actionExecutor.setOnActionStart((entry) => {
       this.startActionHistoryRecord(entry)
     })
+
+    // Set debug log callbacks (DEBUG_MODE=true 時のみ有効)
+    if (this.behaviorDecider instanceof LLMBehaviorDecider) {
+      this.behaviorDecider.setOnDebugLog((entry) => {
+        this.saveAndEmitDebugLog('llm_behavior', entry.characterId, {
+          characterName: entry.characterName,
+          stage: entry.stage,
+          prompt: entry.prompt,
+          response: entry.response,
+          decision: entry.decision,
+        })
+      })
+    }
+
+    this.conversationExecutor.setOnDebugLog((entry) => {
+      this.saveAndEmitDebugLog('conversation_turn', entry.characterId, {
+        characterName: entry.characterName,
+        npcId: entry.npcId,
+        npcName: entry.npcName,
+        turn: entry.turn,
+        speaker: entry.speaker,
+        prompt: entry.prompt,
+        response: entry.response,
+      })
+    })
+
+    // Initialize chat system (async, continues in background)
+    this.initializeChatSystem()
+  }
+
+  // Initialize chat system asynchronously
+  private async initializeChatSystem(): Promise<void> {
+    try {
+      await initializeChatProviders()
+      this.chatEnabled = isChatEnabled()
+
+      if (!this.chatEnabled) {
+        console.log('[SimulationEngine] Chat system disabled (no providers configured)')
+        return
+      }
+
+      this.chatManager = new ChatManager()
+      this.chatExecutor = new ChatExecutor(this.chatManager)
+      this.chatPostProcessor = new ChatPostProc()
+
+      // Wire up executor callbacks
+      this.chatExecutor.setOnChatComplete((characterId, success) => {
+        this.onChatActionComplete(characterId, success)
+      })
+
+      this.chatExecutor.setOnMessageEmit((characterId, providerId, channelId, channelName, content, isFromCharacter) => {
+        const character = this.worldState.getCharacter(characterId)
+        const currentTime = this.worldState.getTime()
+        this.notifyLogSubscribersChatMessage(
+          characterId,
+          character?.name ?? characterId,
+          providerId,
+          channelId,
+          channelName,
+          isFromCharacter ? character?.name ?? characterId : channelName,
+          content,
+          isFromCharacter,
+          currentTime
+        )
+      })
+
+      // Wire up post processor callbacks
+      this.chatPostProcessor.setOnSummaryPersist(async (summary) => {
+        if (this.stateStore) {
+          await this.stateStore.saveChatSummary(summary)
+        }
+      })
+
+      this.chatPostProcessor.setOnMemoryAdd(async (memory) => {
+        if (this.stateStore) {
+          const currentDay = this.worldState.getTime().day
+          // Set day-based fields
+          memory.createdDay = currentDay
+          // Importance-based expiration
+          const expirationDays = { low: 0, medium: 1, high: 2 }
+          memory.expiresDay = currentDay + expirationDays[memory.importance]
+          await this.stateStore.addMidTermMemory(memory)
+        }
+      })
+
+      console.log('[SimulationEngine] Chat system initialized')
+    } catch (error) {
+      console.error('[SimulationEngine] Failed to initialize chat system:', error)
+      this.chatEnabled = false
+    }
   }
 
   // Initialize with world data
@@ -458,6 +556,10 @@ export class SimulationEngine {
       // Delete expired mid-term memories from DB
       this.cleanupExpiredMidTermMemories(realTime.day).catch(err => {
         console.error('[SimulationEngine] Error cleaning up mid-term memories:', err)
+      })
+      // Delete old chat messages (7 days retention)
+      this.cleanupOldChatMessages().catch(err => {
+        console.error('[SimulationEngine] Error cleaning up old chat messages:', err)
       })
       this.lastSaveTime = now
     }
@@ -784,11 +886,14 @@ export class SimulationEngine {
     const currentTimeMinutes = currentTime.day * 24 * 60 + currentTime.hour * 60 + currentTime.minute
 
     // Load data from DB (parallel for performance)
-    const [recentConversations, todayActions, schedule, midTermMemories] = await Promise.all([
+    const [recentConversations, todayActions, schedule, midTermMemories, chatSummaries] = await Promise.all([
       this.getRecentConversationsFromDB(character.id),
       this.getActionHistoryFromDB(character.id),
       this.getScheduleFromDB(character.id),
       this.getMidTermMemoriesFromDB(character.id),
+      this.chatEnabled && this.stateStore
+        ? this.stateStore.loadChatSummariesForCharacter(character.id)
+        : Promise.resolve(undefined),
     ])
 
     // Get NPCs on current map with cooldown info
@@ -804,7 +909,27 @@ export class SimulationEngine {
       availableActions = availableActions.filter(action => action !== 'talk')
     }
 
-    // Apply consecutive action limit filter
+    // Chat context (calculated before filter so chat actions can be included in filter)
+    const hasPendingChat = this.hasPendingChatNotifications(character.id)
+    const pendingChatNotifications = hasPendingChat
+      ? this.getPendingChatNotifications(character.id)
+      : undefined
+
+    // Add chat actions to available actions (before filter so consecutive limit applies)
+    if (this.chatEnabled) {
+      if (hasPendingChat) {
+        availableActions.push('reply_chat')
+      } else {
+        // 未読通知がない場合のみcheck_chatを提示
+        availableActions.push('check_chat')
+      }
+      // send_chat requires more context, add only if there are chat summaries
+      if (chatSummaries && chatSummaries.length > 0) {
+        availableActions.push('send_chat')
+      }
+    }
+
+    // Apply consecutive action limit filter (now includes chat actions)
     availableActions = this.filterActionsByConsecutiveLimit(availableActions, todayActions)
 
     // After system auto-action, don't allow pure 'move' action (which would trigger another behavior decision)
@@ -824,6 +949,10 @@ export class SimulationEngine {
       recentConversations: filterForBehaviorDecision(recentConversations),
       midTermMemories,
       todayActions: includeTodayActions ? todayActions : undefined,
+      // Chat context
+      hasPendingChat,
+      pendingChatNotifications,
+      chatSummaries,
     }
   }
 
@@ -1027,6 +1156,17 @@ export class SimulationEngine {
     const { actionId, targetFacilityId, targetNpcId, reason, durationMinutes } = decision
     if (!actionId) return
 
+    // Handle chat actions (async, fire-and-forget with error handling)
+    // send_chat の場合、targetFacilityId はチャンネル名として使われる
+    if (actionId === 'reply_chat' || actionId === 'check_chat' || actionId === 'send_chat') {
+      this.handleChatAction(character, actionId, reason, targetFacilityId).catch(error => {
+        console.error(`[SimulationEngine] Chat action error for ${character.name}:`, error)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+      })
+      return
+    }
+
     // Handle talk action with NPC target
     if (actionId === 'talk' && targetNpcId) {
       this.handleTalkAction(character, targetNpcId, reason, decision.conversationGoal)
@@ -1035,6 +1175,205 @@ export class SimulationEngine {
 
     // Handle facility-based actions
     this.handleFacilityAction(character, actionId, targetFacilityId, reason, durationMinutes)
+  }
+
+  // Handle chat actions: reply_chat, check_chat, send_chat
+  private async handleChatAction(character: SimCharacter, actionId: ActionId, reason?: string, targetChannelName?: string): Promise<void> {
+    if (!this.chatEnabled || !this.chatManager || !this.chatExecutor) {
+      console.log(`[SimulationEngine] Chat system not available for ${character.name}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Start the action (thinking-like: fixed duration 0, manually completed)
+    // skipCanExecuteCheck=true: チャットアクションの利用可否はSimulationEngineが管理するため
+    const success = this.actionExecutor.startAction(character.id, actionId, undefined, undefined, undefined, reason, true)
+    if (!success) {
+      console.log(`[SimulationEngine] ${character.name} failed to start ${actionId}`)
+      this.triggerActionDecision(character)
+      return
+    }
+
+    // Set up state store for executor
+    if (this.stateStore) {
+      this.chatExecutor.setStateStore(this.stateStore)
+    }
+    if (this.chatPostProcessor) {
+      this.chatExecutor.setPostProcessor(this.chatPostProcessor)
+    }
+
+    // Load context data from DB (parallel for performance)
+    const [recentConversations, midTermMemories, todayActions, schedule, chatSummaries] = await Promise.all([
+      this.getRecentConversationsFromDB(character.id),
+      this.getMidTermMemoriesFromDB(character.id),
+      this.getActionHistoryFromDB(character.id),
+      this.getScheduleFromDB(character.id),
+      this.stateStore?.loadChatSummariesForCharacter(character.id) ?? Promise.resolve(undefined),
+    ])
+
+    // Build chat context (NPC conversations use filterLatestPerNPC - all NPCs with 1 message each)
+    const chatContext: ChatContext = {
+      currentTime: this.worldState.getTime(),
+      todayActions,
+      schedule,
+      midTermMemories,
+      recentConversations: filterLatestPerNPC(recentConversations),
+      chatSummaries,
+      nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+    }
+
+    // Handle each chat action type
+    if (actionId === 'reply_chat') {
+      // Get the oldest pending notification
+      const notification = this.chatManager.getOldestNotification(character.id)
+      if (!notification) {
+        console.log(`[SimulationEngine] ${character.name} no pending chat to reply`)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+        return
+      }
+
+      // Start reply session
+      const session = this.chatManager.startReplySession(character.id, notification)
+      console.log(`[SimulationEngine] ${character.name} replying to chat from ${notification.senderName}`)
+
+      // Execute asynchronously with context
+      this.chatExecutor.executeReply(character, session, chatContext)
+
+    } else if (actionId === 'check_chat') {
+      // For check_chat, we need a target channel
+      // For now, use the first pending notification's channel or skip
+      const notifications = this.chatManager.getPendingNotifications(character.id)
+      if (notifications.length === 0) {
+        console.log(`[SimulationEngine] ${character.name} no chat to check`)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+        return
+      }
+
+      const firstNotification = notifications[0]
+      const session = this.chatManager.startCheckSession(
+        character.id,
+        firstNotification.providerId,
+        firstNotification.channelId,
+        firstNotification.channelName
+      )
+      console.log(`[SimulationEngine] ${character.name} checking chat on ${firstNotification.channelName}`)
+
+      // Execute asynchronously with context
+      this.chatExecutor.executeCheck(character, session, chatContext)
+
+    } else if (actionId === 'send_chat') {
+      // send_chat: LLMが指定したチャンネルに自発的にメッセージを送信
+      if (!reason) {
+        console.log(`[SimulationEngine] ${character.name} send_chat requires reason as intent`)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+        return
+      }
+
+      if (!targetChannelName) {
+        console.log(`[SimulationEngine] ${character.name} send_chat requires target channel name`)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+        return
+      }
+
+      // chatSummaries からチャンネル情報を検索
+      const targetChannel = chatSummaries?.find(s => s.channelName === targetChannelName)
+      if (!targetChannel) {
+        console.log(`[SimulationEngine] ${character.name} channel not found: ${targetChannelName}`)
+        this.actionExecutor.forceCompleteAction(character.id)
+        this.triggerActionDecision(character)
+        return
+      }
+
+      const session = this.chatManager.startSendSession(
+        character.id,
+        targetChannel.providerId,
+        targetChannel.channelId,
+        targetChannel.channelName,
+        reason  // intent
+      )
+      console.log(`[SimulationEngine] ${character.name} sending to ${targetChannel.channelName}: ${reason}`)
+
+      // Execute asynchronously with context
+      this.chatExecutor.executeSend(character, session, chatContext)
+    }
+  }
+
+  // Callback when chat action completes
+  private onChatActionComplete(characterId: string, _success: boolean): void {
+    // Force complete the action and trigger next decision
+    this.actionExecutor.forceCompleteAction(characterId)
+    this.onActionComplete(characterId)
+  }
+
+  // Receive chat message from external webhook
+  receiveExternalChatMessage(message: ChatIncomingMessage): void {
+    if (!this.chatEnabled || !this.chatManager) {
+      console.log('[SimulationEngine] Chat system not available, ignoring message')
+      return
+    }
+
+    // Save message to DB
+    if (this.stateStore) {
+      this.stateStore.saveChatMessage({
+        providerId: message.providerId,
+        channelId: message.channelId,
+        channelName: message.channelName,
+        messageId: message.messageId,
+        senderId: message.senderId,
+        senderName: message.senderName,
+        content: message.content,
+        isFromCharacter: false,
+        timestamp: message.timestamp,
+        createdAt: Date.now(),
+      }).catch(err => {
+        console.error('[SimulationEngine] Failed to save chat message:', err)
+      })
+    }
+
+    // Get characters for this channel
+    const characterIds = getCharactersForChannel(message.providerId, message.channelId)
+
+    // Queue notification if this is a mention or DM
+    if (message.isMention || message.isDM) {
+      for (const characterId of characterIds) {
+        // Check if character exists
+        const character = this.worldState.getCharacter(characterId)
+        if (!character) {
+          console.log(`[SimulationEngine] Character ${characterId} not found for chat notification`)
+          continue
+        }
+
+        this.chatManager.queueNotification(characterId, message)
+        console.log(`[SimulationEngine] Queued chat notification for ${character.name} from ${message.senderName}`)
+      }
+    }
+  }
+
+  // Check if character has pending chat notifications
+  hasPendingChatNotifications(characterId: string): boolean {
+    if (!this.chatEnabled || !this.chatManager) return false
+    return this.chatManager.hasPendingNotifications(characterId)
+  }
+
+  // Get pending chat notifications for a character
+  getPendingChatNotifications(characterId: string): PendingNotification[] {
+    if (!this.chatEnabled || !this.chatManager) return []
+    return this.chatManager.getPendingNotifications(characterId)
+  }
+
+  // Get chat summaries for a character (for LLM context)
+  async getChatSummariesForCharacter(characterId: string): Promise<ChatSummary[]> {
+    if (!this.stateStore) return []
+    return await this.stateStore.loadChatSummariesForCharacter(characterId)
+  }
+
+  // Check if chat feature is enabled
+  isChatFeatureEnabled(): boolean {
+    return this.chatEnabled
   }
 
   // Handle talk action: move to NPC if not adjacent, then start talk
@@ -1155,12 +1494,15 @@ export class SimulationEngine {
       return
     }
 
-    // Load context data from DB
-    const [recentConversations, midTermMemories, todayActions, schedule] = await Promise.all([
+    // Load context data from DB (parallel for performance)
+    const [recentConversations, midTermMemories, todayActions, schedule, chatSummaries] = await Promise.all([
       this.getRecentConversationsFromDB(characterId),
       this.getMidTermMemoriesFromDB(characterId),
       this.getActionHistoryFromDB(characterId),
       this.getScheduleFromDB(characterId),
+      this.chatEnabled && this.stateStore
+        ? this.stateStore.loadChatSummariesForCharacter(characterId)
+        : Promise.resolve(undefined),
     ])
 
     // Build conversation context
@@ -1171,6 +1513,7 @@ export class SimulationEngine {
       schedule,
       currentTime: this.worldState.getTime(),
       nearbyMaps: this.buildNearbyMaps(character.currentMapId),
+      chatSummaries,
     }
 
     // Start async conversation loop (fire and forget)
@@ -1840,6 +2183,16 @@ export class SimulationEngine {
     }
   }
 
+  // Delete old chat messages from DB (7 days retention)
+  private async cleanupOldChatMessages(): Promise<void> {
+    if (!this.stateStore) return
+
+    const deleted = await this.stateStore.deleteOldChatMessages(7)
+    if (deleted > 0) {
+      console.log(`[SimulationEngine] Deleted ${deleted} old chat messages`)
+    }
+  }
+
   // Restore active actions from DB (called on startup)
   async restoreActiveActions(): Promise<void> {
     if (!this.stateStore) return
@@ -2080,6 +2433,88 @@ export class SimulationEngine {
       utterance,
       time: this.formatTimeString(this.worldState.getTime()),
     })
+  }
+
+  // Notify log subscribers of a chat message
+  private notifyLogSubscribersChatMessage(
+    characterId: string,
+    characterName: string,
+    providerId: string,
+    channelId: string,
+    channelName: string,
+    senderName: string,
+    content: string,
+    isFromCharacter: boolean,
+    currentTime: WorldTime
+  ): void {
+    this.emitLogEntry({
+      type: 'chat_message',
+      characterId,
+      characterName,
+      providerId,
+      channelId,
+      channelName,
+      senderName,
+      content,
+      isFromCharacter,
+      time: this.formatTimeString(currentTime),
+    })
+  }
+
+  // Save debug log to DB and emit to subscribers (DEBUG_MODE only)
+  private saveAndEmitDebugLog(
+    type: 'llm_behavior' | 'conversation_turn',
+    characterId: string,
+    data: Record<string, unknown>
+  ): void {
+    if (!isDebugMode()) return
+
+    const currentTime = this.worldState.getTime()
+    const time = this.formatTimeString(currentTime)
+    const day = currentTime.day
+
+    // Save to DB
+    if (this.stateStore) {
+      this.stateStore.addDebugLog({
+        type,
+        characterId,
+        day,
+        time,
+        data,
+      }).catch(err => {
+        console.error('[SimulationEngine] Error saving debug log:', err)
+      })
+    }
+
+    // Emit to log subscribers
+    const character = this.worldState.getCharacter(characterId)
+    if (type === 'llm_behavior') {
+      this.emitLogEntry({
+        type: 'debug_llm_behavior',
+        characterId,
+        characterName: character?.name ?? characterId,
+        time,
+        day,
+        stage: data.stage as 'action_decision' | 'facility_selection' | 'interrupt_facility',
+        prompt: data.prompt as string,
+        response: data.response as string,
+        decision: data.decision as string | undefined,
+      })
+    } else if (type === 'conversation_turn') {
+      this.emitLogEntry({
+        type: 'debug_conversation_turn',
+        characterId,
+        characterName: character?.name ?? characterId,
+        npcId: data.npcId as string,
+        npcName: data.npcName as string,
+        time,
+        day,
+        turn: data.turn as number,
+        speaker: data.speaker as 'character' | 'npc',
+        prompt: data.prompt as string,
+        response: data.response as string,
+      })
+    }
   }
 
   // Notify all subscribers of state change

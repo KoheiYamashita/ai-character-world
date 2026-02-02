@@ -193,6 +193,22 @@ export const ACTIONS: Record<ActionId, ActionDefinition> = {
     requirements: {},
     effects: {},
   },
+
+  // チャット連携系
+  reply_chat: {
+    requirements: { hasPendingChat: true },
+    effects: {},
+  },
+
+  check_chat: {
+    requirements: { chatEnabled: true },
+    effects: {},
+  },
+
+  send_chat: {
+    requirements: { chatEnabled: true },
+    effects: {},
+  },
 }
 
 // ActionId は @/types/action からエクスポート（循環依存回避のため）

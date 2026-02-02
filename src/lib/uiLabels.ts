@@ -46,6 +46,10 @@ export const ACTION_INFO: Record<ActionId, ActionInfo> = {
   massage:       { label: 'マッサージ', emoji: '💆' },
   haircut:       { label: '散髪',       emoji: '💇' },
   clean:         { label: '掃除',       emoji: '🧹' },
+  // チャット連携系
+  reply_chat:    { label: 'チャット返信', emoji: '📱' },
+  check_chat:    { label: 'チャット確認', emoji: '📲' },
+  send_chat:     { label: 'チャット送信', emoji: '✉️' },
 }
 
 // 特殊絵文字（アクション以外の状態表示）

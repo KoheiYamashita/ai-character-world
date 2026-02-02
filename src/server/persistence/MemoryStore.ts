@@ -2,6 +2,7 @@ import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
 import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
 
 /**
  * In-memory implementation of StateStore.
@@ -10,6 +11,16 @@ import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
  */
 interface InMemoryActiveAction extends ActiveActionEntry {
   status: 'in_progress' | 'completed'
+}
+
+interface DebugLogEntry {
+  id: number
+  type: string
+  characterId: string
+  day: number
+  time: string
+  data: Record<string, unknown>
+  createdAt: number
 }
 
 export class MemoryStore implements StateStore {
@@ -24,6 +35,10 @@ export class MemoryStore implements StateStore {
   private midTermMemories: MidTermMemory[] = []
   private activeActions: Map<number, InMemoryActiveAction> = new Map() // key: rowId
   private nextRowId: number = 1
+  private debugLogs: DebugLogEntry[] = []
+  private nextDebugLogId: number = 1
+  private chatMessages: ChatMessageRecord[] = []
+  private chatSummaries: Map<string, ChatSummary> = new Map() // key: `${characterId}:${providerId}:${channelId}`
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -337,6 +352,135 @@ export class MemoryStore implements StateStore {
     this.midTermMemories = []
     this.activeActions.clear()
     this.nextRowId = 1
+    this.debugLogs = []
+    this.nextDebugLogId = 1
+    this.chatMessages = []
+    this.chatSummaries.clear()
+  }
+
+  // Debug log methods
+
+  async addDebugLog(entry: {
+    type: 'llm_behavior' | 'conversation_turn'
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+  }): Promise<void> {
+    this.debugLogs.push({
+      id: this.nextDebugLogId++,
+      type: entry.type,
+      characterId: entry.characterId,
+      day: entry.day,
+      time: entry.time,
+      data: { ...entry.data },
+      createdAt: Date.now(),
+    })
+  }
+
+  async loadDebugLogsForDay(day: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>> {
+    return this.debugLogs
+      .filter(d => d.day === day)
+      .sort((a, b) => a.time.localeCompare(b.time) || a.createdAt - b.createdAt)
+  }
+
+  async loadDebugLogsForCharacter(characterId: string, day?: number): Promise<Array<{
+    id: number
+    type: string
+    characterId: string
+    day: number
+    time: string
+    data: Record<string, unknown>
+    createdAt: number
+  }>> {
+    let logs = this.debugLogs.filter(d => d.characterId === characterId)
+    if (day !== undefined) {
+      logs = logs.filter(d => d.day === day)
+    }
+    return logs
+      .sort((a, b) => {
+        if (day !== undefined) {
+          return a.time.localeCompare(b.time) || a.createdAt - b.createdAt
+        }
+        return b.day - a.day || b.time.localeCompare(a.time) || b.createdAt - a.createdAt
+      })
+      .slice(0, day !== undefined ? logs.length : 100)
+  }
+
+  async deleteOldDebugLogs(keepDays: number): Promise<number> {
+    const before = this.debugLogs.length
+    this.debugLogs = this.debugLogs.filter(d => d.day >= keepDays)
+    return before - this.debugLogs.length
+  }
+
+  // ==========================================================================
+  // Chat message methods
+  // ==========================================================================
+
+  async saveChatMessage(message: ChatMessageRecord): Promise<void> {
+    // Check for duplicate by provider+messageId
+    const exists = this.chatMessages.some(
+      m => m.providerId === message.providerId && m.messageId === message.messageId
+    )
+    if (!exists) {
+      this.chatMessages.push({ ...message })
+    }
+  }
+
+  async loadRecentChatMessages(
+    providerId: ChatProviderId,
+    channelId: string,
+    limit: number = 10
+  ): Promise<ChatMessageRecord[]> {
+    return this.chatMessages
+      .filter(m => m.providerId === providerId && m.channelId === channelId)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit)
+      .reverse() // Return in chronological order
+  }
+
+  async deleteOldChatMessages(retentionDays: number): Promise<number> {
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+    const before = this.chatMessages.length
+    this.chatMessages = this.chatMessages.filter(m => m.createdAt >= cutoff)
+    return before - this.chatMessages.length
+  }
+
+  // ==========================================================================
+  // Chat summary methods
+  // ==========================================================================
+
+  private chatSummaryKey(characterId: string, providerId: ChatProviderId, channelId: string): string {
+    return `${characterId}:${providerId}:${channelId}`
+  }
+
+  async saveChatSummary(summary: ChatSummary): Promise<void> {
+    const key = this.chatSummaryKey(summary.characterId, summary.providerId, summary.channelId)
+    this.chatSummaries.set(key, { ...summary })
+  }
+
+  async loadChatSummary(
+    characterId: string,
+    providerId: ChatProviderId,
+    channelId: string
+  ): Promise<ChatSummary | null> {
+    const key = this.chatSummaryKey(characterId, providerId, channelId)
+    const summary = this.chatSummaries.get(key)
+    return summary ? { ...summary } : null
+  }
+
+  async loadChatSummariesForCharacter(characterId: string): Promise<ChatSummary[]> {
+    return Array.from(this.chatSummaries.values())
+      .filter(s => s.characterId === characterId)
+      .sort((a, b) => b.lastInteractionAt - a.lastInteractionAt)
   }
 
   async close(): Promise<void> {

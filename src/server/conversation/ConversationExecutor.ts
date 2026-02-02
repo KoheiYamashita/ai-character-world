@@ -2,9 +2,37 @@ import { z } from 'zod'
 import type { SimCharacter } from '@/server/simulation/types'
 import type { NPC, ConversationSession, WorldTime, ScheduleEntry } from '@/types'
 import type { ActionHistoryEntry, RecentConversation, MidTermMemory, NearbyMap } from '@/types/behavior'
+import type { ChatSummary } from '@/types/chat'
 import type { ConversationManager } from './ConversationManager'
 import type { ConversationPostProcessor } from './ConversationPostProcessor'
 import { llmGenerateObject, isLLMAvailable } from '@/server/llm'
+import { isDebugMode } from '@/lib/debugConfig'
+import {
+  buildPersonalitySection,
+  buildStatusSection,
+  buildScheduleSection,
+  buildActionHistorySection,
+  buildMemoriesSection,
+  buildRecentConversationsSection,
+  buildChatSummariesSection,
+  buildNearbyMapsSection,
+  buildNearbyMapsNote,
+} from '@/lib/prompts'
+
+// =============================================================================
+// デバッグログコールバック型
+// =============================================================================
+
+export type ConversationDebugLogCallback = (entry: {
+  characterId: string
+  characterName: string
+  npcId: string
+  npcName: string
+  turn: number
+  speaker: 'character' | 'npc'
+  prompt: string
+  response: string
+}) => void
 
 // =============================================================================
 // Zod スキーマ
@@ -30,6 +58,7 @@ export interface ConversationContext {
   schedule: ScheduleEntry[] | null
   currentTime: WorldTime
   nearbyMaps?: NearbyMap[]
+  chatSummaries?: ChatSummary[]
 }
 
 export type ConversationCompleteCallback = (characterId: string, goalAchieved: boolean) => void
@@ -54,6 +83,7 @@ export class ConversationExecutor {
   private postProcessor: ConversationPostProcessor | null = null
   private onConversationComplete: ConversationCompleteCallback | null = null
   private onMessageEmit: MessageEmitCallback | null = null
+  private onDebugLog: ConversationDebugLogCallback | null = null
   private turnIntervalMs: number = 60000 // デフォルト1分
   // Track active conversation loops to prevent duplicates
   private activeLoops: Set<string> = new Set()
@@ -74,8 +104,33 @@ export class ConversationExecutor {
     this.onMessageEmit = callback
   }
 
+  setOnDebugLog(callback: ConversationDebugLogCallback): void {
+    this.onDebugLog = callback
+  }
+
   setTurnIntervalMs(ms: number): void {
     this.turnIntervalMs = ms
+  }
+
+  /**
+   * デバッグログを送信（DEBUG_MODE有効時のみ）
+   */
+  private emitDebugLog(entry: {
+    characterId: string
+    characterName: string
+    npcId: string
+    npcName: string
+    turn: number
+    speaker: 'character' | 'npc'
+    prompt: string
+    response: string
+  }): void {
+    if (!isDebugMode() || !this.onDebugLog) return
+    try {
+      this.onDebugLog(entry)
+    } catch (error) {
+      console.error('[ConversationExecutor] Error emitting debug log:', error)
+    }
   }
 
   /**
@@ -250,6 +305,18 @@ export class ConversationExecutor {
         { system: `あなたは${character.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
       )
 
+      // デバッグログを送信
+      this.emitDebugLog({
+        characterId: character.id,
+        characterName: character.name,
+        npcId: npc.id,
+        npcName: npc.name,
+        turn: session.currentTurn + 1,
+        speaker: 'character',
+        prompt,
+        response: JSON.stringify(result, null, 2),
+      })
+
       return {
         utterance: result.utterance,
         goalAchieved: result.goalAchieved,
@@ -282,6 +349,18 @@ export class ConversationExecutor {
         { system: `あなたは${npc.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
       )
 
+      // デバッグログを送信
+      this.emitDebugLog({
+        characterId: character.id,
+        characterName: character.name,
+        npcId: npc.id,
+        npcName: npc.name,
+        turn: session.currentTurn + 1,
+        speaker: 'npc',
+        prompt,
+        response: JSON.stringify(result, null, 2),
+      })
+
       return result.utterance
     } catch (error) {
       console.error(`[ConversationExecutor] NPC LLM error:`, error)
@@ -304,24 +383,8 @@ export class ConversationExecutor {
     parts.push(`あなたは${character.name}です。${npc.name}と会話しています。`)
     parts.push('')
 
-    // 性格
-    parts.push('【あなたの性格】')
-    parts.push(character.personality || '（未設定）')
-    parts.push('')
-
-    // 行動傾向
-    if (character.tendencies && character.tendencies.length > 0) {
-      parts.push('【行動傾向】')
-      parts.push(character.tendencies.map(t => `- ${t}`).join('\n'))
-      parts.push('')
-    }
-
-    // カスタムプロンプト
-    if (character.customPrompt) {
-      parts.push('【その他の設定】')
-      parts.push(character.customPrompt)
-      parts.push('')
-    }
+    // 性格・行動傾向・カスタムプロンプト（共通ビルダー使用）
+    parts.push(...buildPersonalitySection(character))
 
     // 会話の目的
     parts.push('【会話の目的】')
@@ -346,63 +409,29 @@ export class ConversationExecutor {
       parts.push('')
     }
 
-    // 直近の会話サマリー
-    if (context.recentConversations.length > 0) {
-      parts.push('【直近の会話（過去）】')
-      parts.push(context.recentConversations.map(c => `- ${c.npcName}: ${c.summary}`).join('\n'))
-      parts.push('')
-    }
+    // 直近のNPC会話サマリー（共通ビルダー使用）
+    parts.push(...buildRecentConversationsSection(context.recentConversations))
 
-    // 重要な記憶
-    if (context.midTermMemories.length > 0) {
-      parts.push('【重要な記憶】')
-      parts.push(context.midTermMemories.map(m => `- ${m.content}`).join('\n'))
-      parts.push('')
-    }
+    // チャットでの関係（共通ビルダー使用）
+    parts.push(...buildChatSummariesSection(context.chatSummaries))
 
-    // 今日の行動
-    if (context.todayActions.length > 0) {
-      parts.push('【今日の行動】')
-      parts.push(context.todayActions.map(a => {
-        let line = `- ${a.time} ${a.actionId}`
-        if (a.target) line += ` → ${a.target}`
-        if (a.reason) line += ` [${a.reason}]`
-        if (a.episode) line += `\n  ✨ ${a.episode}`
-        return line
-      }).join('\n'))
-      parts.push('')
-    }
+    // 重要な記憶（共通ビルダー使用）
+    parts.push(...buildMemoriesSection(context.midTermMemories))
 
-    // 周辺の場所
+    // 今日の行動（共通ビルダー使用）
+    parts.push(...buildActionHistorySection(context.todayActions))
+
+    // 周辺の場所（共通ビルダー使用）
+    parts.push(...buildNearbyMapsSection(context.nearbyMaps))
     if (context.nearbyMaps && context.nearbyMaps.length > 0) {
-      parts.push('【周辺の場所】')
-      for (const m of context.nearbyMaps) {
-        if (m.distance === 0) {
-          parts.push(`- ${m.label}（現在地）`)
-        } else {
-          parts.push(`- ${m.label}`)
-        }
-      }
-      parts.push('')
-      parts.push('※上記以外にも、【重要な記憶】【直近の会話（過去）】【今日の行動】で言及された場所は話題にできます。')
-      parts.push('  存在しない施設や店について話さないでください。')
-      parts.push('')
+      parts.push(...buildNearbyMapsNote('character'))
     }
 
-    // 現在のステータス
-    parts.push('【現在のステータス】')
-    parts.push(`- 時刻: ${context.currentTime.hour}:${String(context.currentTime.minute).padStart(2, '0')}`)
-    parts.push(`- 満腹度: ${character.satiety.toFixed(0)}%`)
-    parts.push(`- エネルギー: ${character.energy.toFixed(0)}%`)
-    parts.push(`- 気分: ${character.mood.toFixed(0)}%`)
-    parts.push('')
+    // 現在のステータス（共通ビルダー使用）
+    parts.push(...buildStatusSection(character, context.currentTime))
 
-    // スケジュール
-    if (context.schedule && context.schedule.length > 0) {
-      parts.push('【今日のスケジュール】')
-      parts.push(context.schedule.map(e => `- ${e.time}: ${e.activity}`).join('\n'))
-      parts.push('')
-    }
+    // スケジュール（共通ビルダー使用）
+    parts.push(...buildScheduleSection(context.schedule))
 
     // ターン情報
     parts.push(`【ターン】${session.currentTurn + 1}/${session.maxTurns}`)
@@ -431,24 +460,8 @@ export class ConversationExecutor {
     parts.push(`あなたは${npc.name}です。${character.name}と会話しています。`)
     parts.push('')
 
-    // NPC性格
-    parts.push('【あなたの性格】')
-    parts.push(npc.personality || '（未設定）')
-    parts.push('')
-
-    // 行動傾向
-    if (npc.tendencies && npc.tendencies.length > 0) {
-      parts.push('【行動傾向】')
-      parts.push(npc.tendencies.map(t => `- ${t}`).join('\n'))
-      parts.push('')
-    }
-
-    // カスタムプロンプト
-    if (npc.customPrompt) {
-      parts.push('【その他の設定】')
-      parts.push(npc.customPrompt)
-      parts.push('')
-    }
+    // 性格・行動傾向・カスタムプロンプト（共通ビルダー使用）
+    parts.push(...buildPersonalitySection(npc))
 
     // NPCが保つ事実
     if (npc.facts && npc.facts.length > 0) {
@@ -473,20 +486,10 @@ export class ConversationExecutor {
       parts.push('')
     }
 
-    // 周辺の場所
+    // 周辺の場所（共通ビルダー使用）
+    parts.push(...buildNearbyMapsSection(context.nearbyMaps))
     if (context.nearbyMaps && context.nearbyMaps.length > 0) {
-      parts.push('【周辺の場所】')
-      for (const m of context.nearbyMaps) {
-        if (m.distance === 0) {
-          parts.push(`- ${m.label}（現在地）`)
-        } else {
-          parts.push(`- ${m.label}`)
-        }
-      }
-      parts.push('')
-      parts.push('※上記以外にも、【あなたの知識・事実】【これまでの会話】で言及された場所は話題にできます。')
-      parts.push('  存在しない施設や店について話さないでください。')
-      parts.push('')
+      parts.push(...buildNearbyMapsNote('npc'))
     }
 
     // 指示

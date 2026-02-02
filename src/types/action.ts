@@ -44,6 +44,10 @@ export type ActionId =
   | 'haircut'
   // 家事系
   | 'clean'
+  // チャット連携系
+  | 'reply_chat'
+  | 'check_chat'
+  | 'send_chat'
 
 // キャラクターステータスの部分型（effects用）
 // Character型から数値ステータスを抽出
@@ -75,6 +79,8 @@ export interface ActionRequirements {
   minStats?: Partial<CharacterStats> // 最低ステータス
   nearNpc?: boolean // NPC近くにいる必要
   employment?: boolean // 雇用されている必要
+  hasPendingChat?: boolean // 未読チャット通知がある（reply_chat用）
+  chatEnabled?: boolean // チャット機能が有効である必要
 }
 
 // アクションの効果

@@ -241,6 +241,21 @@
     "clean": {
       "durationRange": { "min": 30, "max": 90, "default": 45 },
       "perMinute": { "mood": 0.2, "energy": -0.2 }
+    },
+    "reply_chat": {
+      "fixed": true,
+      "duration": 0,
+      "effects": { "mood": 5 }
+    },
+    "check_chat": {
+      "fixed": true,
+      "duration": 0,
+      "effects": { "mood": 2 }
+    },
+    "send_chat": {
+      "fixed": true,
+      "duration": 0,
+      "effects": { "mood": 3 }
     }
   },
   "miniEpisode": {

@@ -1,5 +1,6 @@
 import type { FacilityInfo, WorldTime, ScheduleEntry, ActionId, ConversationGoal } from '@/types'
 import type { SimCharacter } from '@/server/simulation/types'
+import type { ChatSummary, PendingNotification } from '@/types/chat'
 
 /**
  * クールダウン情報付きNPC（LLMプロンプト表示用）
@@ -111,6 +112,10 @@ export interface BehaviorContext {
   recentConversations?: RecentConversation[]  // 直近の会話（sleep+日付変更でクリア）
   midTermMemories?: MidTermMemory[]           // 中期記憶
   todayActions?: ActionHistoryEntry[]         // 当日の行動履歴
+  // チャット関連
+  hasPendingChat?: boolean                    // 未読チャット通知の有無
+  pendingChatNotifications?: PendingNotification[]  // 保留中のチャット通知
+  chatSummaries?: ChatSummary[]               // チャットサマリー（記憶）
 }
 
 /**

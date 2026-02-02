@@ -74,16 +74,37 @@ type ScheduleEntry = {
   note?: string;
 };
 
+type DebugLog = {
+  id: number;
+  type: string;
+  character_id: string;
+  character_name: string | null;
+  day: number;
+  time: string;
+  data: string;
+  created_at: number;
+};
+
 // タイムラインイベント統合型
 type TimelineEvent = {
-  type: 'action' | 'schedule' | 'conversation';
+  type: 'action' | 'schedule' | 'conversation' | 'debug';
   day: number;
   time: string;
   sortKey: string; // ソート用: "day-time"
   characterId: string;
   characterName: string;
-  data: ActionHistory | { entry: ScheduleEntry; schedule: Schedule } | NpcSummary;
+  data: ActionHistory | { entry: ScheduleEntry; schedule: Schedule } | NpcSummary | DebugLog;
 };
+
+// Utility function to parse JSON safely
+function parseJson(str: string | null): unknown {
+  if (!str) return null;
+  try {
+    return JSON.parse(str);
+  } catch {
+    return str;
+  }
+}
 
 declare global {
   interface Window {
@@ -103,7 +124,7 @@ export default function LogViewer() {
   // Timeline Filters
   const [timelineCharFilter, setTimelineCharFilter] = useState('');
   const [timelineDayFilter, setTimelineDayFilter] = useState('');
-  const [timelineEventTypeFilter, setTimelineEventTypeFilter] = useState<'' | 'action' | 'schedule' | 'conversation'>('');
+  const [timelineEventTypeFilter, setTimelineEventTypeFilter] = useState<'' | 'action' | 'schedule' | 'conversation' | 'debug'>('');
 
   // Data
   const [characters, setCharacters] = useState<CharacterState[]>([]);
@@ -175,15 +196,6 @@ export default function LogViewer() {
     query<{ day: number }>('SELECT DISTINCT day FROM npc_summaries').forEach(r => days.add(r.day));
     setTimelineDays([...days].sort((a, b) => a - b));
   }, [db, query]);
-
-  const parseJson = (str: string | null) => {
-    if (!str) return null;
-    try {
-      return JSON.parse(str);
-    } catch {
-      return str;
-    }
-  };
 
   const escapeHtml = (str: string | null) => {
     if (!str) return '';
@@ -273,10 +285,38 @@ export default function LogViewer() {
       });
     }
 
+    // デバッグログ
+    if (timelineEventTypeFilter === 'debug') {
+      // debug_logsテーブルが存在するか確認
+      const tableExists = query<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='debug_logs'"
+      ).length > 0;
+
+      if (tableExists) {
+        let sql = 'SELECT d.*, c.name as character_name FROM debug_logs d LEFT JOIN character_states c ON d.character_id = c.id WHERE 1=1';
+        if (timelineCharFilter) sql += ` AND d.character_id = '${timelineCharFilter}'`;
+        if (timelineDayFilter) sql += ` AND d.day = ${timelineDayFilter}`;
+        sql += ' ORDER BY d.day, d.time, d.created_at';
+        const debugLogs = query<DebugLog>(sql);
+        debugLogs.forEach(d => {
+          const time = d.time || '00:00';
+          events.push({
+            type: 'debug',
+            day: d.day,
+            time,
+            sortKey: `${String(d.day).padStart(5, '0')}-${time}-${String(d.created_at).padStart(15, '0')}`,
+            characterId: d.character_id,
+            characterName: d.character_name || d.character_id,
+            data: d,
+          });
+        });
+      }
+    }
+
     // 時系列でソート（降順: 新しいものが上）
     events.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
     return events;
-  }, [db, query, parseJson, timelineCharFilter, timelineDayFilter, timelineEventTypeFilter]);
+  }, [db, query, timelineCharFilter, timelineDayFilter, timelineEventTypeFilter]);
 
   return (
     <>
@@ -529,12 +569,13 @@ export default function LogViewer() {
                       <select
                         className="px-3 py-2 bg-[#1a1a2e] border border-[#4a4a6a] rounded-md text-gray-200 text-sm cursor-pointer focus:outline-none focus:border-[#6dd5ed]"
                         value={timelineEventTypeFilter}
-                        onChange={(e) => setTimelineEventTypeFilter(e.target.value as '' | 'action' | 'schedule' | 'conversation')}
+                        onChange={(e) => setTimelineEventTypeFilter(e.target.value as '' | 'action' | 'schedule' | 'conversation' | 'debug')}
                       >
                         <option value="">全て</option>
                         <option value="action">行動</option>
                         <option value="schedule">予定</option>
                         <option value="conversation">会話</option>
+                        <option value="debug">🔧 デバッグ</option>
                       </select>
                     </div>
                   </div>
@@ -668,6 +709,7 @@ const EVENT_STYLES: Record<TimelineEvent['type'], { color: string; icon: string 
   action: { color: 'bg-blue-500', icon: '' },
   schedule: { color: 'bg-green-500', icon: '📋' },
   conversation: { color: 'bg-purple-500', icon: '💬' },
+  debug: { color: 'bg-orange-500', icon: '🔧' },
 };
 
 // タイムラインイベントカード
@@ -771,5 +813,104 @@ function TimelineEventCard({
     );
   }
 
+  // デバッグイベント
+  if (event.type === 'debug') {
+    const debugLog = event.data as DebugLog;
+    let parsedData: Record<string, unknown> = {};
+    try {
+      parsedData = JSON.parse(debugLog.data);
+    } catch {
+      // ignore
+    }
+
+    const debugType = debugLog.type;
+    const typeLabel = debugType === 'llm_behavior'
+      ? '行動決定'
+      : debugType === 'conversation_turn'
+        ? '会話ターン'
+        : debugType;
+
+    const stage = parsedData.stage as string | undefined;
+    const stageLabel = stage
+      ? ({
+          action_decision: '行動決定',
+          facility_selection: '施設選択',
+          interrupt_facility: '緊急施設選択',
+        }[stage] || stage)
+      : '';
+
+    return (
+      <DebugLogCard
+        cardBaseClass={cardBaseClass}
+        renderHeader={renderHeader}
+        icon={icon}
+        typeLabel={typeLabel}
+        stageLabel={stageLabel}
+        parsedData={parsedData}
+      />
+    );
+  }
+
   return null;
+}
+
+// デバッグログカード（折りたたみ式）
+function DebugLogCard({
+  cardBaseClass,
+  renderHeader,
+  icon,
+  typeLabel,
+  stageLabel,
+  parsedData,
+}: {
+  cardBaseClass: string;
+  renderHeader: (badgeContent: string) => React.ReactNode;
+  icon: string;
+  typeLabel: string;
+  stageLabel: string;
+  parsedData: Record<string, unknown>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const prompt = parsedData.prompt as string | undefined;
+  const response = parsedData.response as string | undefined;
+  const turn = parsedData.turn as number | undefined;
+  const speaker = parsedData.speaker as string | undefined;
+
+  return (
+    <div className={cardBaseClass}>
+      <div
+        className="cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {renderHeader(
+          `${icon} ${typeLabel}${stageLabel ? ` (${stageLabel})` : ''}${turn ? ` Turn ${turn}` : ''}${speaker ? ` - ${speaker}` : ''}`
+        )}
+        <div className="text-gray-500 text-xs mt-1">
+          {expanded ? '▼ 折りたたむ' : '▶ 詳細を表示'}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {prompt && (
+            <div>
+              <div className="text-gray-500 text-xs mb-1">Prompt:</div>
+              <pre className="text-xs bg-[#1a1a2e] p-2 rounded overflow-x-auto max-h-60 overflow-y-auto whitespace-pre-wrap text-gray-400">
+                {prompt}
+              </pre>
+            </div>
+          )}
+          {response && (
+            <div>
+              <div className="text-gray-500 text-xs mb-1">Response:</div>
+              <pre className="text-xs bg-[#1a1a2e] p-2 rounded overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap text-green-400">
+                {response}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

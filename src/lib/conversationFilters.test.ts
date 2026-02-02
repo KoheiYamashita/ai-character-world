@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterForBehaviorDecision, filterForConversation, filterNPCsByCooldown, addCooldownInfoToNPCs, CONVERSATION_COOLDOWN_MINUTES } from './conversationFilters'
+import { filterForBehaviorDecision, filterForConversation, filterLatestPerNPC, filterNPCsByCooldown, addCooldownInfoToNPCs, CONVERSATION_COOLDOWN_MINUTES } from './conversationFilters'
 import type { RecentConversation } from '@/types/behavior'
 import type { SimNPC } from '@/server/simulation/types'
 
@@ -140,6 +140,53 @@ describe('conversationFilters', () => {
       ]
       const original = [...conversations]
       filterForConversation(conversations, 'npc1')
+      expect(conversations).toEqual(original)
+    })
+  })
+
+  describe('filterLatestPerNPC', () => {
+    it('undefined の場合は空配列を返す', () => {
+      expect(filterLatestPerNPC(undefined)).toEqual([])
+    })
+
+    it('空配列の場合は空配列を返す', () => {
+      expect(filterLatestPerNPC([])).toEqual([])
+    })
+
+    it('各NPCの最新1件のみ返す', () => {
+      const conversations = [
+        createConversation('npc1', 'Alice', 100),
+        createConversation('npc1', 'Alice', 200),  // npc1 の最新
+        createConversation('npc2', 'Bob', 150),
+        createConversation('npc2', 'Bob', 250),    // npc2 の最新
+        createConversation('npc3', 'Carol', 300),  // npc3 の最新（1件のみ）
+      ]
+      const result = filterLatestPerNPC(conversations)
+      expect(result).toHaveLength(3)
+      expect(result.find(c => c.npcId === 'npc1')?.timestamp).toBe(200)
+      expect(result.find(c => c.npcId === 'npc2')?.timestamp).toBe(250)
+      expect(result.find(c => c.npcId === 'npc3')?.timestamp).toBe(300)
+    })
+
+    it('結果はtimestamp降順でソートされる', () => {
+      const conversations = [
+        createConversation('npc1', 'Alice', 200),
+        createConversation('npc2', 'Bob', 100),
+        createConversation('npc3', 'Carol', 300),
+      ]
+      const result = filterLatestPerNPC(conversations)
+      expect(result[0].timestamp).toBe(300) // npc3
+      expect(result[1].timestamp).toBe(200) // npc1
+      expect(result[2].timestamp).toBe(100) // npc2
+    })
+
+    it('元の配列を変更しない', () => {
+      const conversations = [
+        createConversation('npc1', 'Alice', 100),
+        createConversation('npc2', 'Bob', 200),
+      ]
+      const original = [...conversations]
+      filterLatestPerNPC(conversations)
       expect(conversations).toEqual(original)
     })
   })
