@@ -478,7 +478,7 @@ export default function LogViewer() {
               {activeTab === 'characters' && (
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-5">
                   {characters.map((c) => {
-                    const employment = parseJson(c.employment);
+                    const employment = parseJson(c.employment) as { job?: string; workplace?: string } | null;
                     return (
                       <div
                         key={c.id}
