@@ -40,6 +40,7 @@ export interface ConversationSummaryEntry {
 }
 
 import type { NPCFact } from './npc'
+import type { Direction } from './character'
 
 export interface NPCDynamicState {
   affinity: number
@@ -47,4 +48,10 @@ export interface NPCDynamicState {
   facts: NPCFact[]
   conversationCount: number
   lastConversation: number | null
+  // 位置情報（optional、undefinedは初期位置を使用）
+  mapId?: string
+  currentNodeId?: string
+  positionX?: number
+  positionY?: number
+  direction?: Direction
 }

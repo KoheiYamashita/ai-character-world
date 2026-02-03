@@ -1,8 +1,8 @@
 import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats, NPCCommitment, CommitmentStatus } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
-import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId, PendingNotification } from '@/types/chat'
 
 /**
  * In-memory implementation of StateStore.
@@ -39,6 +39,8 @@ export class MemoryStore implements StateStore {
   private nextDebugLogId: number = 1
   private chatMessages: ChatMessageRecord[] = []
   private chatSummaries: Map<string, ChatSummary> = new Map() // key: `${characterId}:${providerId}:${channelId}`
+  private commitments: Map<string, NPCCommitment> = new Map()
+  private pendingNotifications: Map<string, PendingNotification[]> = new Map() // key: characterId
 
   async saveState(state: SerializedWorldState): Promise<void> {
     // Deep clone to avoid reference issues
@@ -356,6 +358,8 @@ export class MemoryStore implements StateStore {
     this.nextDebugLogId = 1
     this.chatMessages = []
     this.chatSummaries.clear()
+    this.commitments.clear()
+    this.pendingNotifications.clear()
   }
 
   // Debug log methods
@@ -481,6 +485,84 @@ export class MemoryStore implements StateStore {
     return Array.from(this.chatSummaries.values())
       .filter(s => s.characterId === characterId)
       .sort((a, b) => b.lastInteractionAt - a.lastInteractionAt)
+  }
+
+  // ==========================================================================
+  // NPC Commitment methods
+  // ==========================================================================
+
+  async saveCommitment(commitment: NPCCommitment): Promise<void> {
+    this.commitments.set(commitment.id, { ...commitment })
+  }
+
+  async loadCommitmentsForDay(day: number): Promise<NPCCommitment[]> {
+    return Array.from(this.commitments.values())
+      .filter(c => c.targetDay === day && (c.status === 'pending' || c.status === 'triggered'))
+      .sort((a, b) => a.targetTime.localeCompare(b.targetTime))
+  }
+
+  async loadPendingCommitmentsForNPC(npcId: string, currentDay: number): Promise<NPCCommitment[]> {
+    return Array.from(this.commitments.values())
+      .filter(c => c.npcId === npcId && c.targetDay >= currentDay && c.status === 'pending')
+      .sort((a, b) => a.targetDay - b.targetDay || a.targetTime.localeCompare(b.targetTime))
+  }
+
+  async updateCommitmentStatus(commitmentId: string, status: CommitmentStatus): Promise<void> {
+    const commitment = this.commitments.get(commitmentId)
+    if (commitment) {
+      commitment.status = status
+    }
+  }
+
+  async deleteExpiredCommitments(currentDay: number): Promise<number> {
+    const before = this.commitments.size
+    for (const [id, c] of this.commitments) {
+      if (c.targetDay < currentDay || c.status === 'fulfilled' || c.status === 'expired') {
+        this.commitments.delete(id)
+      }
+    }
+    return before - this.commitments.size
+  }
+
+  // ==========================================================================
+  // Pending notification methods (Discord通知キュー)
+  // ==========================================================================
+
+  async savePendingNotification(characterId: string, notification: PendingNotification): Promise<void> {
+    const existing = this.pendingNotifications.get(characterId) ?? []
+    existing.push({ ...notification })
+    this.pendingNotifications.set(characterId, existing)
+  }
+
+  async loadPendingNotifications(characterId: string): Promise<PendingNotification[]> {
+    const notifications = this.pendingNotifications.get(characterId)
+    if (!notifications) return []
+    return notifications.map(n => ({ ...n }))
+  }
+
+  async loadAllPendingNotifications(): Promise<Map<string, PendingNotification[]>> {
+    const result = new Map<string, PendingNotification[]>()
+    for (const [characterId, notifications] of this.pendingNotifications) {
+      result.set(characterId, notifications.map(n => ({ ...n })))
+    }
+    return result
+  }
+
+  async deletePendingNotification(notificationId: string): Promise<void> {
+    for (const [characterId, notifications] of this.pendingNotifications) {
+      const index = notifications.findIndex(n => n.id === notificationId)
+      if (index !== -1) {
+        notifications.splice(index, 1)
+        if (notifications.length === 0) {
+          this.pendingNotifications.delete(characterId)
+        }
+        break
+      }
+    }
+  }
+
+  async clearPendingNotifications(characterId: string): Promise<void> {
+    this.pendingNotifications.delete(characterId)
   }
 
   async close(): Promise<void> {

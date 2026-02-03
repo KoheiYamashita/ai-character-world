@@ -10,6 +10,7 @@ import type {
 import { DEFAULT_SIMULATION_CONFIG, createSimCharacter } from './types'
 import { WorldStateManager } from './WorldState'
 import { CharacterSimulator } from './CharacterSimulator'
+import { NPCSimulator } from './NPCSimulator'
 import { ActionExecutor } from './actions/ActionExecutor'
 import type { ActionId } from './actions/definitions'
 import type { StateStore } from '../persistence/StateStore'
@@ -19,6 +20,7 @@ import { ConversationManager } from '../conversation/ConversationManager'
 import { ConversationExecutor } from '../conversation/ConversationExecutor'
 import type { ConversationContext } from '../conversation/ConversationExecutor'
 import { ConversationPostProcessor } from '../conversation/ConversationPostProcessor'
+import { CommitmentManager } from '../commitment/CommitmentManager'
 import type { MiniEpisodeGenerator } from '../episode/MiniEpisodeGenerator'
 import { StubMiniEpisodeGenerator } from '../episode/StubMiniEpisodeGenerator'
 import { findObstacleById, getFacilityTargetNode, isNodeAtFacility } from '@/lib/facilityUtils'
@@ -40,10 +42,12 @@ const SAVE_INTERVAL_MS = 30000
 export class SimulationEngine {
   private worldState: WorldStateManager
   private characterSimulator: CharacterSimulator
+  private npcSimulator: NPCSimulator
   private actionExecutor: ActionExecutor
   private conversationManager: ConversationManager
   private conversationExecutor: ConversationExecutor
   private conversationPostProcessor: ConversationPostProcessor
+  private commitmentManager: CommitmentManager
   private behaviorDecider: BehaviorDecider
   // Full NPC data (with personality, facts, etc.) for conversation LLM
   private fullNPCs: Map<string, NPC> = new Map()
@@ -96,10 +100,12 @@ export class SimulationEngine {
     this.config = { ...DEFAULT_SIMULATION_CONFIG, ...config }
     this.worldState = new WorldStateManager()
     this.characterSimulator = new CharacterSimulator(this.worldState, this.config)
+    this.npcSimulator = new NPCSimulator(this.worldState, this.config)
     this.actionExecutor = new ActionExecutor(this.worldState)
     this.conversationManager = new ConversationManager(this.worldState)
     this.conversationExecutor = new ConversationExecutor(this.conversationManager)
     this.conversationPostProcessor = new ConversationPostProcessor()
+    this.commitmentManager = new CommitmentManager()
     this.behaviorDecider = new LLMBehaviorDecider()
     this.stateStore = stateStore ?? null
 
@@ -124,6 +130,17 @@ export class SimulationEngine {
       if (this.stateStore) {
         await this.stateStore.replaceMidTermMemories(characterId, memories)
       }
+    })
+    this.conversationPostProcessor.setOnCommitmentCreate(async (params) => {
+      // Resolve location text to mapId and create commitment
+      await this.commitmentManager.createCommitmentFromLocation({
+        npcId: params.npcId,
+        characterId: params.characterId,
+        locationText: params.targetMapId, // targetMapId contains location text from LLM
+        targetTime: params.targetTime,
+        targetDay: params.targetDay,
+        description: params.description,
+      })
     })
     this.conversationExecutor.setPostProcessor(this.conversationPostProcessor)
 
@@ -256,6 +273,31 @@ export class SimulationEngine {
         }
       })
 
+      // Wire up ChatManager persistence callbacks
+      this.chatManager.setOnNotificationSave(async (characterId, notification) => {
+        if (this.stateStore) {
+          await this.stateStore.savePendingNotification(characterId, notification)
+        }
+      })
+
+      this.chatManager.setOnNotificationDelete(async (notificationId) => {
+        if (this.stateStore) {
+          await this.stateStore.deletePendingNotification(notificationId)
+        }
+      })
+
+      this.chatManager.setOnNotificationsClear(async (characterId) => {
+        if (this.stateStore) {
+          await this.stateStore.clearPendingNotifications(characterId)
+        }
+      })
+
+      // Restore pending notifications from DB
+      if (this.stateStore) {
+        const notifications = await this.stateStore.loadAllPendingNotifications()
+        this.chatManager.restoreNotifications(notifications)
+      }
+
       console.log('[SimulationEngine] Chat system initialized')
     } catch (error) {
       console.error('[SimulationEngine] Failed to initialize chat system:', error)
@@ -291,6 +333,19 @@ export class SimulationEngine {
     }
 
     this.initialized = true
+
+    // Initialize CommitmentManager with WorldState and StateStore
+    this.commitmentManager.setWorldState(this.worldState)
+    if (this.stateStore) {
+      this.commitmentManager.setStateStore(this.stateStore)
+    }
+
+    // Load commitments for current day
+    const currentDay = this.worldState.getTime().day
+    this.commitmentManager.loadCommitmentsForDay(currentDay).catch(err => {
+      console.error('[SimulationEngine] Error loading commitments:', err)
+    })
+
     console.log(`[SimulationEngine] Initialized with ${characters.length} characters and ${Object.keys(maps).length} maps`)
   }
 
@@ -339,6 +394,30 @@ export class SimulationEngine {
     const state = this.worldState.getSerializedState()
     await this.stateStore.saveState(state)
     console.log('[SimulationEngine] State saved to persistent storage')
+  }
+
+  // Save all NPC positions to persistent storage
+  private async saveNPCPositions(): Promise<void> {
+    if (!this.stateStore) return
+
+    for (const [npcId, npc] of this.fullNPCs) {
+      const simNPC = this.worldState.getNPC(npcId)
+      if (!simNPC) continue
+
+      const state: NPCDynamicState = {
+        affinity: npc.affinity,
+        mood: npc.mood,
+        facts: npc.facts,
+        conversationCount: npc.conversationCount,
+        lastConversation: npc.lastConversation,
+        mapId: simNPC.mapId,
+        currentNodeId: simNPC.currentNodeId,
+        positionX: simNPC.position.x,
+        positionY: simNPC.position.y,
+        direction: simNPC.direction,
+      }
+      await this.stateStore.saveNPCState(npcId, state)
+    }
   }
 
   // Shutdown the engine and save state
@@ -460,6 +539,24 @@ export class SimulationEngine {
     npc.mood = state.mood
     npc.conversationCount = state.conversationCount
     npc.lastConversation = state.lastConversation
+
+    // 位置情報の復元（永続化されている場合）
+    if (state.mapId && state.currentNodeId && state.positionX != null && state.positionY != null) {
+      this.worldState.updateNPCMap(npcId, state.mapId, state.currentNodeId, {
+        x: state.positionX,
+        y: state.positionY,
+      })
+      if (state.direction) {
+        this.worldState.updateNPCDirection(npcId, state.direction)
+      }
+      // fullNPCsの位置も更新
+      npc.mapId = state.mapId
+      npc.currentNodeId = state.currentNodeId
+      npc.position = { x: state.positionX, y: state.positionY }
+      if (state.direction) {
+        npc.direction = state.direction
+      }
+    }
   }
 
   // Clean up expired NPC facts on day change
@@ -474,12 +571,19 @@ export class SimulationEngine {
         totalRemoved += removed
         // Persist updated NPC state
         if (this.stateStore) {
+          const simNPC = this.worldState.getNPC(npcId)
           const state: NPCDynamicState = {
             affinity: npc.affinity,
             mood: npc.mood,
             facts: npc.facts,
             conversationCount: npc.conversationCount,
             lastConversation: npc.lastConversation,
+            // 位置情報
+            mapId: simNPC?.mapId,
+            currentNodeId: simNPC?.currentNodeId,
+            positionX: simNPC?.position.x,
+            positionY: simNPC?.position.y,
+            direction: simNPC?.direction,
           }
           this.stateStore.saveNPCState(npcId, state).catch(err => {
             console.error(`[SimulationEngine] Error saving NPC state after facts cleanup:`, err)
@@ -489,6 +593,41 @@ export class SimulationEngine {
     }
     if (totalRemoved > 0) {
       console.log(`[SimulationEngine] Cleaned up ${totalRemoved} expired NPC facts`)
+    }
+  }
+
+  // Process NPC commitments - trigger NPC movement to meeting locations
+  private processCommitments(): void {
+    const currentTime = this.worldState.getTime()
+    const triggered = this.commitmentManager.getTriggeredCommitments(currentTime)
+
+    for (const commitment of triggered) {
+      const npc = this.worldState.getNPC(commitment.npcId)
+      if (!npc || npc.isInConversation) continue
+
+      // Resolve commitment to specific node
+      const resolved = this.commitmentManager.resolveCommitmentToNode(commitment)
+      if (!resolved) {
+        console.warn(`[SimulationEngine] Could not resolve commitment location for ${commitment.id}`)
+        continue
+      }
+
+      // Navigate NPC to commitment location
+      let started = false
+      if (npc.mapId === resolved.mapId) {
+        // Same map - direct navigation
+        started = this.npcSimulator.navigateToNode(commitment.npcId, resolved.nodeId)
+      } else {
+        // Different map - cross-map navigation
+        started = this.npcSimulator.navigateToMap(commitment.npcId, resolved.mapId, resolved.nodeId)
+      }
+
+      if (started) {
+        this.commitmentManager.markTriggered(commitment.id).catch(err => {
+          console.error(`[SimulationEngine] Error marking commitment as triggered:`, err)
+        })
+        console.log(`[SimulationEngine] NPC ${npc.name} started moving to commitment location (${resolved.mapId}/${resolved.nodeId})`)
+      }
     }
   }
 
@@ -519,6 +658,17 @@ export class SimulationEngine {
       })
       // Clean up expired NPC facts
       this.cleanupExpiredNPCFacts(currentDay)
+      // Reset all NPCs to home positions
+      this.npcSimulator.resetAllToHome()
+      console.log('[SimulationEngine] NPCs reset to home positions')
+
+      // Expire old commitments and load new day's commitments
+      this.commitmentManager.expireOldCommitments(currentDay).catch(err => {
+        console.error('[SimulationEngine] Error expiring commitments:', err)
+      })
+      this.commitmentManager.loadCommitmentsForDay(currentDay).catch(err => {
+        console.error('[SimulationEngine] Error loading commitments:', err)
+      })
     }
 
     // Check for status decay with elapsed time scaling
@@ -537,6 +687,12 @@ export class SimulationEngine {
 
     // Update character simulations (movement, transitions)
     this.characterSimulator.tick(deltaTime, now)
+
+    // Update NPC simulations (movement)
+    this.npcSimulator.tick(deltaTime)
+
+    // Process NPC commitments (trigger NPC movement to meeting locations)
+    this.processCommitments()
 
     // Check for pending actions after movement completes
     this.checkPendingActions()
@@ -560,6 +716,10 @@ export class SimulationEngine {
       // Delete old chat messages (7 days retention)
       this.cleanupOldChatMessages().catch(err => {
         console.error('[SimulationEngine] Error cleaning up old chat messages:', err)
+      })
+      // Save NPC positions
+      this.saveNPCPositions().catch(err => {
+        console.error('[SimulationEngine] Error saving NPC positions:', err)
       })
       this.lastSaveTime = now
     }

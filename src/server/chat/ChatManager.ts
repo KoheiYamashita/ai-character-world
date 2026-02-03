@@ -18,6 +18,44 @@ export class ChatManager {
   // キャラクターごとのアクティブセッション (characterId -> session)
   private activeSessions: Map<string, ChatSession> = new Map()
 
+  // 永続化コールバック
+  private onNotificationSave: ((characterId: string, notification: PendingNotification) => Promise<void>) | null = null
+  private onNotificationDelete: ((notificationId: string) => Promise<void>) | null = null
+  private onNotificationsClear: ((characterId: string) => Promise<void>) | null = null
+
+  // ==========================================================================
+  // 永続化コールバック設定
+  // ==========================================================================
+
+  /**
+   * 通知保存時のコールバックを設定
+   */
+  setOnNotificationSave(callback: (characterId: string, notification: PendingNotification) => Promise<void>): void {
+    this.onNotificationSave = callback
+  }
+
+  /**
+   * 通知削除時のコールバックを設定
+   */
+  setOnNotificationDelete(callback: (notificationId: string) => Promise<void>): void {
+    this.onNotificationDelete = callback
+  }
+
+  /**
+   * 通知クリア時のコールバックを設定
+   */
+  setOnNotificationsClear(callback: (characterId: string) => Promise<void>): void {
+    this.onNotificationsClear = callback
+  }
+
+  /**
+   * 永続化から通知を復元
+   */
+  restoreNotifications(notifications: Map<string, PendingNotification[]>): void {
+    this.notificationQueues = notifications
+    console.log(`[ChatManager] Restored ${this.getTotalPendingCount()} pending notifications`)
+  }
+
   // ==========================================================================
   // 通知キュー管理
   // ==========================================================================
@@ -41,6 +79,13 @@ export class ChatManager {
     const queue = this.notificationQueues.get(characterId) ?? []
     queue.push(notification)
     this.notificationQueues.set(characterId, queue)
+
+    // 永続化
+    if (this.onNotificationSave) {
+      this.onNotificationSave(characterId, notification).catch(err => {
+        console.error('[ChatManager] Failed to persist notification:', err)
+      })
+    }
 
     console.log(`[ChatManager] Queued notification for ${characterId}: "${message.content.substring(0, 50)}..."`)
   }
@@ -70,6 +115,13 @@ export class ChatManager {
     const index = queue.findIndex(n => n.id === notificationId)
     if (index !== -1) {
       queue.splice(index, 1)
+
+      // 永続化から削除
+      if (this.onNotificationDelete) {
+        this.onNotificationDelete(notificationId).catch(err => {
+          console.error('[ChatManager] Failed to delete notification from DB:', err)
+        })
+      }
     }
 
     if (queue.length === 0) {
@@ -82,6 +134,13 @@ export class ChatManager {
    */
   clearNotifications(characterId: string): void {
     this.notificationQueues.delete(characterId)
+
+    // 永続化から削除
+    if (this.onNotificationsClear) {
+      this.onNotificationsClear(characterId).catch(err => {
+        console.error('[ChatManager] Failed to clear notifications from DB:', err)
+      })
+    }
   }
 
   /**

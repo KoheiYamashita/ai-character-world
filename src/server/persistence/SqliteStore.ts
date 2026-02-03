@@ -1,9 +1,9 @@
 import Database from 'better-sqlite3'
 import type { StateStore, ActiveActionEntry } from './StateStore'
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, NPCFact, CharacterStats } from '@/types'
+import type { WorldTime, Direction, SpriteConfig, Employment, DailySchedule, ScheduleEntry, ConversationSummaryEntry, NPCDynamicState, NPCFact, CharacterStats, NPCCommitment, CommitmentStatus } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
-import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId, PendingNotification } from '@/types/chat'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -64,6 +64,21 @@ interface ActionHistoryRow {
   end_time: string | null  // 完了時刻
   last_update_time: number | null  // 最終更新時刻
   stats_snapshot: string | null  // JSON: CharacterStats
+}
+
+// Database row type for npc_states table
+interface NPCStateRow {
+  npc_id: string
+  affinity: number
+  mood: string
+  facts: string
+  conversation_count: number
+  last_conversation: number | null
+  map_id: string | null
+  current_node_id: string | null
+  position_x: number | null
+  position_y: number | null
+  direction: string | null
 }
 
 /**
@@ -259,6 +274,44 @@ export class SqliteStore implements StateStore {
 
       CREATE INDEX IF NOT EXISTS idx_chat_summaries_character
         ON chat_summaries(character_id);
+
+      -- NPC commitments (約束・待ち合わせ)
+      CREATE TABLE IF NOT EXISTS npc_commitments (
+        id TEXT PRIMARY KEY,
+        npc_id TEXT NOT NULL,
+        character_id TEXT NOT NULL,
+        target_map_id TEXT NOT NULL,
+        target_facility_id TEXT,
+        target_time TEXT NOT NULL,
+        target_day INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_commitments_npc_day
+        ON npc_commitments(npc_id, target_day);
+
+      CREATE INDEX IF NOT EXISTS idx_commitments_status_day
+        ON npc_commitments(status, target_day);
+
+      -- Pending notifications (Discord通知キュー)
+      CREATE TABLE IF NOT EXISTS pending_notifications (
+        id TEXT PRIMARY KEY,
+        character_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pending_notifications_character
+        ON pending_notifications(character_id);
     `)
 
     // Migration: add episode column to action_history
@@ -274,6 +327,28 @@ export class SqliteStore implements StateStore {
     if (!hasFitness) {
       this.db.prepare('ALTER TABLE character_states ADD COLUMN fitness INTEGER NOT NULL DEFAULT 80').run()
       console.log('[SqliteStore] Migrated: added fitness column to character_states')
+    }
+    // Chain to next migration
+    this.migrateNPCStatePosition()
+  }
+
+  private migrateNPCStatePosition(): void {
+    const columns = this.db.pragma('table_info(npc_states)') as Array<{ name: string }>
+    const columnNames = new Set(columns.map(c => c.name))
+
+    const newColumns = [
+      { name: 'map_id', type: 'TEXT' },
+      { name: 'current_node_id', type: 'TEXT' },
+      { name: 'position_x', type: 'REAL' },
+      { name: 'position_y', type: 'REAL' },
+      { name: 'direction', type: 'TEXT' },
+    ]
+
+    for (const col of newColumns) {
+      if (!columnNames.has(col.name)) {
+        this.db.prepare(`ALTER TABLE npc_states ADD COLUMN ${col.name} ${col.type}`).run()
+        console.log(`[SqliteStore] Migrated: added ${col.name} column to npc_states`)
+      }
     }
   }
 
@@ -903,8 +978,13 @@ export class SqliteStore implements StateStore {
 
   async saveNPCState(npcId: string, state: NPCDynamicState): Promise<void> {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO npc_states (npc_id, affinity, mood, facts, conversation_count, last_conversation, updated_at)
-      VALUES (@npc_id, @affinity, @mood, @facts, @conversation_count, @last_conversation, @updated_at)
+      INSERT OR REPLACE INTO npc_states (
+        npc_id, affinity, mood, facts, conversation_count, last_conversation,
+        map_id, current_node_id, position_x, position_y, direction, updated_at
+      ) VALUES (
+        @npc_id, @affinity, @mood, @facts, @conversation_count, @last_conversation,
+        @map_id, @current_node_id, @position_x, @position_y, @direction, @updated_at
+      )
     `)
 
     stmt.run({
@@ -914,30 +994,46 @@ export class SqliteStore implements StateStore {
       facts: JSON.stringify(state.facts),
       conversation_count: state.conversationCount,
       last_conversation: state.lastConversation,
+      map_id: state.mapId ?? null,
+      current_node_id: state.currentNodeId ?? null,
+      position_x: state.positionX ?? null,
+      position_y: state.positionY ?? null,
+      direction: state.direction ?? null,
       updated_at: Date.now(),
     })
   }
 
   async loadNPCState(npcId: string): Promise<NPCDynamicState | null> {
     const stmt = this.db.prepare('SELECT * FROM npc_states WHERE npc_id = ?')
-    const row = stmt.get(npcId) as {
-      npc_id: string
-      affinity: number
-      mood: string
-      facts: string
-      conversation_count: number
-      last_conversation: number | null
-      updated_at: number
-    } | undefined
-
+    const row = stmt.get(npcId) as NPCStateRow | undefined
     if (!row) return null
+    return this.rowToNPCDynamicState(row)
+  }
 
+  async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
+    const stmt = this.db.prepare('SELECT * FROM npc_states')
+    const rows = stmt.all() as NPCStateRow[]
+
+    const result = new Map<string, NPCDynamicState>()
+    for (const row of rows) {
+      result.set(row.npc_id, this.rowToNPCDynamicState(row))
+    }
+    return result
+  }
+
+  // Convert NPC state row to NPCDynamicState
+  private rowToNPCDynamicState(row: NPCStateRow): NPCDynamicState {
     return {
       affinity: row.affinity,
       mood: row.mood,
       facts: this.parseNPCFacts(row.facts),
       conversationCount: row.conversation_count,
       lastConversation: row.last_conversation,
+      mapId: row.map_id ?? undefined,
+      currentNodeId: row.current_node_id ?? undefined,
+      positionX: row.position_x ?? undefined,
+      positionY: row.position_y ?? undefined,
+      direction: (row.direction as NPCDynamicState['direction']) ?? undefined,
     }
   }
 
@@ -953,30 +1049,6 @@ export class SqliteStore implements StateStore {
     }
     // New format: already NPCFact[]
     return parsed as NPCFact[]
-  }
-
-  async loadAllNPCStates(): Promise<Map<string, NPCDynamicState>> {
-    const stmt = this.db.prepare('SELECT * FROM npc_states')
-    const rows = stmt.all() as Array<{
-      npc_id: string
-      affinity: number
-      mood: string
-      facts: string
-      conversation_count: number
-      last_conversation: number | null
-    }>
-
-    const result = new Map<string, NPCDynamicState>()
-    for (const row of rows) {
-      result.set(row.npc_id, {
-        affinity: row.affinity,
-        mood: row.mood,
-        facts: this.parseNPCFacts(row.facts),
-        conversationCount: row.conversation_count,
-        lastConversation: row.last_conversation,
-      })
-    }
-    return result
   }
 
   // Mid-term memory CRUD methods
@@ -1349,6 +1421,226 @@ export class SqliteStore implements StateStore {
       totalMessages: row.total_messages,
       updatedAt: row.updated_at,
     }))
+  }
+
+  // ==========================================================================
+  // NPC Commitment methods
+  // ==========================================================================
+
+  async saveCommitment(commitment: NPCCommitment): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO npc_commitments (
+        id, npc_id, character_id, target_map_id, target_facility_id,
+        target_time, target_day, description, status, created_at
+      ) VALUES (
+        @id, @npc_id, @character_id, @target_map_id, @target_facility_id,
+        @target_time, @target_day, @description, @status, @created_at
+      )
+    `)
+
+    stmt.run({
+      id: commitment.id,
+      npc_id: commitment.npcId,
+      character_id: commitment.characterId,
+      target_map_id: commitment.targetMapId,
+      target_facility_id: commitment.targetFacilityId ?? null,
+      target_time: commitment.targetTime,
+      target_day: commitment.targetDay,
+      description: commitment.description,
+      status: commitment.status,
+      created_at: commitment.createdAt,
+    })
+  }
+
+  async loadCommitmentsForDay(day: number): Promise<NPCCommitment[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM npc_commitments
+      WHERE target_day = ? AND status IN ('pending', 'triggered')
+      ORDER BY target_time
+    `)
+    const rows = stmt.all(day) as Array<{
+      id: string
+      npc_id: string
+      character_id: string
+      target_map_id: string
+      target_facility_id: string | null
+      target_time: string
+      target_day: number
+      description: string
+      status: string
+      created_at: number
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      npcId: row.npc_id,
+      characterId: row.character_id,
+      targetMapId: row.target_map_id,
+      targetFacilityId: row.target_facility_id ?? undefined,
+      targetTime: row.target_time,
+      targetDay: row.target_day,
+      description: row.description,
+      status: row.status as CommitmentStatus,
+      createdAt: row.created_at,
+    }))
+  }
+
+  async loadPendingCommitmentsForNPC(npcId: string, currentDay: number): Promise<NPCCommitment[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM npc_commitments
+      WHERE npc_id = ? AND target_day >= ? AND status = 'pending'
+      ORDER BY target_day, target_time
+    `)
+    const rows = stmt.all(npcId, currentDay) as Array<{
+      id: string
+      npc_id: string
+      character_id: string
+      target_map_id: string
+      target_facility_id: string | null
+      target_time: string
+      target_day: number
+      description: string
+      status: string
+      created_at: number
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      npcId: row.npc_id,
+      characterId: row.character_id,
+      targetMapId: row.target_map_id,
+      targetFacilityId: row.target_facility_id ?? undefined,
+      targetTime: row.target_time,
+      targetDay: row.target_day,
+      description: row.description,
+      status: row.status as CommitmentStatus,
+      createdAt: row.created_at,
+    }))
+  }
+
+  async updateCommitmentStatus(commitmentId: string, status: CommitmentStatus): Promise<void> {
+    const stmt = this.db.prepare(`
+      UPDATE npc_commitments SET status = ? WHERE id = ?
+    `)
+    stmt.run(status, commitmentId)
+  }
+
+  async deleteExpiredCommitments(currentDay: number): Promise<number> {
+    const stmt = this.db.prepare(`
+      DELETE FROM npc_commitments WHERE target_day < ? OR status IN ('fulfilled', 'expired')
+    `)
+    const result = stmt.run(currentDay)
+    return result.changes
+  }
+
+  // ==========================================================================
+  // Pending notification methods (Discord通知キュー)
+  // ==========================================================================
+
+  async savePendingNotification(characterId: string, notification: PendingNotification): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO pending_notifications (
+        id, character_id, provider_id, channel_id, channel_name,
+        message_id, sender_id, sender_name, content, received_at, created_at
+      ) VALUES (
+        @id, @character_id, @provider_id, @channel_id, @channel_name,
+        @message_id, @sender_id, @sender_name, @content, @received_at, @created_at
+      )
+    `)
+
+    stmt.run({
+      id: notification.id,
+      character_id: characterId,
+      provider_id: notification.providerId,
+      channel_id: notification.channelId,
+      channel_name: notification.channelName,
+      message_id: notification.messageId,
+      sender_id: notification.senderId,
+      sender_name: notification.senderName,
+      content: notification.content,
+      received_at: notification.receivedAt,
+      created_at: Date.now(),
+    })
+  }
+
+  async loadPendingNotifications(characterId: string): Promise<PendingNotification[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM pending_notifications
+      WHERE character_id = ?
+      ORDER BY received_at
+    `)
+    const rows = stmt.all(characterId) as Array<{
+      id: string
+      character_id: string
+      provider_id: string
+      channel_id: string
+      channel_name: string
+      message_id: string
+      sender_id: string
+      sender_name: string
+      content: string
+      received_at: number
+      created_at: number
+    }>
+
+    return rows.map(row => ({
+      id: row.id,
+      providerId: row.provider_id as PendingNotification['providerId'],
+      channelId: row.channel_id,
+      channelName: row.channel_name,
+      messageId: row.message_id,
+      senderId: row.sender_id,
+      senderName: row.sender_name,
+      content: row.content,
+      receivedAt: row.received_at,
+    }))
+  }
+
+  async loadAllPendingNotifications(): Promise<Map<string, PendingNotification[]>> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM pending_notifications
+      ORDER BY character_id, received_at
+    `)
+    const rows = stmt.all() as Array<{
+      id: string
+      character_id: string
+      provider_id: string
+      channel_id: string
+      channel_name: string
+      message_id: string
+      sender_id: string
+      sender_name: string
+      content: string
+      received_at: number
+      created_at: number
+    }>
+
+    const result = new Map<string, PendingNotification[]>()
+    for (const row of rows) {
+      const notification: PendingNotification = {
+        id: row.id,
+        providerId: row.provider_id as PendingNotification['providerId'],
+        channelId: row.channel_id,
+        channelName: row.channel_name,
+        messageId: row.message_id,
+        senderId: row.sender_id,
+        senderName: row.sender_name,
+        content: row.content,
+        receivedAt: row.received_at,
+      }
+      const existing = result.get(row.character_id) ?? []
+      existing.push(notification)
+      result.set(row.character_id, existing)
+    }
+    return result
+  }
+
+  async deletePendingNotification(notificationId: string): Promise<void> {
+    this.db.prepare('DELETE FROM pending_notifications WHERE id = ?').run(notificationId)
+  }
+
+  async clearPendingNotifications(characterId: string): Promise<void> {
+    this.db.prepare('DELETE FROM pending_notifications WHERE character_id = ?').run(characterId)
   }
 
   async close(): Promise<void> {

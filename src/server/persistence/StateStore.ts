@@ -1,7 +1,7 @@
 import type { SerializedWorldState, SimCharacter } from '../simulation/types'
-import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats } from '@/types'
+import type { WorldTime, DailySchedule, ConversationSummaryEntry, NPCDynamicState, CharacterStats, NPCCommitment, CommitmentStatus } from '@/types'
 import type { ActionHistoryEntry, MidTermMemory } from '@/types/behavior'
-import type { ChatMessageRecord, ChatSummary, ChatProviderId } from '@/types/chat'
+import type { ChatMessageRecord, ChatSummary, ChatProviderId, PendingNotification } from '@/types/chat'
 
 /**
  * Active action entry (for restoring in-progress actions on restart)
@@ -326,6 +326,66 @@ export interface StateStore {
    * Load all chat summaries for a character
    */
   loadChatSummariesForCharacter(characterId: string): Promise<ChatSummary[]>
+
+  // ==========================================================================
+  // NPC Commitment methods
+  // ==========================================================================
+
+  /**
+   * Save an NPC commitment
+   */
+  saveCommitment(commitment: NPCCommitment): Promise<void>
+
+  /**
+   * Load commitments for a specific day
+   * Returns pending/triggered commitments for that day
+   */
+  loadCommitmentsForDay(day: number): Promise<NPCCommitment[]>
+
+  /**
+   * Load pending commitments for a specific NPC
+   */
+  loadPendingCommitmentsForNPC(npcId: string, currentDay: number): Promise<NPCCommitment[]>
+
+  /**
+   * Update commitment status
+   */
+  updateCommitmentStatus(commitmentId: string, status: CommitmentStatus): Promise<void>
+
+  /**
+   * Delete expired commitments
+   * Returns number of deleted records
+   */
+  deleteExpiredCommitments(currentDay: number): Promise<number>
+
+  // ==========================================================================
+  // Pending notification methods (Discord通知キュー)
+  // ==========================================================================
+
+  /**
+   * Save a pending notification
+   */
+  savePendingNotification(characterId: string, notification: PendingNotification): Promise<void>
+
+  /**
+   * Load pending notifications for a character
+   */
+  loadPendingNotifications(characterId: string): Promise<PendingNotification[]>
+
+  /**
+   * Load all pending notifications grouped by character
+   */
+  loadAllPendingNotifications(): Promise<Map<string, PendingNotification[]>>
+
+  /**
+   * Delete a pending notification by ID
+   */
+  deletePendingNotification(notificationId: string): Promise<void>
+
+  /**
+   * Clear all pending notifications for a character
+   */
+  clearPendingNotifications(characterId: string): Promise<void>
 }
 
 /**
