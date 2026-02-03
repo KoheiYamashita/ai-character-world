@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { z } from 'zod'
-import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC, WorldTime } from '@/types'
+import type { ConversationSession, ConversationSummaryEntry, NPCDynamicState, NPC, WorldTime, CommitmentCreateParams } from '@/types'
 import type { SimCharacter } from '@/server/simulation/types'
 import type { MidTermMemory } from '@/types/behavior'
 import { llmGenerateObject } from '@/server/llm'
@@ -18,6 +18,14 @@ const ConversationExtractionSchema = z.object({
     content: z.string().describe('行動に影響する情報（簡潔に）'),
     importance: z.enum(['low', 'medium', 'high']).describe('重要度: low=些細な情報, medium=数日覚えておくべき情報, high=重要な約束や予定'),
   })).describe('既存の記憶と今回の会話から得られた情報を統合・整理した結果。重複を排除し、重要度の高いものを優先して保持'),
+  // 約束・待ち合わせの抽出
+  commitment: z.object({
+    hasCommitment: z.boolean().describe('会話で待ち合わせ・約束が成立したか'),
+    location: z.string().nullable().describe('約束の場所（マップ名または施設名）。nullの場合は約束なし'),
+    time: z.string().nullable().describe('約束の時刻（"HH:MM"形式）。nullの場合は約束なし'),
+    dayOffset: z.number().describe('約束の日（0=今日、1=明日、2=明後日）'),
+    description: z.string().describe('約束の内容の簡潔な説明'),
+  }).describe('会話で成立した約束・待ち合わせ。具体的な場所と時間が決まっている場合のみ'),
 })
 
 export type ConversationExtraction = z.infer<typeof ConversationExtractionSchema>
@@ -30,6 +38,9 @@ export type MemoryReplaceCallback = (characterId: string, memories: MidTermMemor
 
 // Deprecated: Use MemoryReplaceCallback instead
 export type MemoryPersistCallback = (memories: MidTermMemory[]) => Promise<void>
+
+// Commitment creation callback (约束作成時に呼び出し)
+export type CommitmentCreateCallback = (params: CommitmentCreateParams) => Promise<void>
 
 // Importance → days until expiry mapping
 const IMPORTANCE_EXPIRY_DAYS: Record<string, number> = {
@@ -47,6 +58,7 @@ export class ConversationPostProcessor {
   private onSummaryPersist: SummaryPersistCallback | null = null
   private onNPCStatePersist: NPCStatePersistCallback | null = null
   private onMemoryReplace: MemoryReplaceCallback | null = null
+  private onCommitmentCreate: CommitmentCreateCallback | null = null
   private midTermLimit: number = DEFAULT_MID_TERM_LIMIT
   private factsLimit: number = DEFAULT_FACTS_LIMIT
 
@@ -64,6 +76,10 @@ export class ConversationPostProcessor {
 
   setOnMemoryReplace(callback: MemoryReplaceCallback): void {
     this.onMemoryReplace = callback
+  }
+
+  setOnCommitmentCreate(callback: CommitmentCreateCallback): void {
+    this.onCommitmentCreate = callback
   }
 
   setMidTermLimit(limit: number): void {
@@ -167,6 +183,24 @@ export class ConversationPostProcessor {
       console.log(`[ConversationPostProcessor] Replaced memories with ${consolidatedMemories.length} consolidated entries for ${character.name}`)
     }
 
+    // Process commitment if extracted
+    if (this.onCommitmentCreate && currentTime && extraction.commitment?.hasCommitment) {
+      const { location, time, dayOffset, description } = extraction.commitment
+      if (location && time) {
+        const targetDay = currentTime.day + dayOffset
+        const commitmentParams: CommitmentCreateParams = {
+          npcId: npc.id,
+          characterId: session.characterId,
+          targetMapId: location, // Will be resolved to actual mapId by CommitmentManager
+          targetTime: time,
+          targetDay,
+          description,
+        }
+        await this.onCommitmentCreate(commitmentParams)
+        console.log(`[ConversationPostProcessor] Created commitment: ${description} (${npc.name}, Day ${targetDay} at ${time})`)
+      }
+    }
+
     return extraction
   }
 
@@ -232,6 +266,13 @@ export class ConversationPostProcessor {
     parts.push('  - 重要度の高いものを優先して保持')
     parts.push('  - 雑談や既知の情報は含めない')
     parts.push('  - 今後の行動に影響しうる情報のみ残す（約束、予定、新知識など）')
+    parts.push('- commitment: 会話で成立した約束・待ち合わせ')
+    parts.push('  - hasCommitment: 具体的な場所と時間が決まった約束があるかどうか')
+    parts.push('  - location: 約束の場所（マップ名：公園、カフェ、自宅など、または施設名）')
+    parts.push('  - time: 約束の時刻（"HH:MM"形式、例："15:00"）')
+    parts.push('  - dayOffset: 約束の日（0=今日、1=明日、2=明後日）')
+    parts.push('  - description: 約束の内容の簡潔な説明')
+    parts.push('  - 注意: 「また会おうね」などの曖昧な約束は含めない。具体的な場所・時間が決まっている場合のみ')
 
     return parts.join('\n')
   }
