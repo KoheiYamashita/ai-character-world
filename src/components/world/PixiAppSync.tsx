@@ -10,7 +10,7 @@ import { loadWorldConfig, parseColor } from '@/lib/worldConfigLoader'
 import { loadCharacterSpritesheet, getDirectionAnimation, getIdleTexture, type CharacterSpritesheet } from '@/lib/spritesheet'
 import { renderNode, renderObstacle, createObstacleLabel, renderEntranceConnections, createNPCSprite } from '@/lib/pixiRenderers'
 import { useSimulationSync } from '@/hooks'
-import type { Direction, WorldConfig, PathNode } from '@/types'
+import type { Direction, WorldConfig, PathNode, NPC } from '@/types'
 
 export default function PixiAppSync(): React.ReactNode {
   // Store selectors
@@ -20,7 +20,7 @@ export default function PixiAppSync(): React.ReactNode {
   const activeCharacter = useCharacterStore((s) => s.getActiveCharacter())
 
   const addNPC = useNPCStore((s) => s.addNPC)
-  const getNPCsByMap = useNPCStore((s) => s.getNPCsByMap)
+  const getNPC = useNPCStore((s) => s.getNPC)
   const clearNPCs = useNPCStore((s) => s.clearNPCs)
 
   // Connect to simulation server - get serverCharacters and serverNPCs for navigation/conversation state
@@ -359,7 +359,23 @@ export default function PixiAppSync(): React.ReactNode {
     npcSpritesRef.current.clear()
 
     // Create NPC sprites for current map
-    const npcsOnMap = getNPCsByMap(currentMapId)
+    // serverNPCsから現在のマップにいるNPCをフィルタリング
+    // npcStoreのスプライト情報とマージ
+    const npcsOnMap = Object.values(serverNPCsRef.current)
+      .filter((simNpc) => simNpc.mapId === currentMapId)
+      .map((simNpc) => {
+        const storeNpc = getNPC(simNpc.id)
+        if (!storeNpc) return null
+        // serverNPCsの位置情報でオーバーライド
+        return {
+          ...storeNpc,
+          mapId: simNpc.mapId,
+          currentNodeId: simNpc.currentNodeId,
+          position: simNpc.position,
+          direction: simNpc.direction,
+        }
+      })
+      .filter((npc): npc is NPC => npc !== null)
     for (const npc of npcsOnMap) {
       const cachedSpritesheet = npcSpritesheetsRef.current.get(npc.id)
       if (cachedSpritesheet) {
@@ -529,17 +545,81 @@ export default function PixiAppSync(): React.ReactNode {
       }
     }
 
-    // Update NPC sprite direction when it changes
-    function updateNPCDirections(): void {
+    // Sync NPC sprites: handle map transitions, position updates, and direction changes
+    function syncNPCSprites(): void {
       const serverNPCs = serverNPCsRef.current
+      const currentMap = currentMapIdRef.current
+      const config = configRef.current
+      if (!config || !npcContainerRef.current) return
+
+      // Get NPCs currently on this map
+      const npcsOnCurrentMap = new Map<string, typeof serverNPCs[string]>()
       for (const [npcId, simNPC] of Object.entries(serverNPCs)) {
+        if (simNPC.mapId === currentMap) {
+          npcsOnCurrentMap.set(npcId, simNPC)
+        }
+      }
+
+      // Remove sprites for NPCs that left this map
+      for (const [npcId, sprite] of npcSpritesRef.current) {
+        if (!npcsOnCurrentMap.has(npcId)) {
+          sprite.parent?.removeChild(sprite)
+          sprite.destroy()
+          npcSpritesRef.current.delete(npcId)
+          npcDirectionsRef.current.delete(npcId)
+        }
+      }
+
+      // Update existing NPCs and add new ones
+      for (const [npcId, simNPC] of npcsOnCurrentMap) {
         const sprite = npcSpritesRef.current.get(npcId)
         const spritesheet = npcSpritesheetsRef.current.get(npcId)
-        const lastDirection = npcDirectionsRef.current.get(npcId)
 
-        if (sprite && spritesheet && lastDirection !== simNPC.direction) {
-          sprite.texture = getIdleTexture(spritesheet, simNPC.direction)
-          npcDirectionsRef.current.set(npcId, simNPC.direction)
+        if (sprite && spritesheet) {
+          // Update position with interpolation
+          const nav = simNPC.navigation
+          if (nav?.isMoving && nav.startPosition && nav.targetPosition) {
+            const progress = nav.progress
+            sprite.x = nav.startPosition.x + (nav.targetPosition.x - nav.startPosition.x) * progress
+            sprite.y = nav.startPosition.y + (nav.targetPosition.y - nav.startPosition.y) * progress
+          } else {
+            sprite.x = simNPC.position.x
+            sprite.y = simNPC.position.y
+          }
+
+          // Update direction
+          const lastDirection = npcDirectionsRef.current.get(npcId)
+          if (lastDirection !== simNPC.direction) {
+            sprite.texture = getIdleTexture(spritesheet, simNPC.direction)
+            npcDirectionsRef.current.set(npcId, simNPC.direction)
+          }
+        } else if (!sprite && !npcSpritesheetsRef.current.has(npcId)) {
+          // NPC entered this map but no spritesheet loaded yet - load it
+          const storeNpc = getNPC(npcId)
+          if (storeNpc) {
+            loadCharacterSpritesheet(storeNpc.sprite).then((loadedSpritesheet) => {
+              npcSpritesheetsRef.current.set(npcId, loadedSpritesheet)
+              // Sprite will be created on next tick
+            }).catch((err) => {
+              console.error(`[NPC] Failed to load spritesheet for ${npcId}:`, err)
+            })
+          }
+        } else if (!sprite && spritesheet) {
+          // Spritesheet ready but no sprite yet - create it
+          const storeNpc = getNPC(npcId)
+          if (storeNpc && npcContainerRef.current) {
+            const npcWithPosition = {
+              ...storeNpc,
+              mapId: simNPC.mapId,
+              currentNodeId: simNPC.currentNodeId,
+              position: simNPC.position,
+              direction: simNPC.direction,
+            }
+            const newSprite = createNPCSprite(npcWithPosition, spritesheet, config)
+            npcSpritesRef.current.set(npcId, newSprite)
+            npcDirectionsRef.current.set(npcId, simNPC.direction)
+            npcContainerRef.current.addChild(newSprite)
+          }
         }
       }
     }
@@ -604,8 +684,8 @@ export default function PixiAppSync(): React.ReactNode {
 
       updateSpriteAnimation(character.direction, isMoving)
 
-      // Update NPC directions
-      updateNPCDirections()
+      // Sync NPC sprites (map transitions, positions, directions)
+      syncNPCSprites()
 
       // Update head icons (displayEmoji from server state)
       updateHeadIcons(x, y)

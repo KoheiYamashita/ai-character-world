@@ -68,6 +68,14 @@ export interface SimNPC {
   position: Position
   direction: Direction
   isInConversation: boolean
+  // Navigation state for NPC movement
+  navigation: SimNavigationState
+  // Cross-map navigation state
+  crossMapNavigation: SimCrossMapNavState | null
+  // Home position (for day reset)
+  homeMapId: string
+  homeNodeId: string
+  homePosition: Position
 }
 
 // World state broadcast to clients
@@ -174,6 +182,19 @@ export function createSimNPC(npc: NPC): SimNPC {
     position: { ...npc.position },
     direction: npc.direction,
     isInConversation: false,
+    navigation: {
+      isMoving: false,
+      path: [],
+      currentPathIndex: 0,
+      progress: 0,
+      startPosition: null,
+      targetPosition: null,
+    },
+    crossMapNavigation: null,
+    // Store home position for day reset
+    homeMapId: npc.mapId,
+    homeNodeId: npc.currentNodeId,
+    homePosition: { ...npc.position },
   }
 }
 

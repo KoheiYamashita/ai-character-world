@@ -16,7 +16,8 @@ const INITIAL_MAP_ID = 'home'
 export class WorldStateManager {
   private state: WorldState
   private maps: Record<string, WorldMap> = {}
-  private npcBlockedNodes: Map<string, Set<string>> = new Map()
+  // mapId -> (nodeId -> npcId) for tracking which NPC is at which node
+  private npcBlockedNodes: Map<string, Map<string, string>> = new Map()
 
   constructor() {
     this.state = {
@@ -53,16 +54,76 @@ export class WorldStateManager {
   }
 
   // NPC blocked nodes management
-  setNPCBlockedNodes(mapId: string, nodeIds: Set<string>): void {
-    this.npcBlockedNodes.set(mapId, nodeIds)
+  // Initialize blocked nodes from NPC list (called at startup)
+  initializeNPCBlockedNodes(npcs: NPC[]): void {
+    this.npcBlockedNodes.clear()
+    for (const npc of npcs) {
+      const mapNodes = this.npcBlockedNodes.get(npc.mapId) ?? new Map<string, string>()
+      mapNodes.set(npc.currentNodeId, npc.id)
+      this.npcBlockedNodes.set(npc.mapId, mapNodes)
+    }
   }
 
+  // Legacy compatibility: set blocked nodes as Set (for external callers)
+  setNPCBlockedNodes(mapId: string, nodeIds: Set<string>): void {
+    const mapNodes = new Map<string, string>()
+    for (const nodeId of nodeIds) {
+      mapNodes.set(nodeId, 'unknown')
+    }
+    this.npcBlockedNodes.set(mapId, mapNodes)
+  }
+
+  // Get blocked node IDs as Set (for pathfinding)
   getNPCBlockedNodes(mapId: string): Set<string> {
-    return this.npcBlockedNodes.get(mapId) ?? new Set()
+    const mapNodes = this.npcBlockedNodes.get(mapId)
+    return mapNodes ? new Set(mapNodes.keys()) : new Set()
+  }
+
+  // Get all blocked nodes across all maps (for pathfinding)
+  getAllNPCBlockedNodes(): Map<string, Set<string>> {
+    const result = new Map<string, Set<string>>()
+    for (const [mapId, nodeMap] of this.npcBlockedNodes) {
+      result.set(mapId, new Set(nodeMap.keys()))
+    }
+    return result
   }
 
   clearNPCBlockedNodes(): void {
     this.npcBlockedNodes.clear()
+  }
+
+  // Update NPC blocked node when NPC moves
+  updateNPCBlockedNode(
+    npcId: string,
+    oldMapId: string,
+    oldNodeId: string,
+    newMapId: string,
+    newNodeId: string
+  ): void {
+    // Remove from old position
+    const oldMapNodes = this.npcBlockedNodes.get(oldMapId)
+    if (oldMapNodes) {
+      oldMapNodes.delete(oldNodeId)
+      if (oldMapNodes.size === 0) {
+        this.npcBlockedNodes.delete(oldMapId)
+      }
+    }
+
+    // Add to new position
+    const newMapNodes = this.npcBlockedNodes.get(newMapId) ?? new Map<string, string>()
+    newMapNodes.set(newNodeId, npcId)
+    this.npcBlockedNodes.set(newMapId, newMapNodes)
+  }
+
+  // Get character blocked nodes for NPC pathfinding
+  getCharacterBlockedNodes(mapId: string): Set<string> {
+    const blocked = new Set<string>()
+    for (const char of this.state.characters.values()) {
+      if (char.currentMapId === mapId) {
+        blocked.add(char.currentNodeId)
+      }
+    }
+    return blocked
   }
 
   // NPC management
@@ -102,6 +163,170 @@ export class WorldStateManager {
     const npc = this.state.npcs.get(id)
     if (npc) {
       npc.isInConversation = isInConversation
+    }
+  }
+
+  // NPC position update
+  updateNPCPosition(id: string, position: Position): void {
+    const npc = this.state.npcs.get(id)
+    if (npc) {
+      npc.position = { ...position }
+    }
+  }
+
+  // NPC node update (when arriving at a new node)
+  updateNPCNode(id: string, nodeId: string): void {
+    const npc = this.state.npcs.get(id)
+    if (npc) {
+      const oldNodeId = npc.currentNodeId
+      npc.currentNodeId = nodeId
+      // Update blocked nodes
+      this.updateNPCBlockedNode(id, npc.mapId, oldNodeId, npc.mapId, nodeId)
+    }
+  }
+
+  // NPC navigation state management
+  startNPCNavigation(
+    npcId: string,
+    path: string[],
+    startPosition: Position,
+    targetPosition: Position
+  ): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      npc.navigation = {
+        isMoving: true,
+        path,
+        currentPathIndex: 0,
+        progress: 0,
+        startPosition: { ...startPosition },
+        targetPosition: { ...targetPosition },
+      }
+    }
+  }
+
+  updateNPCNavigationProgress(npcId: string, progress: number): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc?.navigation) {
+      npc.navigation.progress = progress
+    }
+  }
+
+  advanceNPCToNextNode(npcId: string, newTargetPosition: Position): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc?.navigation) {
+      npc.navigation.currentPathIndex++
+      npc.navigation.progress = 0
+      npc.navigation.startPosition = npc.navigation.targetPosition
+      npc.navigation.targetPosition = { ...newTargetPosition }
+    }
+  }
+
+  completeNPCNavigation(npcId: string): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      npc.navigation = {
+        isMoving: false,
+        path: [],
+        currentPathIndex: 0,
+        progress: 0,
+        startPosition: null,
+        targetPosition: null,
+      }
+    }
+  }
+
+  isNPCMoving(npcId: string): boolean {
+    return this.state.npcs.get(npcId)?.navigation.isMoving ?? false
+  }
+
+  // NPC cross-map navigation
+  getNPCCrossMapNavigation(npcId: string): SimCrossMapNavState | null {
+    return this.state.npcs.get(npcId)?.crossMapNavigation ?? null
+  }
+
+  startNPCCrossMapNavigation(
+    npcId: string,
+    targetMapId: string,
+    targetNodeId: string,
+    route: CrossMapRoute
+  ): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      npc.crossMapNavigation = {
+        isActive: true,
+        targetMapId,
+        targetNodeId,
+        route,
+        currentSegmentIndex: 0,
+      }
+    }
+  }
+
+  advanceNPCCrossMapSegment(npcId: string): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc?.crossMapNavigation) {
+      npc.crossMapNavigation.currentSegmentIndex++
+    }
+  }
+
+  completeNPCCrossMapNavigation(npcId: string): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      npc.crossMapNavigation = null
+    }
+  }
+
+  isNPCCrossMapNavigating(npcId: string): boolean {
+    return this.state.npcs.get(npcId)?.crossMapNavigation?.isActive ?? false
+  }
+
+  // Update NPC map (when transitioning between maps)
+  updateNPCMap(npcId: string, mapId: string, nodeId: string, position: Position): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      const oldMapId = npc.mapId
+      const oldNodeId = npc.currentNodeId
+      npc.mapId = mapId
+      npc.currentNodeId = nodeId
+      npc.position = { ...position }
+      // Update blocked nodes
+      this.updateNPCBlockedNode(npcId, oldMapId, oldNodeId, mapId, nodeId)
+    }
+  }
+
+  // Reset NPC to home position (for day reset)
+  resetNPCToHome(npcId: string): void {
+    const npc = this.state.npcs.get(npcId)
+    if (npc) {
+      const oldMapId = npc.mapId
+      const oldNodeId = npc.currentNodeId
+
+      // Stop any ongoing navigation
+      npc.navigation = {
+        isMoving: false,
+        path: [],
+        currentPathIndex: 0,
+        progress: 0,
+        startPosition: null,
+        targetPosition: null,
+      }
+      npc.crossMapNavigation = null
+
+      // Reset to home
+      npc.mapId = npc.homeMapId
+      npc.currentNodeId = npc.homeNodeId
+      npc.position = { ...npc.homePosition }
+
+      // Update blocked nodes
+      this.updateNPCBlockedNode(npcId, oldMapId, oldNodeId, npc.homeMapId, npc.homeNodeId)
+    }
+  }
+
+  // Reset all NPCs to home positions
+  resetAllNPCsToHome(): void {
+    for (const npcId of this.state.npcs.keys()) {
+      this.resetNPCToHome(npcId)
     }
   }
 
