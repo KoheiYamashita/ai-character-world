@@ -399,6 +399,9 @@ export class ChatExecutor {
     parts.push('上記のメッセージに返信してください。')
     parts.push('- reply: 返信内容（1〜3文程度）')
     parts.push('- shouldContinue: まだ会話を続けたい場合はtrue')
+    parts.push('')
+    parts.push('※これはチャットです。【直近のメッセージ】の[自分]の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
+    parts.push('※同じ話題でも、新しい情報や異なる切り口で話してください。')
 
     return parts.join('\n')
   }
@@ -509,6 +512,9 @@ export class ChatExecutor {
     parts.push('【指示】')
     parts.push('送信するメッセージを生成してください。')
     parts.push('- message: 送信内容（1〜3文程度）')
+    parts.push('')
+    parts.push('※これはチャットです。【直近のメッセージ】の[自分]の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
+    parts.push('※同じ話題でも、新しい情報や異なる切り口で話してください。')
 
     return parts.join('\n')
   }
