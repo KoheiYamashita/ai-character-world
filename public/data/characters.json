@@ -18,12 +18,12 @@
       },
       "defaultStats": {
         "money": 100000,
-        "satiety": 80,
-        "energy": 80,
-        "hygiene": 80,
-        "mood": 80,
-        "bladder": 80,
-        "fitness": 80
+        "satiety": 100,
+        "energy": 100,
+        "hygiene": 100,
+        "mood": 100,
+        "bladder": 100,
+        "fitness": 100
       },
       "employment": {
         "jobId": "freelance-engineer",
