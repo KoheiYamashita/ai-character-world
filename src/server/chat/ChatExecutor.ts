@@ -4,13 +4,18 @@
  */
 
 import { z } from 'zod'
+import type { ModelMessage } from 'ai'
 import type { SimCharacter } from '@/server/simulation/types'
 import type { ChatSession, ChatMessageRecord, ChatSummary, ChatContext } from '@/types/chat'
 import type { StateStore } from '@/server/persistence/StateStore'
 import type { ChatManager } from './ChatManager'
 import type { ChatPostProcessor } from './ChatPostProcessor'
 import { getChatProvider } from './client'
-import { llmGenerateObject, isLLMAvailable } from '@/server/llm'
+import {
+  isLLMAvailable,
+  llmGenerateObjectWithMessages,
+  chatToMessagesForCharacter,
+} from '@/server/llm'
 import {
   buildPersonalitySection,
   buildStatusSection,
@@ -37,7 +42,7 @@ const ChatSendSchema = z.object({
 
 const ChatCheckSummarySchema = z.object({
   summary: z.string().describe('チャットの要約（100文字程度）'),
-  importantInfo: z.string().nullable().describe('行動に影響する重要な情報があれば（なければnull）'),
+  importantInfo: z.string().describe('行動に影響する重要な情報があれば（なければ空文字列""）'),
 })
 
 // =============================================================================
@@ -266,13 +271,25 @@ export class ChatExecutor {
       return { reply: '...', shouldContinue: false }
     }
 
-    const prompt = this.buildReplyPrompt(character, session, recentMessages, existingSummary, context)
+    // Systemプロンプト（メッセージ履歴以外の全て）
+    const systemPrompt = this.buildReplySystemPrompt(character, session, existingSummary, context)
+
+    // メッセージ履歴をmessages配列に変換
+    const historyMessages = chatToMessagesForCharacter(recentMessages)
+
+    // 返信対象メッセージを最後に追加
+    const messages: ModelMessage[] = [
+      ...historyMessages,
+      ...(session.notification
+        ? [{ role: 'user' as const, content: `${session.notification.senderName}: ${session.notification.content}` }]
+        : []),
+    ]
 
     try {
-      const result = await llmGenerateObject(
-        prompt,
+      const result = await llmGenerateObjectWithMessages(
+        messages,
         ChatReplySchema,
-        { system: `あなたは${character.name}です。チャットで会話しています。自然な口語調で返信してください。` }
+        { system: systemPrompt }
       )
       return result
     } catch (error) {
@@ -292,17 +309,22 @@ export class ChatExecutor {
       return { summary: '最近のメッセージを確認しました' }
     }
 
-    const prompt = this.buildCheckPrompt(character, session, recentMessages, existingSummary, context)
+    // Systemプロンプト（メッセージ履歴以外の全て）
+    const systemPrompt = this.buildCheckSystemPrompt(character, session, existingSummary, context)
+
+    // メッセージ履歴をmessages配列に変換
+    const messages = chatToMessagesForCharacter(recentMessages)
 
     try {
-      const result = await llmGenerateObject(
-        prompt,
+      const result = await llmGenerateObjectWithMessages(
+        messages,
         ChatCheckSummarySchema,
-        { system: `チャットの内容を簡潔に要約してください。` }
+        { system: systemPrompt }
       )
       return {
         summary: result.summary,
-        importantInfo: result.importantInfo ?? undefined,
+        // 空文字列は「なし」を意味するので undefined に変換
+        importantInfo: result.importantInfo === '' ? undefined : result.importantInfo,
       }
     } catch (error) {
       console.error(`[ChatExecutor] LLM error in generateCheckSummary:`, error)
@@ -321,13 +343,17 @@ export class ChatExecutor {
       return { message: 'こんにちは！' }
     }
 
-    const prompt = this.buildSendPrompt(character, session, recentMessages, existingSummary, context)
+    // Systemプロンプト（メッセージ履歴以外の全て）
+    const systemPrompt = this.buildSendSystemPrompt(character, session, existingSummary, context)
+
+    // メッセージ履歴をmessages配列に変換
+    const messages = chatToMessagesForCharacter(recentMessages)
 
     try {
-      const result = await llmGenerateObject(
-        prompt,
+      const result = await llmGenerateObjectWithMessages(
+        messages,
         ChatSendSchema,
-        { system: `あなたは${character.name}です。チャットでメッセージを送信します。自然な口語調で書いてください。` }
+        { system: systemPrompt }
       )
       return result
     } catch (error) {
@@ -337,13 +363,16 @@ export class ChatExecutor {
   }
 
   // ==========================================================================
-  // プロンプト構築
+  // Systemプロンプト構築（メッセージ履歴以外の全て）
   // ==========================================================================
 
-  private buildReplyPrompt(
+  /**
+   * 返信生成用のSystemプロンプト
+   * メッセージ履歴はmessages配列で渡すため、ここには含めない
+   */
+  private buildReplySystemPrompt(
     character: SimCharacter,
     session: ChatSession,
-    recentMessages: ChatMessageRecord[],
     existingSummary: ChatSummary | null,
     context?: ChatContext
   ): string {
@@ -378,38 +407,25 @@ export class ChatExecutor {
       parts.push('')
     }
 
-    // 直近メッセージ
-    if (recentMessages.length > 0) {
-      parts.push('【直近のメッセージ】')
-      for (const msg of recentMessages) {
-        const sender = msg.isFromCharacter ? `[自分]` : msg.senderName
-        parts.push(`${sender}: ${msg.content}`)
-      }
-      parts.push('')
-    }
-
-    // 通知メッセージ
-    if (session.notification) {
-      parts.push('【返信対象のメッセージ】')
-      parts.push(`${session.notification.senderName}: ${session.notification.content}`)
-      parts.push('')
-    }
-
+    // 指示
     parts.push('【指示】')
-    parts.push('上記のメッセージに返信してください。')
-    parts.push('- reply: 返信内容（1〜3文程度）')
+    parts.push('メッセージに返信してください。')
+    parts.push('- reply: 返信内容（1〜3文程度、自然な口語調で）')
     parts.push('- shouldContinue: まだ会話を続けたい場合はtrue')
     parts.push('')
-    parts.push('※これはチャットです。【直近のメッセージ】の[自分]の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
+    parts.push('※これはチャットです。過去の自分の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
     parts.push('※同じ話題でも、新しい情報や異なる切り口で話してください。')
 
     return parts.join('\n')
   }
 
-  private buildCheckPrompt(
+  /**
+   * チャット確認用のSystemプロンプト
+   * メッセージ履歴はmessages配列で渡すため、ここには含めない
+   */
+  private buildCheckSystemPrompt(
     character: SimCharacter,
     session: ChatSession,
-    recentMessages: ChatMessageRecord[],
     existingSummary: ChatSummary | null,
     context?: ChatContext
   ): string {
@@ -436,28 +452,22 @@ export class ChatExecutor {
       parts.push('')
     }
 
-    // 直近メッセージ
-    if (recentMessages.length > 0) {
-      parts.push('【直近のメッセージ】')
-      for (const msg of recentMessages) {
-        const sender = msg.isFromCharacter ? `[${character.name}]` : msg.senderName
-        parts.push(`${sender}: ${msg.content}`)
-      }
-      parts.push('')
-    }
-
+    // 指示
     parts.push('【指示】')
     parts.push('上記のチャットを要約してください。')
     parts.push('- summary: 100文字程度の要約')
-    parts.push('- importantInfo: 行動に影響する重要な情報があれば')
+    parts.push('- importantInfo: 行動に影響する重要な情報があれば（なければ空文字列""）')
 
     return parts.join('\n')
   }
 
-  private buildSendPrompt(
+  /**
+   * メッセージ送信用のSystemプロンプト
+   * メッセージ履歴はmessages配列で渡すため、ここには含めない
+   */
+  private buildSendSystemPrompt(
     character: SimCharacter,
     session: ChatSession,
-    recentMessages: ChatMessageRecord[],
     existingSummary: ChatSummary | null,
     context?: ChatContext
   ): string {
@@ -499,21 +509,12 @@ export class ChatExecutor {
       parts.push('')
     }
 
-    // 直近メッセージ
-    if (recentMessages.length > 0) {
-      parts.push('【直近のメッセージ】')
-      for (const msg of recentMessages) {
-        const sender = msg.isFromCharacter ? `[自分]` : msg.senderName
-        parts.push(`${sender}: ${msg.content}`)
-      }
-      parts.push('')
-    }
-
+    // 指示
     parts.push('【指示】')
     parts.push('送信するメッセージを生成してください。')
-    parts.push('- message: 送信内容（1〜3文程度）')
+    parts.push('- message: 送信内容（1〜3文程度、自然な口語調で）')
     parts.push('')
-    parts.push('※これはチャットです。【直近のメッセージ】の[自分]の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
+    parts.push('※これはチャットです。過去の自分の発言を確認し、既に送った内容と同じことは繰り返さないでください。')
     parts.push('※同じ話題でも、新しい情報や異なる切り口で話してください。')
 
     return parts.join('\n')

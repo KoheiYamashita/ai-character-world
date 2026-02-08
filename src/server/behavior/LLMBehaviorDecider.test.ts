@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// Mock LLM client
+// Mock LLM client (new schema format: no nullable, use empty string/0/false instead)
 vi.mock('@/server/llm', () => ({
   llmGenerateObject: vi.fn().mockResolvedValue({
     action: 'idle',
-    target: null,
+    target: '',
     reason: 'default',
-    durationMinutes: null,
-    scheduleUpdate: null,
+    durationMinutes: 0,
+    hasConversationGoal: false,
+    conversationGoal: { goal: '', successCriteria: '' },
+    hasScheduleUpdate: false,
+    scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
   }),
 }))
 
@@ -67,10 +70,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'nothing to do',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext()
@@ -85,8 +91,11 @@ describe('LLMBehaviorDecider', () => {
         action: 'move',
         target: 'cafe',
         reason: 'going to cafe',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext()
@@ -101,8 +110,11 @@ describe('LLMBehaviorDecider', () => {
         action: 'talk',
         target: 'npc-1',
         reason: 'want to chat',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: true,
+        conversationGoal: { goal: 'chat with friend', successCriteria: 'had a conversation' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -118,10 +130,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'toilet',
-        target: null,
+        target: '',
         reason: 'need to go',
         durationMinutes: 5,
-        scheduleUpdate: null,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -142,12 +157,15 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'resting',
-        durationMinutes: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: true,
         scheduleUpdate: {
           type: 'add',
-          entry: { time: '12:00', activity: 'Lunch', location: null, note: null },
+          entry: { time: '12:00', activity: 'Lunch', location: '', note: '' },
         },
       })
 
@@ -270,10 +288,13 @@ describe('LLMBehaviorDecider', () => {
       // First call: LLM decides to use toilet
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'toilet',
-        target: null,
+        target: '',
         reason: 'need to go',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
       // Second call: LLM selects specific facility
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
@@ -299,8 +320,11 @@ describe('LLMBehaviorDecider', () => {
         action: 'toilet',
         target: 'toilet-1',
         reason: 'going home',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -320,12 +344,15 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'toilet',
-        target: null,
+        target: '',
         reason: 'urgent',
         durationMinutes: 10,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: true,
         scheduleUpdate: {
           type: 'add',
-          entry: { time: '14:00', activity: 'Rest', location: null, note: null },
+          entry: { time: '14:00', activity: 'Rest', location: '', note: '' },
         },
       })
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
@@ -349,10 +376,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'eat',
-        target: null,
+        target: '',
         reason: 'hungry',
         durationMinutes: 30,
-        scheduleUpdate: null,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         facilityId: 'cafe-restaurant',
@@ -377,10 +407,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'relaxing',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -403,10 +436,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'waiting',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -436,10 +472,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'waiting for next event',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -459,10 +498,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'thinking',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext()
@@ -477,10 +519,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'idle',
-        target: null,
+        target: '',
         reason: 'done',
-        durationMinutes: null,
-        scheduleUpdate: null,
+        durationMinutes: 0,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       decider.setActionConfigs({
@@ -677,10 +722,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'toilet',
-        target: null,
+        target: '',
         reason: 'bladder is low',
         durationMinutes: 5,
-        scheduleUpdate: null,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({
@@ -700,10 +748,13 @@ describe('LLMBehaviorDecider', () => {
       const { llmGenerateObject } = await import('@/server/llm')
       vi.mocked(llmGenerateObject).mockResolvedValueOnce({
         action: 'bathe',
-        target: null,
+        target: '',
         reason: 'want to take a bath',
         durationMinutes: 30,
-        scheduleUpdate: null,
+        hasConversationGoal: false,
+        conversationGoal: { goal: '', successCriteria: '' },
+        hasScheduleUpdate: false,
+        scheduleUpdate: { type: 'add', entry: { time: '', activity: '', location: '', note: '' } },
       })
 
       const context = createTestContext({

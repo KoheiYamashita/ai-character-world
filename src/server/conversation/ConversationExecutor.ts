@@ -5,7 +5,12 @@ import type { ActionHistoryEntry, RecentConversation, MidTermMemory, NearbyMap }
 import type { ChatSummary } from '@/types/chat'
 import type { ConversationManager } from './ConversationManager'
 import type { ConversationPostProcessor } from './ConversationPostProcessor'
-import { llmGenerateObject, isLLMAvailable } from '@/server/llm'
+import {
+  isLLMAvailable,
+  llmGenerateObjectWithMessages,
+  conversationToMessagesForCharacter,
+  conversationToMessagesForNPC,
+} from '@/server/llm'
 import { isDebugMode } from '@/lib/debugConfig'
 import {
   buildPersonalitySection,
@@ -171,6 +176,54 @@ export class ConversationExecutor {
   ): Promise<void> {
     let goalAchieved = false
 
+    // openingLineがある場合、最初のキャラクター発話として使用
+    if (session.goal.openingLine) {
+      this.conversationManager.addMessage(character.id, {
+        speaker: 'character',
+        speakerId: character.id,
+        speakerName: character.name,
+        utterance: session.goal.openingLine,
+        timestamp: Date.now(),
+      })
+      if (this.onMessageEmit) {
+        this.onMessageEmit(character.id, npc.id, 'character', character.name, session.goal.openingLine)
+      }
+      console.log(`[ConversationExecutor] ${character.name} (opening): "${session.goal.openingLine}"`)
+
+      // NPC応答を生成
+      const sessionAfterOpening = this.conversationManager.getActiveSession(character.id)
+      if (!sessionAfterOpening || sessionAfterOpening.status !== 'active') {
+        this.finishConversation(character, npc, session, context, goalAchieved)
+        return
+      }
+
+      const npcUtterance = await this.generateNPCUtterance(npc, character, sessionAfterOpening, context)
+      this.conversationManager.addMessage(character.id, {
+        speaker: 'npc',
+        speakerId: npc.id,
+        speakerName: npc.name,
+        utterance: npcUtterance,
+        timestamp: Date.now(),
+      })
+      if (this.onMessageEmit) {
+        this.onMessageEmit(character.id, npc.id, 'npc', npc.name, npcUtterance)
+      }
+      console.log(`[ConversationExecutor] ${npc.name}: "${npcUtterance}"`)
+
+      // ターン上限チェック
+      if (this.conversationManager.isAtMaxTurns(character.id)) {
+        console.log(`[ConversationExecutor] Max turns reached for ${character.name}`)
+        this.finishConversation(character, npc, session, context, goalAchieved)
+        return
+      }
+
+      // ターンインターバル待機
+      if (this.turnIntervalMs > 0) {
+        await this.sleep(this.turnIntervalMs)
+      }
+    }
+
+    // 通常のループ（2ターン目以降、またはopeningLineがない場合）
     while (true) {
       // Check if session is still active
       const currentSession = this.conversationManager.getActiveSession(character.id)
@@ -253,6 +306,16 @@ export class ConversationExecutor {
       }
     }
 
+    await this.finishConversation(character, npc, session, context, goalAchieved)
+  }
+
+  private async finishConversation(
+    character: SimCharacter,
+    npc: NPC,
+    session: ConversationSession,
+    context: ConversationContext,
+    goalAchieved: boolean
+  ): Promise<void> {
     // セッションのスナップショットを取得（endConversationで消える前に）
     const finalSession = this.conversationManager.getActiveSession(character.id)
     const completedSession: ConversationSession = finalSession
@@ -296,13 +359,17 @@ export class ConversationExecutor {
       return { utterance: '...', goalAchieved: false, error: true }
     }
 
-    const prompt = this.buildCharacterPrompt(character, npc, session, context)
+    // Systemプロンプト（会話履歴以外の全て）
+    const systemPrompt = this.buildCharacterSystemPrompt(character, npc, session, context)
+
+    // 会話履歴をmessages配列に変換
+    const messages = conversationToMessagesForCharacter(session.messages)
 
     try {
-      const result = await llmGenerateObject(
-        prompt,
+      const result = await llmGenerateObjectWithMessages(
+        messages,
         CharacterUtteranceSchema,
-        { system: `あなたは${character.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
+        { system: systemPrompt }
       )
 
       // デバッグログを送信
@@ -313,7 +380,7 @@ export class ConversationExecutor {
         npcName: npc.name,
         turn: session.currentTurn + 1,
         speaker: 'character',
-        prompt,
+        prompt: `[System]\n${systemPrompt}\n\n[Messages]\n${JSON.stringify(messages, null, 2)}`,
         response: JSON.stringify(result, null, 2),
       })
 
@@ -340,13 +407,17 @@ export class ConversationExecutor {
       return '...'
     }
 
-    const prompt = this.buildNPCPrompt(npc, character, session, context)
+    // Systemプロンプト（会話履歴以外の全て）
+    const systemPrompt = this.buildNPCSystemPrompt(npc, character, session, context)
+
+    // 会話履歴をmessages配列に変換
+    const messages = conversationToMessagesForNPC(session.messages)
 
     try {
-      const result = await llmGenerateObject(
-        prompt,
+      const result = await llmGenerateObjectWithMessages(
+        messages,
         NPCUtteranceSchema,
-        { system: `あなたは${npc.name}として会話してください。口頭で話しているような自然な口語調で、1〜3文程度の短い発話にしてください。` }
+        { system: systemPrompt }
       )
 
       // デバッグログを送信
@@ -357,7 +428,7 @@ export class ConversationExecutor {
         npcName: npc.name,
         turn: session.currentTurn + 1,
         speaker: 'npc',
-        prompt,
+        prompt: `[System]\n${systemPrompt}\n\n[Messages]\n${JSON.stringify(messages, null, 2)}`,
         response: JSON.stringify(result, null, 2),
       })
 
@@ -369,10 +440,14 @@ export class ConversationExecutor {
   }
 
   // ===========================================================================
-  // プロンプト構築
+  // Systemプロンプト構築（会話履歴以外の全て）
   // ===========================================================================
 
-  private buildCharacterPrompt(
+  /**
+   * キャラクター発話生成用のSystemプロンプト
+   * 会話履歴はmessages配列で渡すため、ここには含めない
+   */
+  private buildCharacterSystemPrompt(
     character: SimCharacter,
     npc: NPC,
     session: ConversationSession,
@@ -399,15 +474,6 @@ export class ConversationExecutor {
     parts.push(`- 気分: ${npc.mood}`)
     parts.push(`- あなたへの好感度: ${npc.affinity}`)
     parts.push('')
-
-    // 会話履歴
-    if (session.messages.length > 0) {
-      parts.push('【これまでの会話】')
-      for (const msg of session.messages) {
-        parts.push(`${msg.speakerName}: ${msg.utterance}`)
-      }
-      parts.push('')
-    }
 
     // 直近のNPC会話サマリー（共通ビルダー使用）
     parts.push(...buildRecentConversationsSection(context.recentConversations))
@@ -438,8 +504,8 @@ export class ConversationExecutor {
     parts.push('')
 
     // 指示
-    parts.push('【回答形式】')
-    parts.push('JSON形式で回答してください。')
+    parts.push('【指示】')
+    parts.push('次の発話を生成してください。')
     parts.push('- utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）')
     parts.push('- goalAchieved: 会話の目的を達成できたか（true/false）')
     parts.push('')
@@ -449,7 +515,11 @@ export class ConversationExecutor {
     return parts.join('\n')
   }
 
-  private buildNPCPrompt(
+  /**
+   * NPC発話生成用のSystemプロンプト
+   * 会話履歴はmessages配列で渡すため、ここには含めない
+   */
+  private buildNPCSystemPrompt(
     npc: NPC,
     character: SimCharacter,
     session: ConversationSession,
@@ -477,15 +547,6 @@ export class ConversationExecutor {
     parts.push(`- これまでの会話回数: ${npc.conversationCount}回`)
     parts.push('')
 
-    // 会話履歴
-    if (session.messages.length > 0) {
-      parts.push('【これまでの会話】')
-      for (const msg of session.messages) {
-        parts.push(`${msg.speakerName}: ${msg.utterance}`)
-      }
-      parts.push('')
-    }
-
     // 周辺の場所（共通ビルダー使用）
     parts.push(...buildNearbyMapsSection(context.nearbyMaps))
     if (context.nearbyMaps && context.nearbyMaps.length > 0) {
@@ -493,8 +554,8 @@ export class ConversationExecutor {
     }
 
     // 指示
-    parts.push('【回答形式】')
-    parts.push('JSON形式で回答してください。')
+    parts.push('【指示】')
+    parts.push('次の発話を生成してください。')
     parts.push('- utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）')
     parts.push('')
     parts.push('※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。')

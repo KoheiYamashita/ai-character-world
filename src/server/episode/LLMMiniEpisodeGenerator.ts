@@ -11,11 +11,11 @@ const SKIP_ACTIONS: Set<string> = new Set(['talk', 'thinking', 'idle'])
 const MiniEpisodeSchema = z.object({
   episode: z.string().describe('短い出来事の描写（1-2文、キャラクターの一人称視点ではなく客観的描写）'),
   statChanges: z.object({
-    satiety: z.number().nullable().describe('満腹度の変化（-10〜+10、変化なしならnull）'),
-    energy: z.number().nullable().describe('エネルギーの変化（-10〜+10、変化なしならnull）'),
-    hygiene: z.number().nullable().describe('衛生度の変化（-10〜+10、変化なしならnull）'),
-    mood: z.number().nullable().describe('気分の変化（-10〜+10、変化なしならnull）'),
-    bladder: z.number().nullable().describe('トイレ欲求の変化（-10〜+10、変化なしならnull）'),
+    satiety: z.number().describe('満腹度の変化（-10〜+10、変化なしなら0）'),
+    energy: z.number().describe('エネルギーの変化（-10〜+10、変化なしなら0）'),
+    hygiene: z.number().describe('衛生度の変化（-10〜+10、変化なしなら0）'),
+    mood: z.number().describe('気分の変化（-10〜+10、変化なしなら0）'),
+    bladder: z.number().describe('トイレ欲求の変化（-10〜+10、変化なしなら0）'),
   }),
 })
 
@@ -50,11 +50,11 @@ export class LLMMiniEpisodeGenerator implements MiniEpisodeGenerator {
         system: 'あなたはキャラクターシミュレーションのミニエピソード生成器です。キャラクターがアクションを完了した際に、ちょっとした出来事を生成してください。出来事は短く（1-2文）、日常的で自然なものにしてください。',
       })
 
-      // Convert nullable values to actual stat changes (exclude nulls)
+      // Convert 0 values to undefined (0 means "no change")
       const statChanges: MiniEpisodeResult['statChanges'] = {}
       const statKeys = ['satiety', 'energy', 'hygiene', 'mood', 'bladder'] as const
       for (const key of statKeys) {
-        if (result.statChanges[key] != null) {
+        if (result.statChanges[key] !== 0) {
           statChanges[key] = clampChange(result.statChanges[key])
         }
       }
@@ -88,7 +88,7 @@ export class LLMMiniEpisodeGenerator implements MiniEpisodeGenerator {
     parts.push('')
     parts.push('上記のアクション完了後に起こった小さな出来事を生成してください。')
     parts.push('例: 食事中に新メニューを発見した、仕事中に同僚と雑談した、入浴中にリラックスできた、など。')
-    parts.push('ステータス変化は出来事に応じて -10〜+10 の範囲で設定してください。多くの場合は変化なし(null)で構いません。')
+    parts.push('ステータス変化は出来事に応じて -10〜+10 の範囲で設定してください。変化なしの場合は0を指定してください。')
 
     return parts.join('\n')
   }

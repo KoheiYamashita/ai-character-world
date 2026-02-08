@@ -10,8 +10,8 @@ const ConversationExtractionSchema = z.object({
   affinityChange: z.number().min(-20).max(20).describe('好感度変化量'),
   updatedFacts: z.array(z.object({
     content: z.string().describe('知識・事実の内容'),
-    expiresDay: z.number().nullable().describe('有効期限（ワールド日数）。永続的な基本情報はnull、時限情報は適切な日数を設定'),
-  })).describe('NPCのfacts全量。永続的な基本情報はexpiresDay:null、会話で得た時限情報は適切な期限を設定'),
+    expiresDay: z.number().describe('有効期限（ワールド日数）。永続的な基本情報は-1、時限情報は適切な日数を設定'),
+  })).describe('NPCのfacts全量。永続的な基本情報はexpiresDay:-1、会話で得た時限情報は適切な期限を設定'),
   mood: z.enum(['happy', 'neutral', 'sad', 'angry', 'excited']).describe('会話後のNPCの気分'),
   topicsDiscussed: z.array(z.string()).describe('話題になったトピック'),
   consolidatedMemories: z.array(z.object({
@@ -21,8 +21,8 @@ const ConversationExtractionSchema = z.object({
   // 約束・待ち合わせの抽出
   commitment: z.object({
     hasCommitment: z.boolean().describe('会話で待ち合わせ・約束が成立したか'),
-    location: z.string().nullable().describe('約束の場所（マップ名または施設名）。nullの場合は約束なし'),
-    time: z.string().nullable().describe('約束の時刻（"HH:MM"形式）。nullの場合は約束なし'),
+    location: z.string().describe('約束の場所（マップ名または施設名）。約束なしなら空文字列""'),
+    time: z.string().describe('約束の時刻（"HH:MM"形式）。約束なしなら空文字列""'),
     dayOffset: z.number().describe('約束の日（0=今日、1=明日、2=明後日）'),
     description: z.string().describe('約束の内容の簡潔な説明'),
   }).describe('会話で成立した約束・待ち合わせ。具体的な場所と時間が決まっている場合のみ'),
@@ -117,8 +117,11 @@ export class ConversationPostProcessor {
     const newConversationCount = npc.conversationCount + 1
     const newLastConversation = Date.now()
 
-    // Enforce facts limit
-    const limitedFacts = extraction.updatedFacts.slice(0, this.factsLimit)
+    // Enforce facts limit and convert expiresDay: -1 → null for permanent facts
+    const limitedFacts = extraction.updatedFacts.slice(0, this.factsLimit).map(f => ({
+      content: f.content,
+      expiresDay: f.expiresDay === -1 ? null : f.expiresDay,
+    }))
 
     const updates: Partial<NPCDynamicState> = {
       facts: limitedFacts,
@@ -183,10 +186,10 @@ export class ConversationPostProcessor {
       console.log(`[ConversationPostProcessor] Replaced memories with ${consolidatedMemories.length} consolidated entries for ${character.name}`)
     }
 
-    // Process commitment if extracted
+    // Process commitment if extracted (location/time が空文字列でない場合のみ)
     if (this.onCommitmentCreate && currentTime && extraction.commitment?.hasCommitment) {
       const { location, time, dayOffset, description } = extraction.commitment
-      if (location && time) {
+      if (location !== '' && time !== '') {
         const targetDay = currentTime.day + dayOffset
         const commitmentParams: CommitmentCreateParams = {
           npcId: npc.id,
@@ -254,7 +257,7 @@ export class ConversationPostProcessor {
     parts.push('- summary: 会話の要約を1-2文で')
     parts.push('- affinityChange: NPCの好感度変化（-20〜+20）。良い会話なら正、悪い会話なら負')
     parts.push(`- updatedFacts: NPCのfacts全量を出力（上限${this.factsLimit}件）。各factにはexpiresDay（有効期限）を設定:`)
-    parts.push('  - 永続的な基本情報（職業、趣味、性格など）: expiresDay: null')
+    parts.push('  - 永続的な基本情報（職業、趣味、性格など）: expiresDay: -1')
     parts.push('  - 時限情報（予定、約束、一時的な状態など）: expiresDay: 適切な日数（例: 明日の約束なら現在日+1）')
     parts.push('  - 既存の永続factは変更がなければそのまま維持')
     parts.push('  - 重要度の高いものを優先して保持')
@@ -268,8 +271,8 @@ export class ConversationPostProcessor {
     parts.push('  - 今後の行動に影響しうる情報のみ残す（約束、予定、新知識など）')
     parts.push('- commitment: 会話で成立した約束・待ち合わせ')
     parts.push('  - hasCommitment: 具体的な場所と時間が決まった約束があるかどうか')
-    parts.push('  - location: 約束の場所（マップ名：公園、カフェ、自宅など、または施設名）')
-    parts.push('  - time: 約束の時刻（"HH:MM"形式、例："15:00"）')
+    parts.push('  - location: 約束の場所（マップ名：公園、カフェ、自宅など、または施設名）。約束なしなら空文字列""')
+    parts.push('  - time: 約束の時刻（"HH:MM"形式、例："15:00"）。約束なしなら空文字列""')
     parts.push('  - dayOffset: 約束の日（0=今日、1=明日、2=明後日）')
     parts.push('  - description: 約束の内容の簡潔な説明')
     parts.push('  - 注意: 「また会おうね」などの曖昧な約束は含めない。具体的な場所・時間が決まっている場合のみ')

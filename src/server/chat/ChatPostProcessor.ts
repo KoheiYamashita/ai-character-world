@@ -17,8 +17,8 @@ import { v4 as uuidv4 } from 'uuid'
 
 const ChatSummaryUpdateSchema = z.object({
   summary: z.string().describe('チャットの要約（100文字程度）'),
-  importantMemory: z.string().nullable().describe('中期記憶に追加すべき重要な情報（なければnull）'),
-  memoryImportance: z.enum(['low', 'medium', 'high']).nullable().describe('記憶の重要度（なければnull）'),
+  importantMemory: z.string().describe('中期記憶に追加すべき重要な情報（なければ空文字列""）'),
+  memoryImportance: z.enum(['low', 'medium', 'high', 'none']).describe('記憶の重要度（なければnone）'),
 })
 
 // =============================================================================
@@ -142,8 +142,9 @@ export class ChatPostProcessor {
       )
       return {
         summary: result.summary,
-        importantMemory: result.importantMemory ?? undefined,
-        memoryImportance: result.memoryImportance ?? undefined,
+        // 空文字列または'none'は「なし」を意味するので undefined に変換
+        importantMemory: result.importantMemory === '' ? undefined : result.importantMemory,
+        memoryImportance: result.memoryImportance === 'none' ? undefined : result.memoryImportance,
       }
     } catch (error) {
       console.error(`[ChatPostProcessor] LLM error in generateSummaryUpdate:`, error)

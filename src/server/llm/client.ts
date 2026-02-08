@@ -2,9 +2,20 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
-import { generateText, generateObject, type LanguageModel } from 'ai'
+import { generateText, generateObject, type LanguageModel, type ModelMessage } from 'ai'
+import type { ProviderOptions } from '@ai-sdk/provider-utils'
 import type { z } from 'zod'
 import { getLLMErrorHandler } from './errorHandler'
+
+/**
+ * Options for messages-based LLM calls
+ */
+export interface LLMMessagesOptions {
+  /** System prompt */
+  system?: string
+  /** Whether to enable cache for system prompt on Anthropic (default: true) */
+  cacheSystem?: boolean
+}
 
 // Internal state
 let model: LanguageModel | null = null
@@ -176,4 +187,92 @@ export function shutdownLLMClient(): void {
  */
 export function getLLMModelString(): string | null {
   return modelString
+}
+
+/**
+ * Check if current model is Anthropic
+ */
+function isAnthropicModel(): boolean {
+  return modelString?.startsWith('anthropic/') ?? false
+}
+
+/**
+ * Build provider options for cache control
+ * Returns cache control options for Anthropic models unless explicitly disabled
+ */
+function buildProviderOptions(cacheSystem: boolean | undefined): ProviderOptions | undefined {
+  if (!isAnthropicModel() || cacheSystem === false) {
+    return undefined
+  }
+  return {
+    anthropic: {
+      cacheControl: { type: 'ephemeral' as const },
+    },
+  }
+}
+
+/**
+ * Generate text with messages array
+ */
+export async function llmGenerateTextWithMessages(
+  messages: ModelMessage[],
+  options?: LLMMessagesOptions
+): Promise<string> {
+  const errorHandler = getLLMErrorHandler()
+
+  if (!model) {
+    const error = new Error('LLM client not initialized')
+    await errorHandler.handleError(error, { operation: 'generateTextWithMessages', reason: 'not_initialized' })
+    throw error
+  }
+
+  try {
+    const providerOptions = buildProviderOptions(options?.cacheSystem)
+    const result = await generateText({
+      model,
+      messages,
+      system: options?.system,
+      providerOptions,
+    })
+
+    errorHandler.resetFailureCount()
+    return result.text
+  } catch (error) {
+    await errorHandler.handleError(error, { operation: 'generateTextWithMessages' })
+    throw error
+  }
+}
+
+/**
+ * Generate structured output with messages array
+ */
+export async function llmGenerateObjectWithMessages<T>(
+  messages: ModelMessage[],
+  schema: z.Schema<T>,
+  options?: LLMMessagesOptions
+): Promise<T> {
+  const errorHandler = getLLMErrorHandler()
+
+  if (!model) {
+    const error = new Error('LLM client not initialized')
+    await errorHandler.handleError(error, { operation: 'generateObjectWithMessages', reason: 'not_initialized' })
+    throw error
+  }
+
+  try {
+    const providerOptions = buildProviderOptions(options?.cacheSystem)
+    const result = await generateObject({
+      model,
+      messages,
+      schema,
+      system: options?.system,
+      providerOptions,
+    })
+
+    errorHandler.resetFailureCount()
+    return result.object
+  } catch (error) {
+    await errorHandler.handleError(error, { operation: 'generateObjectWithMessages' })
+    throw error
+  }
 }

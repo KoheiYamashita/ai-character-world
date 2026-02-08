@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > character without optional fields - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildCharacterSystemPrompt > character without optional fields - should match snapshot 1`] = `
 "あなたは花子です。Aliceと会話しています。
 
 【あなたの性格】
@@ -22,8 +22,8 @@ exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > characte
 
 【ターン】1/5
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）
 - goalAchieved: 会話の目的を達成できたか（true/false）
 
@@ -31,7 +31,7 @@ JSON形式で回答してください。
 目的を達成したら goalAchieved を true にしてください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > context with empty arrays - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildCharacterSystemPrompt > context with empty arrays - should match snapshot 1`] = `
 "あなたは花子です。Aliceと会話しています。
 
 【あなたの性格】
@@ -60,8 +60,8 @@ exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > context 
 
 【ターン】1/5
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）
 - goalAchieved: 会話の目的を達成できたか（true/false）
 
@@ -69,7 +69,7 @@ JSON形式で回答してください。
 目的を達成したら goalAchieved を true にしてください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > full context - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildCharacterSystemPrompt > full context - should match snapshot 1`] = `
 "あなたは花子です。Aliceと会話しています。
 
 【あなたの性格】
@@ -89,10 +89,6 @@ exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > full con
 【相手: Alice】
 - 気分: happy
 - あなたへの好感度: 50
-
-【これまでの会話】
-花子: こんにちは！
-Alice: いらっしゃいませ！
 
 【直近の会話（過去）】
 - Alice: カフェでコーヒーを注文した
@@ -128,8 +124,8 @@ Alice: いらっしゃいませ！
 
 【ターン】2/5
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）
 - goalAchieved: 会話の目的を達成できたか（true/false）
 
@@ -137,7 +133,7 @@ JSON形式で回答してください。
 目的を達成したら goalAchieved を true にしてください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > minimal context - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildCharacterSystemPrompt > minimal context - should match snapshot 1`] = `
 "あなたは花子です。Aliceと会話しています。
 
 【あなたの性格】
@@ -166,8 +162,8 @@ exports[`ConversationExecutor prompt snapshots > buildCharacterPrompt > minimal 
 
 【ターン】1/5
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの発話（1〜3文程度。口頭で話すような短く自然な口語調で）
 - goalAchieved: 会話の目的を達成できたか（true/false）
 
@@ -175,7 +171,7 @@ JSON形式で回答してください。
 目的を達成したら goalAchieved を true にしてください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > NPC without optional fields - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildNPCSystemPrompt > NPC without optional fields - should match snapshot 1`] = `
 "あなたはAliceです。花子と会話しています。
 
 【あなたの性格】
@@ -186,15 +182,15 @@ exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > NPC without op
 - 花子への好感度: 50
 - これまでの会話回数: 3回
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）
 
 ※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。
 あなたの性格と知識に基づいて応答してください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > context with nearbyMaps - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildNPCSystemPrompt > context with nearbyMaps - should match snapshot 1`] = `
 "あなたはAliceです。花子と会話しています。
 
 【あなたの性格】
@@ -223,15 +219,15 @@ exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > context with n
 ※上記以外にも、【あなたの知識・事実】【これまでの会話】で言及された場所は話題にできます。
   存在しない施設や店について話さないでください。
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）
 
 ※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。
 あなたの性格と知識に基づいて応答してください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > full context - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildNPCSystemPrompt > full context - should match snapshot 1`] = `
 "あなたはAliceです。花子と会話しています。
 
 【あなたの性格】
@@ -252,10 +248,6 @@ exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > full context -
 - 気分: happy
 - 花子への好感度: 50
 - これまでの会話回数: 3回
-
-【これまでの会話】
-花子: こんにちは！
-Alice: いらっしゃいませ！
 
 【周辺の場所】
 - カフェ（現在地）
@@ -265,15 +257,15 @@ Alice: いらっしゃいませ！
 ※上記以外にも、【あなたの知識・事実】【これまでの会話】で言及された場所は話題にできます。
   存在しない施設や店について話さないでください。
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）
 
 ※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。
 あなたの性格と知識に基づいて応答してください。"
 `;
 
-exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > minimal context - should match snapshot 1`] = `
+exports[`ConversationExecutor prompt snapshots > buildNPCSystemPrompt > minimal context - should match snapshot 1`] = `
 "あなたはAliceです。花子と会話しています。
 
 【あなたの性格】
@@ -295,8 +287,8 @@ exports[`ConversationExecutor prompt snapshots > buildNPCPrompt > minimal contex
 - 花子への好感度: 50
 - これまでの会話回数: 3回
 
-【回答形式】
-JSON形式で回答してください。
+【指示】
+次の発話を生成してください。
 - utterance: あなたの応答（1〜3文程度。口頭で話すような短く自然な口語調で）
 
 ※発話は書き言葉ではなく、実際に口頭で話しているような短い文にしてください。

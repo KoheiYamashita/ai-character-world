@@ -88,7 +88,7 @@ describe('LLMMiniEpisodeGenerator', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.3) // < 0.5
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'おいしいパンを見つけた',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: 5, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 5, bladder: 0 },
       })
 
       const result = await generator.generate(createTestCharacter(), 'eat', null)
@@ -101,7 +101,7 @@ describe('LLMMiniEpisodeGenerator', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.99) // still < 1.0
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'エピソード',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: null, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 0, bladder: 0 },
       })
 
       const result = await gen.generate(createTestCharacter(), 'eat', null)
@@ -124,7 +124,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should convert nullable stat changes to actual values', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'いい気分になった',
-        statChanges: { satiety: null, energy: 3, hygiene: null, mood: 5, bladder: null },
+        statChanges: { satiety: 0, energy: 3, hygiene: 0, mood: 5, bladder: 0 },
       })
 
       const result = await generator.generate(createTestCharacter(), 'rest', null)
@@ -137,7 +137,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should exclude null stat changes from result', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: '何もなかった',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: null, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 0, bladder: 0 },
       })
 
       const result = await generator.generate(createTestCharacter(), 'eat', null)
@@ -150,7 +150,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should clamp stat changes to -10..+10', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: '極端な出来事',
-        statChanges: { satiety: 15, energy: -20, hygiene: null, mood: 10, bladder: null },
+        statChanges: { satiety: 15, energy: -20, hygiene: 0, mood: 10, bladder: 0 },
       })
 
       const result = await generator.generate(createTestCharacter(), 'eat', null)
@@ -162,7 +162,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should round stat changes to integers', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: '小さな出来事',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: 3.7, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 3.7, bladder: 0 },
       })
 
       const result = await generator.generate(createTestCharacter(), 'bathe', null)
@@ -172,7 +172,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should include facility actionIds in prompt when facility is provided', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'レストランでの出来事',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: 2, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 2, bladder: 0 },
       })
 
       const facility: FacilityInfo = { actionIds: ['eat'], quality: 80 }
@@ -185,7 +185,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should include character personality in prompt', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'エピソード',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: null, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 0, bladder: 0 },
       })
 
       await generator.generate(createTestCharacter({ personality: '穏やかで優しい' }), 'rest', null)
@@ -197,7 +197,7 @@ describe('LLMMiniEpisodeGenerator', () => {
     it('should include action id in prompt', async () => {
       mockLlmGenerateObject.mockResolvedValue({
         episode: 'エピソード',
-        statChanges: { satiety: null, energy: null, hygiene: null, mood: null, bladder: null },
+        statChanges: { satiety: 0, energy: 0, hygiene: 0, mood: 0, bladder: 0 },
       })
 
       await generator.generate(createTestCharacter(), 'work', null)

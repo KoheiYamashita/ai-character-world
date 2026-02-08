@@ -9,10 +9,12 @@ import type { ConversationContext } from './ConversationExecutor'
 // Mock LLM client
 vi.mock('@/server/llm', () => ({
   isLLMAvailable: vi.fn(() => true),
-  llmGenerateObject: vi.fn(),
+  llmGenerateObjectWithMessages: vi.fn(),
+  conversationToMessagesForCharacter: vi.fn(() => []),
+  conversationToMessagesForNPC: vi.fn(() => []),
 }))
 
-import { llmGenerateObject, isLLMAvailable } from '@/server/llm'
+import { llmGenerateObjectWithMessages, isLLMAvailable } from '@/server/llm'
 
 function createTestMap(): WorldMap {
   return {
@@ -123,7 +125,7 @@ describe('ConversationExecutor', () => {
   describe('executeConversation', () => {
     it('should execute a conversation loop until goal achieved', async () => {
       // Character says something, then achieves goal
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'こんにちは！最近どうですか？',
           goalAchieved: false,
@@ -147,7 +149,7 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, createTestContext())
 
       // Should have called LLM 3 times (char, npc, char with goal achieved)
-      expect(llmGenerateObject).toHaveBeenCalledTimes(3)
+      expect(llmGenerateObjectWithMessages).toHaveBeenCalledTimes(3)
 
       // Should have triggered completion with goalAchieved=true
       expect(completeSpy).toHaveBeenCalledWith('char-1', true)
@@ -158,7 +160,7 @@ describe('ConversationExecutor', () => {
 
     it('should stop at max turns', async () => {
       // Mock to always continue conversation
-      vi.mocked(llmGenerateObject).mockImplementation(async (_prompt, schema) => {
+      vi.mocked(llmGenerateObjectWithMessages).mockImplementation(async (_messages, schema) => {
         // Check if it's a character utterance schema (has goalAchieved field)
         const schemaStr = JSON.stringify(schema)
         if (schemaStr.includes('goalAchieved')) {
@@ -180,7 +182,7 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, createTestContext())
 
       // Max turns = 10, so 10 character messages + 10 NPC messages = 20 LLM calls
-      expect(llmGenerateObject).toHaveBeenCalledTimes(20)
+      expect(llmGenerateObjectWithMessages).toHaveBeenCalledTimes(20)
       expect(completeSpy).toHaveBeenCalledWith('char-1', false)
     })
 
@@ -196,12 +198,12 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, createTestContext())
 
       // Should end immediately since LLM returns wantsToEnd: true
-      expect(llmGenerateObject).not.toHaveBeenCalled()
+      expect(llmGenerateObjectWithMessages).not.toHaveBeenCalled()
       expect(completeSpy).toHaveBeenCalledWith('char-1', false)
     })
 
     it('should handle LLM error gracefully', async () => {
-      vi.mocked(llmGenerateObject).mockRejectedValueOnce(new Error('LLM API error'))
+      vi.mocked(llmGenerateObjectWithMessages).mockRejectedValueOnce(new Error('LLM API error'))
 
       const goal = { goal: 'test', successCriteria: '' }
       const session = conversationManager.startConversation('char-1', 'npc-1', goal)!
@@ -220,7 +222,7 @@ describe('ConversationExecutor', () => {
       let resolveFirst: (() => void) | null = null
       const firstCallPromise = new Promise<void>(resolve => { resolveFirst = resolve })
 
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockImplementationOnce(async () => {
           await firstCallPromise
           return {
@@ -250,11 +252,11 @@ describe('ConversationExecutor', () => {
 
       // Only first execution should have triggered LLM
       // 3 calls: char(初回goalAchievedスキップ), npc, char(goalAchieved→終了)
-      expect(llmGenerateObject).toHaveBeenCalledTimes(3)
+      expect(llmGenerateObjectWithMessages).toHaveBeenCalledTimes(3)
     })
 
     it('should add messages to conversation session via manager', async () => {
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'こんにちは',
           goalAchieved: false,
@@ -281,7 +283,7 @@ describe('ConversationExecutor', () => {
     })
 
     it('should use context information in prompts', async () => {
-      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+      vi.mocked(llmGenerateObjectWithMessages).mockResolvedValueOnce({
         utterance: 'test',
         goalAchieved: true,
       })
@@ -300,7 +302,7 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, context)
 
       // Check that the prompt included context
-      const promptArg = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      const promptArg = vi.mocked(llmGenerateObjectWithMessages).mock.calls[0][2]?.system as string
       expect(promptArg).toContain('おすすめを聞く')
       expect(promptArg).toContain('先日カレーを食べた')
       expect(promptArg).toContain('明日は休みだ')
@@ -316,7 +318,7 @@ describe('ConversationExecutor', () => {
 
       const startTime = Date.now()
 
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'hello',
           goalAchieved: false,
@@ -344,7 +346,7 @@ describe('ConversationExecutor', () => {
 
   describe('nearby maps in prompts', () => {
     it('should include nearby maps with current location marked in character prompt', async () => {
-      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+      vi.mocked(llmGenerateObjectWithMessages).mockResolvedValueOnce({
         utterance: 'test',
         goalAchieved: true,
       })
@@ -363,7 +365,7 @@ describe('ConversationExecutor', () => {
 
       await executor.executeConversation(character, npc, session, context)
 
-      const promptArg = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      const promptArg = vi.mocked(llmGenerateObjectWithMessages).mock.calls[0][2]?.system as string
       expect(promptArg).toContain('【周辺の場所】')
       expect(promptArg).toContain('カフェ ドルチェ（現在地）')
       expect(promptArg).toContain('- 桜木町の広場')
@@ -372,7 +374,7 @@ describe('ConversationExecutor', () => {
     })
 
     it('should not mark non-zero distance maps as current location', async () => {
-      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+      vi.mocked(llmGenerateObjectWithMessages).mockResolvedValueOnce({
         utterance: 'test',
         goalAchieved: true,
       })
@@ -391,7 +393,7 @@ describe('ConversationExecutor', () => {
 
       await executor.executeConversation(character, npc, session, context)
 
-      const promptArg = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      const promptArg = vi.mocked(llmGenerateObjectWithMessages).mock.calls[0][2]?.system as string
       expect(promptArg).toContain('桜木町の広場（現在地）')
       expect(promptArg).not.toContain('桜木公園（現在地）')
       expect(promptArg).not.toContain('さくらの湯（現在地）')
@@ -400,7 +402,7 @@ describe('ConversationExecutor', () => {
     })
 
     it('should not include nearby maps section when no maps provided', async () => {
-      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+      vi.mocked(llmGenerateObjectWithMessages).mockResolvedValueOnce({
         utterance: 'test',
         goalAchieved: true,
       })
@@ -410,12 +412,12 @@ describe('ConversationExecutor', () => {
 
       await executor.executeConversation(character, npc, session, createTestContext())
 
-      const promptArg = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      const promptArg = vi.mocked(llmGenerateObjectWithMessages).mock.calls[0][2]?.system as string
       expect(promptArg).not.toContain('【周辺の場所】')
     })
 
     it('should include nearby maps in NPC prompt', async () => {
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'こんにちは',
           goalAchieved: false,
@@ -443,7 +445,7 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, context)
 
       // NPC LLM call is the 2nd call
-      const npcPrompt = vi.mocked(llmGenerateObject).mock.calls[1][0] as string
+      const npcPrompt = vi.mocked(llmGenerateObjectWithMessages).mock.calls[1][2]?.system as string
       expect(npcPrompt).toContain('【周辺の場所】')
       expect(npcPrompt).toContain('カフェ ドルチェ（現在地）')
       expect(npcPrompt).toContain('- 桜木町の広場')
@@ -452,7 +454,7 @@ describe('ConversationExecutor', () => {
     })
 
     it('should not include nearby maps section in NPC prompt when no maps', async () => {
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'こんにちは',
           goalAchieved: false,
@@ -471,12 +473,12 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, createTestContext())
 
       // NPC LLM call is the 2nd call
-      const npcPrompt = vi.mocked(llmGenerateObject).mock.calls[1][0] as string
+      const npcPrompt = vi.mocked(llmGenerateObjectWithMessages).mock.calls[1][2]?.system as string
       expect(npcPrompt).not.toContain('【周辺の場所】')
     })
 
     it('should include character-specific caveat for memories and actions', async () => {
-      vi.mocked(llmGenerateObject).mockResolvedValueOnce({
+      vi.mocked(llmGenerateObjectWithMessages).mockResolvedValueOnce({
         utterance: 'test',
         goalAchieved: true,
       })
@@ -491,12 +493,12 @@ describe('ConversationExecutor', () => {
 
       await executor.executeConversation(character, npc, session, context)
 
-      const promptArg = vi.mocked(llmGenerateObject).mock.calls[0][0] as string
+      const promptArg = vi.mocked(llmGenerateObjectWithMessages).mock.calls[0][2]?.system as string
       expect(promptArg).toContain('【重要な記憶】【直近の会話（過去）】【今日の行動】で言及された場所は話題にできます')
     })
 
     it('should include NPC-specific caveat for facts and conversation', async () => {
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'こんにちは',
           goalAchieved: false,
@@ -519,14 +521,14 @@ describe('ConversationExecutor', () => {
 
       await executor.executeConversation(character, npc, session, context)
 
-      const npcPrompt = vi.mocked(llmGenerateObject).mock.calls[1][0] as string
+      const npcPrompt = vi.mocked(llmGenerateObjectWithMessages).mock.calls[1][2]?.system as string
       expect(npcPrompt).toContain('【あなたの知識・事実】【これまでの会話】で言及された場所は話題にできます')
     })
   })
 
   describe('NPC prompt', () => {
     it('should include NPC facts in prompt', async () => {
-      vi.mocked(llmGenerateObject)
+      vi.mocked(llmGenerateObjectWithMessages)
         .mockResolvedValueOnce({
           utterance: 'おすすめはありますか？',
           goalAchieved: false,
@@ -547,7 +549,7 @@ describe('ConversationExecutor', () => {
       await executor.executeConversation(character, npc, session, createTestContext())
 
       // NPC LLM call is the 2nd call
-      const npcPrompt = vi.mocked(llmGenerateObject).mock.calls[1][0] as string
+      const npcPrompt = vi.mocked(llmGenerateObjectWithMessages).mock.calls[1][2]?.system as string
       expect(npcPrompt).toContain('この店は10年営業している')
       expect(npcPrompt).toContain('名物はカレーライス')
       expect(npcPrompt).toContain('温厚で優しい店主')

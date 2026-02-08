@@ -14,7 +14,9 @@ import type { ConversationContext } from './ConversationExecutor'
 // Mock LLM client (not used in prompt building, but required for constructor)
 vi.mock('@/server/llm', () => ({
   isLLMAvailable: vi.fn(() => true),
-  llmGenerateObject: vi.fn(),
+  llmGenerateObjectWithMessages: vi.fn(),
+  conversationToMessagesForCharacter: vi.fn(() => []),
+  conversationToMessagesForNPC: vi.fn(() => []),
 }))
 
 // =============================================================================
@@ -195,7 +197,7 @@ describe('ConversationExecutor prompt snapshots', () => {
     executor = new ConversationExecutor(conversationManager)
   })
 
-  describe('buildCharacterPrompt', () => {
+  describe('buildCharacterSystemPrompt', () => {
     it('minimal context - should match snapshot', () => {
       const character = createTestCharacter()
       const npc = createTestNPC()
@@ -203,7 +205,7 @@ describe('ConversationExecutor prompt snapshots', () => {
       const context = createTestContext()
 
       // Access private method via 'as any'
-      const prompt = (executor as any).buildCharacterPrompt(character, npc, session, context)
+      const prompt = (executor as any).buildCharacterSystemPrompt(character, npc, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -213,7 +215,7 @@ describe('ConversationExecutor prompt snapshots', () => {
       const session = createSessionWithMessages()
       const context = createFullContext()
 
-      const prompt = (executor as any).buildCharacterPrompt(character, npc, session, context)
+      const prompt = (executor as any).buildCharacterSystemPrompt(character, npc, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -226,7 +228,7 @@ describe('ConversationExecutor prompt snapshots', () => {
       const session = createTestSession()
       const context = createTestContext()
 
-      const prompt = (executor as any).buildCharacterPrompt(character, npc, session, context)
+      const prompt = (executor as any).buildCharacterSystemPrompt(character, npc, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -242,19 +244,19 @@ describe('ConversationExecutor prompt snapshots', () => {
         nearbyMaps: [],
       })
 
-      const prompt = (executor as any).buildCharacterPrompt(character, npc, session, context)
+      const prompt = (executor as any).buildCharacterSystemPrompt(character, npc, session, context)
       expect(prompt).toMatchSnapshot()
     })
   })
 
-  describe('buildNPCPrompt', () => {
+  describe('buildNPCSystemPrompt', () => {
     it('minimal context - should match snapshot', () => {
       const character = createTestCharacter()
       const npc = createTestNPC()
       const session = createTestSession()
       const context = createTestContext()
 
-      const prompt = (executor as any).buildNPCPrompt(npc, character, session, context)
+      const prompt = (executor as any).buildNPCSystemPrompt(npc, character, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -264,7 +266,7 @@ describe('ConversationExecutor prompt snapshots', () => {
       const session = createSessionWithMessages()
       const context = createFullContext()
 
-      const prompt = (executor as any).buildNPCPrompt(npc, character, session, context)
+      const prompt = (executor as any).buildNPCSystemPrompt(npc, character, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -278,7 +280,7 @@ describe('ConversationExecutor prompt snapshots', () => {
       const session = createTestSession()
       const context = createTestContext()
 
-      const prompt = (executor as any).buildNPCPrompt(npc, character, session, context)
+      const prompt = (executor as any).buildNPCSystemPrompt(npc, character, session, context)
       expect(prompt).toMatchSnapshot()
     })
 
@@ -293,7 +295,7 @@ describe('ConversationExecutor prompt snapshots', () => {
         ],
       })
 
-      const prompt = (executor as any).buildNPCPrompt(npc, character, session, context)
+      const prompt = (executor as any).buildNPCSystemPrompt(npc, character, session, context)
       expect(prompt).toMatchSnapshot()
     })
   })

@@ -2959,7 +2959,15 @@ describe('SimulationEngine (integration)', () => {
     })
 
     it('should apply consecutive limit filter in buildBehaviorContext', async () => {
-      const maps = { town: createTestMap('town') }
+      const maps = { town: createTestMap('town', {
+        obstacles: [
+          {
+            id: 'facility1', type: 'building' as const,
+            x: 0, y: 0, width: 100, height: 100,
+            facility: { tags: ['restaurant', 'bedroom'], actionIds: ['eat', 'sleep'], quality: 50 },
+          },
+        ],
+      }) }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
       engine.setActionRestrictions({ maxConsecutiveSameAction: 2 })

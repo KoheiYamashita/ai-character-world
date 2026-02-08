@@ -1,6 +1,7 @@
 export interface ConversationGoal {
   goal: string              // "最近の様子を聞きたい"
   successCriteria: string   // "近況を1つ以上聞けたら達成"
+  openingLine?: string      // "ねえ、最近どう？" (キャラクターの最初の一言)
 }
 
 export interface ConversationMessage {

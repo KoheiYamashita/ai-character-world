@@ -151,10 +151,10 @@ export class SimulationEngine {
 
     // Set conversation complete callback
     this.conversationExecutor.setOnConversationComplete((characterId) => {
-      // Record talk action before clearing state
+      // Complete the existing in_progress talk action record (don't create a new one)
       const action = this.worldState.getCharacter(characterId)?.currentAction
       if (action?.actionId === 'talk') {
-        this.recordActionHistory({
+        this.completeActionHistoryRecord({
           characterId,
           actionId: 'talk',
           targetNpcId: action.targetNpcId,
@@ -1057,15 +1057,12 @@ export class SimulationEngine {
     ])
 
     // Get NPCs on current map with cooldown info
-    // After system auto-action, don't show NPCs (talk is disabled anyway)
     const allNPCs = this.worldState.getNPCsOnMap(character.currentMapId)
-    const npcsWithCooldown = character.afterSystemAutoAction
-      ? []
-      : addCooldownInfoToNPCs(allNPCs, recentConversations, currentTimeMinutes)
+    const npcsWithCooldown = addCooldownInfoToNPCs(allNPCs, recentConversations, currentTimeMinutes)
 
-    // Get available actions, then remove 'talk' if afterSystemAutoAction flag is set
+    // Get available actions, remove 'talk' if no NPCs on current map
     let availableActions = this.actionExecutor.getAvailableActions(character.id)
-    if (character.afterSystemAutoAction) {
+    if (npcsWithCooldown.length === 0) {
       availableActions = availableActions.filter(action => action !== 'talk')
     }
 

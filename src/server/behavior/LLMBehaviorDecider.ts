@@ -42,8 +42,8 @@ const ScheduleUpdateSchema = z.object({
   entry: z.object({
     time: z.string().describe('時刻（HH:MM形式）'),
     activity: z.string().describe('活動内容'),
-    location: z.string().nullable().describe('場所（不要ならnull）'),
-    note: z.string().nullable().describe('備考（不要ならnull）'),
+    location: z.string().describe('場所（不要なら空文字列""）'),
+    note: z.string().describe('備考（不要なら空文字列""）'),
   }),
 })
 
@@ -81,15 +81,18 @@ const ALLOWED_ACTIONS = [
 const ConversationGoalSchema = z.object({
   goal: z.string().describe('会話の具体的な目的（例: 「おすすめの料理を聞く」「最近の街の様子を聞く」「体調を気遣う」）'),
   successCriteria: z.string().describe('目的達成の具体的な判定基準（例: 「おすすめを1つ以上教えてもらえた」「街の近況を1つ以上聞けた」「体調について返答があった」）'),
+  openingLine: z.string().describe('NPCに話しかける最初の一言（口語調で短く自然に。例: 「ねえ、おすすめのスイーツってある？」）'),
 })
 
 const ActionDecisionSchema = z.object({
   action: z.enum(ALLOWED_ACTIONS).describe('アクション種別'),
-  target: z.string().nullable().describe('対象のID（施設ID、NPC ID、マップIDのいずれか。不要ならnull）'),
+  target: z.string().describe('対象のID（施設ID、NPC ID、マップIDのいずれか。不要なら空文字列""）'),
   reason: z.string().describe('この行動を選んだ理由'),
-  durationMinutes: z.number().nullable().describe('実行時間（分）。可変時間アクション（eat, sleep, toilet, bathe, rest, work, exercise, read, game, drink_alcohol, watch, shopping, study, meditate, nap, draw, play_music, cook, garden, jog, swim, walk, fish, karaoke, cinema, arcade, bowling, coffee, snack, massage, haircut, clean）の場合に指定。talk, move, idle, thinkingはnull'),
-  conversationGoal: ConversationGoalSchema.nullable().describe('会話の目的と達成条件（talkの場合に必須。それ以外はnull）'),
-  scheduleUpdate: ScheduleUpdateSchema.nullable().describe('スケジュール変更（不要ならnull）'),
+  durationMinutes: z.number().describe('実行時間（分）。可変時間アクションの場合に指定。固定時間アクション（talk, move, idle, thinking）は0'),
+  hasConversationGoal: z.boolean().describe('会話目的があるか（talkの場合はtrue、それ以外はfalse）'),
+  conversationGoal: ConversationGoalSchema.describe('会話の目的と達成条件（hasConversationGoal=trueの場合に使用）'),
+  hasScheduleUpdate: z.boolean().describe('スケジュール変更があるか'),
+  scheduleUpdate: ScheduleUpdateSchema.describe('スケジュール変更内容（hasScheduleUpdate=trueの場合に使用）'),
 })
 
 type LLMActionDecision = z.infer<typeof ActionDecisionSchema>
@@ -161,7 +164,7 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       return {
         type: 'idle',
         reason: llmDecision.reason,
-        scheduleUpdate: this.convertScheduleUpdate(llmDecision.scheduleUpdate),
+        scheduleUpdate: this.convertScheduleUpdate(llmDecision.hasScheduleUpdate, llmDecision.scheduleUpdate),
       }
     }
 
@@ -169,11 +172,11 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     if (this.needsDetailSelection(llmDecision, context)) {
       const detailDecision = await this.selectDetail(llmDecision, context)
       // scheduleUpdate を引き継ぐ
-      if (llmDecision.scheduleUpdate && !detailDecision.scheduleUpdate) {
-        detailDecision.scheduleUpdate = this.convertScheduleUpdate(llmDecision.scheduleUpdate)
+      if (llmDecision.hasScheduleUpdate && !detailDecision.scheduleUpdate) {
+        detailDecision.scheduleUpdate = this.convertScheduleUpdate(llmDecision.hasScheduleUpdate, llmDecision.scheduleUpdate)
       }
-      // durationMinutes を引き継ぐ
-      if (llmDecision.durationMinutes != null && detailDecision.durationMinutes === undefined) {
+      // durationMinutes を引き継ぐ（0以外の値のみ）
+      if (llmDecision.durationMinutes !== 0 && detailDecision.durationMinutes === undefined) {
         detailDecision.durationMinutes = llmDecision.durationMinutes
       }
       return detailDecision
@@ -222,8 +225,8 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       return false
     }
 
-    // LLMがtargetを指定していて、それが有効な施設IDの場合は2段階選択不要
-    if (decision.target) {
+    // LLMがtargetを指定していて（空文字列でない）、それが有効な施設IDの場合は2段階選択不要
+    if (decision.target !== '') {
       const targetFacility = relevantFacilities.find(f => f.id === decision.target)
       if (targetFacility) {
         return false
@@ -405,15 +408,18 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     llmDecision: LLMActionDecision,
     context: BehaviorContext
   ): BehaviorDecision {
-    const { action, target, reason, scheduleUpdate, durationMinutes, conversationGoal } = llmDecision
-    const convertedScheduleUpdate = this.convertScheduleUpdate(scheduleUpdate)
-    const duration = durationMinutes ?? undefined
+    const { action, target, reason, scheduleUpdate, durationMinutes, hasConversationGoal, conversationGoal, hasScheduleUpdate } = llmDecision
+    const convertedScheduleUpdate = this.convertScheduleUpdate(hasScheduleUpdate, scheduleUpdate)
+    // durationMinutes === 0 は「固定時間」を意味するので undefined に変換
+    const duration = durationMinutes === 0 ? undefined : durationMinutes
+    // 空文字列は「対象なし」を意味するので undefined に変換
+    const targetId = target === '' ? undefined : target
 
     // move アクション
     if (action === 'move') {
       return {
         type: 'move',
-        targetMapId: target ?? undefined,
+        targetMapId: targetId,
         reason,
         scheduleUpdate: convertedScheduleUpdate,
       }
@@ -434,13 +440,13 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     const relevantFacilities = this.getRelevantFacilities(action, context)
     if (relevantFacilities.length > 0) {
       // LLMがtargetを指定している場合、その施設を使用
-      if (target) {
-        const targetFacility = relevantFacilities.find(f => f.id === target)
+      if (targetId) {
+        const targetFacility = relevantFacilities.find(f => f.id === targetId)
         if (targetFacility) {
           return buildFacilityAction(targetFacility)
         }
         // targetが無効な場合はフォールバック（ログ出力）
-        console.log(`[LLMBehaviorDecider] Target facility ${target} not found for action ${action}, falling back to auto-selection`)
+        console.log(`[LLMBehaviorDecider] Target facility ${targetId} not found for action ${action}, falling back to auto-selection`)
       }
 
       // 単一施設の場合は自動選択
@@ -463,13 +469,13 @@ export class LLMBehaviorDecider implements BehaviorDecider {
       }
 
       // talk アクションの場合、targetがあればNPC IDとして設定
-      if (action === 'talk' && target) {
-        result.targetNpcId = target
-        result.conversationGoal = conversationGoal ?? { goal: reason, successCriteria: '' }
+      if (action === 'talk' && targetId) {
+        result.targetNpcId = targetId
+        result.conversationGoal = hasConversationGoal ? conversationGoal : { goal: reason, successCriteria: '' }
       }
       // 施設アクションの場合、targetがあれば施設IDとして設定
-      else if (target) {
-        result.targetFacilityId = target
+      else if (targetId) {
+        result.targetFacilityId = targetId
       }
 
       return result
@@ -500,19 +506,20 @@ export class LLMBehaviorDecider implements BehaviorDecider {
 
   /**
    * scheduleUpdate を内部形式に変換
-   * Note: LLM出力では nullable なので null → undefined に変換
+   * Note: LLM出力では空文字列が「不要」を表すので、空文字列 → undefined に変換
    */
   private convertScheduleUpdate(
-    update: z.infer<typeof ScheduleUpdateSchema> | null | undefined
+    hasScheduleUpdate: boolean,
+    update: z.infer<typeof ScheduleUpdateSchema>
   ): ScheduleUpdate | undefined {
-    if (!update) return undefined
+    if (!hasScheduleUpdate) return undefined
     return {
       type: update.type,
       entry: {
         time: update.entry.time,
         activity: update.entry.activity,
-        location: update.entry.location ?? undefined,
-        note: update.entry.note ?? undefined,
+        location: update.entry.location === '' ? undefined : update.entry.location,
+        note: update.entry.note === '' ? undefined : update.entry.note,
       },
     }
   }
@@ -681,32 +688,42 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     if (nearbyMaps && nearbyMaps.length > 0) {
       parts.push('- move: 任意の場所へ移動（上記マップIDをtargetに指定）')
     }
-    parts.push('- idle: その場で待機')
+    parts.push('- idle: その場で待機（※約束の時間待ち等、待つ理由がある場合のみ使用）')
     parts.push('')
 
     // 指示
     parts.push('【回答形式】')
-    parts.push('JSON形式で回答してください。targetには必ずIDを指定してください（ラベルや説明文ではなくID）。')
+    parts.push('JSON形式で回答してください。targetには必ずIDを指定してください（ラベルや説明文ではなくID）。不要な場合は空文字列""を指定。')
     parts.push('')
     parts.push('【行動選択の指針】')
+    parts.push('- あなたは自立した存在です。自分の性格・趣味・行動傾向に基づいて、積極的に行動を選んでください')
     parts.push('- ステータスが低い場合（20%以下）は優先的に対処してください')
     parts.push('- ⚠️ 0%になると深刻な結果（倒れる、社会的死など）を招くため、絶対に避けてください')
+    parts.push('- NPCが近くにいる場合、積極的に話しかけてください。特にまだ話したことがないNPCや、前回の会話から時間が経ったNPCとの会話を優先してください')
+    parts.push('- ステータスが十分（全て20%以上）なときは、ステータス回復よりNPCとの会話や趣味を優先してください')
     parts.push('- スケジュールも考慮してください')
     parts.push('- 現在マップで実行可能なアクションを優先してください')
     parts.push('- 施設を利用する場合（eat, sleep, bathe, rest等）はアクションを選択し、targetに施設IDを指定')
-    parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定。conversationGoalには1回の会話で達成可能な具体的目的を設定すること（例: 「おすすめの料理を聞く」「最近の出来事を聞く」）。「会話する」「話す」のような曖昧な目的は避けること')
+    parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定。hasConversationGoal=true、conversationGoalには1回の会話で達成可能な具体的目的を設定すること（例: 「おすすめの料理を聞く」「最近の出来事を聞く」）。「会話する」「話す」のような曖昧な目的は避けること')
     if (nearbyMaps && nearbyMaps.length > 0) {
       parts.push('- 別のマップに移動したい場合は「move」を選択し、targetにマップIDを指定')
     }
-    parts.push('- 特にすることがなければ「idle」を選択（targetはnull）')
+    parts.push('- ⚠️ idleは極力避けてください。「待つ理由がある」場合（約束の時間待ち等）のみidle可。ステータスが満たされていても、自分らしい行動を選んでください')
     parts.push('')
     parts.push('【durationMinutesについて】')
     parts.push('- eat, sleep, toilet, bathe, rest, work, exercise, read, game, drink_alcohol, watch, shopping の場合は durationMinutes を分単位で指定してください')
     parts.push('- 各アクションの最小〜最大時間の範囲内で指定してください')
     parts.push('- 次のスケジュールまでの時間を考慮して適切な時間を選んでください')
-    parts.push('- talk, move, idle は固定または即時なので durationMinutes は null にしてください')
+    parts.push('- talk, move, idle は固定または即時なので durationMinutes は 0 を指定してください')
     parts.push('')
-    parts.push('スケジュールを変更したい場合は scheduleUpdate で指定できます。')
+    parts.push('【スケジュール変更について】')
+    parts.push('- スケジュールを変更したい場合は hasScheduleUpdate=true、scheduleUpdateに変更内容を指定')
+    parts.push('- 変更しない場合は hasScheduleUpdate=false（scheduleUpdateの内容は無視されます）')
+    parts.push('')
+    parts.push('【会話目的について】')
+    parts.push('- talkアクションの場合は hasConversationGoal=true、conversationGoalに目的・達成条件・最初の一言（openingLine）を指定')
+    parts.push('- openingLineはNPCに話しかける最初の一言です。口語調で短く自然な言葉にしてください')
+    parts.push('- それ以外のアクションは hasConversationGoal=false（conversationGoalの内容は無視されます）')
 
     return parts.join('\n')
   }
@@ -958,6 +975,9 @@ ${facilityList}
       return effectStr
         ? `自発的にメッセージを送信する（${effectStr}）`
         : '自発的にメッセージを送信する'
+    }
+    if (actionType === 'talk') {
+      return 'NPCと会話する（関係構築・情報収集）'
     }
 
     // 設定がない場合は基本説明のみ

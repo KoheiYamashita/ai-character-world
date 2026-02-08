@@ -3,9 +3,19 @@ export {
   isLLMAvailable,
   llmGenerateText,
   llmGenerateObject,
+  llmGenerateTextWithMessages,
+  llmGenerateObjectWithMessages,
   shutdownLLMClient,
   getLLMModelString,
 } from './client'
+
+export type { LLMMessagesOptions } from './client'
+
+export {
+  conversationToMessagesForCharacter,
+  conversationToMessagesForNPC,
+  chatToMessagesForCharacter,
+} from './messageUtils'
 
 export {
   initializeLLMErrorHandler,
