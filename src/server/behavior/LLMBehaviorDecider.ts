@@ -655,18 +655,28 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push(`- 所持金: ${character.money}円 ⚠️0円で生活困窮（食事・施設を利用できなくなる）`)
     parts.push('')
 
-    // 今日のスケジュール
-    parts.push('【今日のスケジュール】')
-    parts.push(this.formatSchedule(schedule))
+    // スケジュール状況（現在の枠 + 次の予定）
+    const scheduleWindow = this.getCurrentScheduleWindow(schedule, currentTime)
+    parts.push('【📋 スケジュール状況】')
+    if (scheduleWindow.current) {
+      const { activity, location, startTime, endTime } = scheduleWindow.current
+      const timeRange = endTime ? `${startTime}〜${endTime}` : `${startTime}〜`
+      const loc = location ? `（${location}）` : ''
+      parts.push(`📌 現在の予定: 「${activity}」${loc}の時間帯（${timeRange}）`)
+    } else {
+      parts.push('📌 現在の予定: なし（スケジュール開始前）')
+    }
+    if (scheduleWindow.next) {
+      const { activity, location, time, minutesUntil } = scheduleWindow.next
+      const loc = location ? `（${location}）` : ''
+      parts.push(`→ 次の予定: ${minutesUntil}分後に「${activity}」${loc}（${time}〜）`)
+    }
     parts.push('')
 
-    // 次のスケジュールまでの時間
-    const nextScheduleInfo = this.getNextScheduleInfo(schedule, currentTime)
-    if (nextScheduleInfo) {
-      parts.push('【次のスケジュールまでの時間】')
-      parts.push(`- ${nextScheduleInfo.minutesUntil}分後に「${nextScheduleInfo.activity}」${nextScheduleInfo.location ? `(${nextScheduleInfo.location})` : ''}`)
-      parts.push('')
-    }
+    // 今日のスケジュール（全体）
+    parts.push('【今日のスケジュール（全体）】')
+    parts.push(this.formatSchedule(schedule))
+    parts.push('')
 
     // 現在マップで実行可能なアクション（NPC・施設情報を含む）
     parts.push('【アクション】（現在マップで実行可能）')
@@ -697,11 +707,13 @@ export class LLMBehaviorDecider implements BehaviorDecider {
     parts.push('')
     parts.push('【行動選択の指針】')
     parts.push('- あなたは自立した存在です。自分の性格・趣味・行動傾向に基づいて、積極的に行動を選んでください')
-    parts.push('- ステータスが低い場合（20%以下）は優先的に対処してください')
+    parts.push('- ⚠️ スケジュールを基本的に守ってください。「📋 スケジュール状況」の現在の予定に沿った行動を優先してください')
+    parts.push('  - 「仕事」→ work、「朝食/昼食/夕食」→ eat、「就寝」→ sleep、「起床」→ 起きて活動開始、のように解釈してください')
+    parts.push('  - 「自由時間」の場合は自分の判断で好きな行動を選んでOKです（会話・趣味・外出など）')
+    parts.push('  - 次の予定までの残り時間に収まるようにdurationMinutesを調整してください')
+    parts.push('- ステータスが低い場合（20%以下）はスケジュールより優先して対処してください')
     parts.push('- ⚠️ 0%になると深刻な結果（倒れる、社会的死など）を招くため、絶対に避けてください')
-    parts.push('- NPCが近くにいる場合、積極的に話しかけてください。特にまだ話したことがないNPCや、前回の会話から時間が経ったNPCとの会話を優先してください')
-    parts.push('- ステータスが十分（全て20%以上）なときは、ステータス回復よりNPCとの会話や趣味を優先してください')
-    parts.push('- スケジュールも考慮してください')
+    parts.push('- NPCが近くにいる場合、自由時間中やスケジュールの合間に積極的に話しかけてください。特にまだ話したことがないNPCや、前回の会話から時間が経ったNPCとの会話を優先してください')
     parts.push('- 現在マップで実行可能なアクションを優先してください')
     parts.push('- 施設を利用する場合（eat, sleep, bathe, rest等）はアクションを選択し、targetに施設IDを指定')
     parts.push('- NPCと話したい場合は「talk」を選択し、targetにNPC IDを指定。hasConversationGoal=true、conversationGoalには1回の会話で達成可能な具体的目的を設定すること（例: 「おすすめの料理を聞く」「最近の出来事を聞く」）。「会話する」「話す」のような曖昧な目的は避けること')
@@ -920,34 +932,79 @@ ${facilityList}
   }
 
   /**
-   * 次のスケジュールまでの時間を計算
+   * スケジュールエントリの時刻を分に変換
    */
-  private getNextScheduleInfo(
+  private parseScheduleMinutes(time: string): number | null {
+    const timeParts = time.split(':')
+    if (timeParts.length < 2) return null
+    const h = parseInt(timeParts[0], 10)
+    const m = parseInt(timeParts[1], 10)
+    if (isNaN(h) || isNaN(m)) return null
+    return h * 60 + m
+  }
+
+  /**
+   * 現在のスケジュール枠を計算
+   * 現在時刻がどのスケジュールエントリの時間帯にいるか、次の予定は何かを返す
+   */
+  private getCurrentScheduleWindow(
     schedule: ScheduleEntry[] | null,
     currentTime: WorldTime
-  ): { activity: string; location?: string; minutesUntil: number } | null {
-    if (!schedule || schedule.length === 0) return null
+  ): {
+    current: { activity: string; location?: string; startTime: string; endTime?: string } | null
+    next: { activity: string; location?: string; time: string; minutesUntil: number } | null
+  } {
+    if (!schedule || schedule.length === 0) return { current: null, next: null }
 
     const currentMinutes = currentTime.hour * 60 + currentTime.minute
 
-    for (const entry of schedule) {
-      const timeParts = entry.time.split(':')
-      if (timeParts.length < 2) continue
-      const h = parseInt(timeParts[0], 10)
-      const m = parseInt(timeParts[1], 10)
-      if (isNaN(h) || isNaN(m)) continue
+    // 時刻順にパースしてフィルタ
+    const parsed = schedule
+      .map(entry => ({ entry, minutes: this.parseScheduleMinutes(entry.time) }))
+      .filter((p): p is { entry: ScheduleEntry; minutes: number } => p.minutes !== null)
+      .sort((a, b) => a.minutes - b.minutes)
 
-      const entryMinutes = h * 60 + m
-      if (entryMinutes > currentMinutes) {
-        return {
-          activity: entry.activity,
-          location: entry.location,
-          minutesUntil: entryMinutes - currentMinutes,
-        }
+    if (parsed.length === 0) return { current: null, next: null }
+
+    // 現在の枠を探す: currentMinutes >= entry.time で最後にマッチするもの
+    let currentEntry: typeof parsed[0] | null = null
+    let nextEntry: typeof parsed[0] | null = null
+
+    for (let i = 0; i < parsed.length; i++) {
+      if (parsed[i].minutes <= currentMinutes) {
+        currentEntry = parsed[i]
+        nextEntry = i + 1 < parsed.length ? parsed[i + 1] : null
       }
     }
 
-    return null  // 今日のスケジュールはすべて終了
+    // 全エントリが未来の場合 → 最初のエントリがnext
+    if (!currentEntry) {
+      const first = parsed[0]
+      return {
+        current: null,
+        next: {
+          activity: first.entry.activity,
+          location: first.entry.location,
+          time: first.entry.time,
+          minutesUntil: first.minutes - currentMinutes,
+        },
+      }
+    }
+
+    return {
+      current: {
+        activity: currentEntry.entry.activity,
+        location: currentEntry.entry.location,
+        startTime: currentEntry.entry.time,
+        endTime: nextEntry?.entry.time,
+      },
+      next: nextEntry ? {
+        activity: nextEntry.entry.activity,
+        location: nextEntry.entry.location,
+        time: nextEntry.entry.time,
+        minutesUntil: nextEntry.minutes - currentMinutes,
+      } : null,
+    }
   }
 
   /**
