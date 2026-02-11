@@ -1569,6 +1569,97 @@ describe('SimulationEngine (integration)', () => {
       // When on home map, buildNearbyFacilities should not include home (current map excluded)
       expect(facilities.length).toBe(0)
     })
+
+    it('should exclude facilities when characterMoney is insufficient', async () => {
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-entrance'] },
+        { id: 'town-entrance', x: 200, y: 100, type: 'entrance' as const, connectedTo: ['town-0-0'], leadsTo: { mapId: 'cafe', nodeId: 'cafe-entrance' } },
+      ]
+      const cafeNodes = [
+        { id: 'cafe-entrance', x: 100, y: 100, type: 'entrance' as const, connectedTo: ['cafe-0-0'], leadsTo: { mapId: 'town', nodeId: 'town-entrance' } },
+        { id: 'cafe-0-0', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['cafe-entrance'] },
+      ]
+      const cafeObstacle: Obstacle = {
+        id: 'cafe-counter',
+        x: 200, y: 100, width: 100, height: 100,
+        type: 'zone', label: 'Counter',
+        facility: { actionIds: ['eat', 'cook'], owner: 'cafe-counter', cost: 500 },
+        tileRow: 0, tileCol: 1, tileWidth: 2, tileHeight: 2,
+      }
+      const maps = {
+        town: createTestMap('town', { nodes: townNodes }),
+        cafe: createTestMap('cafe', { nodes: cafeNodes, obstacles: [cafeObstacle] }),
+      }
+      await engine.initialize(maps, [createTestCharacter('c1')])
+
+      // With insufficient money, facility should be excluded
+      const facilities = (engine as any).buildNearbyFacilities('town', 100)
+      expect(facilities.length).toBe(0)
+
+      // With sufficient money, facility should be included
+      const facilitiesWithMoney = (engine as any).buildNearbyFacilities('town', 500)
+      expect(facilitiesWithMoney.length).toBe(1)
+      expect(facilitiesWithMoney[0].id).toBe('cafe-counter')
+    })
+
+    it('should work without characterMoney argument (no filter)', async () => {
+      const townNodes = [
+        { id: 'town-0-0', x: 100, y: 100, type: 'waypoint' as const, connectedTo: ['town-entrance'] },
+        { id: 'town-entrance', x: 200, y: 100, type: 'entrance' as const, connectedTo: ['town-0-0'], leadsTo: { mapId: 'cafe', nodeId: 'cafe-entrance' } },
+      ]
+      const cafeNodes = [
+        { id: 'cafe-entrance', x: 100, y: 100, type: 'entrance' as const, connectedTo: ['cafe-0-0'], leadsTo: { mapId: 'town', nodeId: 'town-entrance' } },
+        { id: 'cafe-0-0', x: 200, y: 100, type: 'waypoint' as const, connectedTo: ['cafe-entrance'] },
+      ]
+      const cafeObstacle: Obstacle = {
+        id: 'cafe-counter',
+        x: 200, y: 100, width: 100, height: 100,
+        type: 'zone', label: 'Counter',
+        facility: { actionIds: ['eat'], cost: 500 },
+        tileRow: 0, tileCol: 1, tileWidth: 2, tileHeight: 2,
+      }
+      const maps = {
+        town: createTestMap('town', { nodes: townNodes }),
+        cafe: createTestMap('cafe', { nodes: cafeNodes, obstacles: [cafeObstacle] }),
+      }
+      await engine.initialize(maps, [createTestCharacter('c1')])
+
+      // Without characterMoney, all facilities should be included
+      const facilities = (engine as any).buildNearbyFacilities('town')
+      expect(facilities.length).toBe(1)
+    })
+  })
+
+  describe('buildCurrentMapFacilities - money filter', () => {
+    it('should exclude facilities when characterMoney is insufficient', async () => {
+      const obstacles: Obstacle[] = [
+        {
+          id: 'restaurant',
+          x: 100, y: 100, width: 200, height: 200,
+          type: 'zone', label: 'Restaurant',
+          facility: { actionIds: ['eat'], cost: 1000 },
+          tileRow: 0, tileCol: 0, tileWidth: 2, tileHeight: 2,
+        },
+        {
+          id: 'free-park',
+          x: 300, y: 100, width: 200, height: 200,
+          type: 'zone', label: 'Park',
+          facility: { actionIds: ['rest'] },
+          tileRow: 0, tileCol: 3, tileWidth: 2, tileHeight: 2,
+        },
+      ]
+      const maps = { town: createTestMap('town', { obstacles }) }
+      await engine.initialize(maps, [createTestCharacter('c1')])
+
+      // With insufficient money, only free facility should be included
+      const facilities = (engine as any).buildCurrentMapFacilities('town', 500)
+      expect(facilities.length).toBe(1)
+      expect(facilities[0].id).toBe('free-park')
+
+      // With sufficient money, both should be included
+      const allFacilities = (engine as any).buildCurrentMapFacilities('town', 1000)
+      expect(allFacilities.length).toBe(2)
+    })
   })
 
   describe('buildNearbyMaps', () => {

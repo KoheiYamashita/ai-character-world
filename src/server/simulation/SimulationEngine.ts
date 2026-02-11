@@ -1100,8 +1100,8 @@ export class SimulationEngine {
       schedule,
       availableActions,
       nearbyNPCs: npcsWithCooldown,
-      currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId),
-      nearbyFacilities: this.buildNearbyFacilities(character.currentMapId),
+      currentMapFacilities: this.buildCurrentMapFacilities(character.currentMapId, character.money),
+      nearbyFacilities: this.buildNearbyFacilities(character.currentMapId, character.money),
       nearbyMaps,
       recentConversations: filterForBehaviorDecision(recentConversations),
       midTermMemories,
@@ -1868,7 +1868,7 @@ export class SimulationEngine {
   /**
    * 現在マップの施設情報を収集（アクション表示用）
    */
-  private buildCurrentMapFacilities(mapId: string): CurrentMapFacility[] {
+  private buildCurrentMapFacilities(mapId: string, characterMoney?: number): CurrentMapFacility[] {
     const map = this.worldState.getMap(mapId)
     if (!map) return []
 
@@ -1877,6 +1877,9 @@ export class SimulationEngine {
     for (const obstacle of map.obstacles) {
       if (!obstacle.facility) continue
       if (obstacle.facility.actionIds.length === 0) continue
+      if (characterMoney !== undefined
+          && obstacle.facility.cost !== undefined
+          && characterMoney < obstacle.facility.cost) continue
 
       facilities.push({
         id: obstacle.id,
@@ -1928,11 +1931,14 @@ export class SimulationEngine {
   /**
    * マップから施設情報を抽出（共通ヘルパー）
    */
-  private extractFacilitiesFromMap(map: WorldMap, mapId: string, distance: number): NearbyFacility[] {
+  private extractFacilitiesFromMap(map: WorldMap, mapId: string, distance: number, characterMoney?: number): NearbyFacility[] {
     const facilities: NearbyFacility[] = []
     for (const obstacle of map.obstacles) {
       if (!obstacle.facility) continue
       if (obstacle.facility.actionIds.length === 0) continue
+      if (characterMoney !== undefined
+          && obstacle.facility.cost !== undefined
+          && characterMoney < obstacle.facility.cost) continue
 
       facilities.push({
         id: obstacle.id,
@@ -1951,11 +1957,11 @@ export class SimulationEngine {
    * 他マップの施設を収集（現在マップは除外、distance > 0 のみ）
    * homeマップの施設は、現在位置に関わらず常に含める
    */
-  private buildNearbyFacilities(currentMapId: string): NearbyFacility[] {
+  private buildNearbyFacilities(currentMapId: string, characterMoney?: number): NearbyFacility[] {
     const facilities = this.traverseNearbyMaps(currentMapId, (map, mapId, distance) => {
       // 現在マップの施設は除外
       if (distance === 0) return []
-      return this.extractFacilitiesFromMap(map, mapId, distance)
+      return this.extractFacilitiesFromMap(map, mapId, distance, characterMoney)
     })
 
     // homeマップの施設を常に含める（現在マップがhomeでなく、BFS結果に含まれていない場合）
@@ -1965,7 +1971,7 @@ export class SimulationEngine {
         const homeMap = this.worldState.getMap('home')
         if (homeMap) {
           // distance: 10 - 3ホップより遠いが常に利用可能
-          facilities.push(...this.extractFacilitiesFromMap(homeMap, 'home', 10))
+          facilities.push(...this.extractFacilitiesFromMap(homeMap, 'home', 10, characterMoney))
         }
       }
     }

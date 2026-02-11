@@ -445,8 +445,10 @@ export class LLMBehaviorDecider implements BehaviorDecider {
         if (targetFacility) {
           return buildFacilityAction(targetFacility)
         }
-        // targetが無効な場合はフォールバック（ログ出力）
-        console.log(`[LLMBehaviorDecider] Target facility ${targetId} not found for action ${action}, falling back to auto-selection`)
+        // 無効なtargetの場合、最寄り施設を自動選択
+        console.log(`[LLMBehaviorDecider] Target facility ${targetId} not found for action ${action}, falling back to nearest facility`)
+        const nearest = relevantFacilities.reduce((a, b) => a.distance <= b.distance ? a : b)
+        return buildFacilityAction(nearest)
       }
 
       // 単一施設の場合は自動選択
@@ -473,9 +475,15 @@ export class LLMBehaviorDecider implements BehaviorDecider {
         result.targetNpcId = targetId
         result.conversationGoal = hasConversationGoal ? conversationGoal : { goal: reason, successCriteria: '' }
       }
-      // 施設アクションの場合、targetがあれば施設IDとして設定
+      // 施設アクションの場合、targetがあれば検証して施設IDとして設定
       else if (targetId) {
-        result.targetFacilityId = targetId
+        const validTarget = relevantFacilities.find(f => f.id === targetId)
+        if (validTarget) {
+          result.targetFacilityId = targetId
+          if (validTarget.distance > 0) {
+            result.targetMapId = validTarget.mapId
+          }
+        }
       }
 
       return result

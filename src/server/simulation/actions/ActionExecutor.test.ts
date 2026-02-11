@@ -925,6 +925,67 @@ describe('ActionExecutor', () => {
     })
   })
 
+  describe('facility cost - actionIds filter', () => {
+    it('should NOT deduct cost when action is not in facility actionIds (e.g. talk in hotel)', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('hotel', 0, 0, {
+          actionIds: ['eat'],
+          cost: 500,
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        money: 1000,
+        currentNodeId: 'test-2-2',
+      }))
+
+      // talk is not in hotel's actionIds, so cost should NOT be deducted
+      executor.startAction('char-1', 'talk', undefined, undefined, undefined, undefined, true)
+
+      const char = worldState.getCharacter('char-1')
+      expect(char?.money).toBe(1000) // No cost deducted
+    })
+
+    it('should NOT deduct cost for action not in facility actionIds (thinking in paid zone)', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('hotel', 0, 0, {
+          actionIds: ['eat'],
+          cost: 500,
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        money: 1000,
+        currentNodeId: 'test-2-2',
+      }))
+
+      // thinking is not in hotel's actionIds, so cost should NOT be deducted
+      executor.startAction('char-1', 'thinking', undefined, undefined, undefined, undefined, true)
+
+      const char = worldState.getCharacter('char-1')
+      expect(char?.money).toBe(1000) // No cost deducted
+    })
+
+    it('should deduct cost when action IS in facility actionIds', () => {
+      const map = createTestMap('test-map', [
+        createZoneWithFacility('restaurant', 0, 0, {
+          actionIds: ['eat'],
+          cost: 500,
+        }),
+      ])
+      worldState.initialize({ 'test-map': map })
+      worldState.addCharacter(createTestCharacter('char-1', {
+        money: 1000,
+        currentNodeId: 'test-2-2',
+      }))
+
+      executor.startAction('char-1', 'eat')
+
+      const char = worldState.getCharacter('char-1')
+      expect(char?.money).toBe(500) // Cost deducted
+    })
+  })
+
   describe('completeAction with hourly wage', () => {
     it('should NOT pay hourly wage on completion (perMinute handles it)', () => {
       const map = createTestMap('test-map', [
