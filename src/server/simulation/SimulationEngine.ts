@@ -90,6 +90,8 @@ export class SimulationEngine {
     energy: 'sleep',  // Could also be 'rest', but sleep is more effective
     hygiene: 'bathe',
   }
+  // Track characters in interrupt fallback movement (livelock prevention)
+  private interruptMovingCharacters: Set<string> = new Set()
   // Chat system
   private chatManager: ChatManager | null = null
   private chatExecutor: ChatExecutor | null = null
@@ -151,8 +153,8 @@ export class SimulationEngine {
 
     // Set conversation complete callback
     this.conversationExecutor.setOnConversationComplete((characterId) => {
-      // Complete the existing in_progress talk action record (don't create a new one)
       const action = this.worldState.getCharacter(characterId)?.currentAction
+      // Only complete if still in talk action (interrupt may have already aborted it)
       if (action?.actionId === 'talk') {
         this.completeActionHistoryRecord({
           characterId,
@@ -160,10 +162,9 @@ export class SimulationEngine {
           targetNpcId: action.targetNpcId,
           reason: action.reason,
         })
+        this.actionExecutor.forceCompleteAction(characterId)
+        this.onActionComplete(characterId)
       }
-      // Clear action state and trigger next behavior decision
-      this.actionExecutor.forceCompleteAction(characterId)
-      this.onActionComplete(characterId)
     })
 
     // Set action completion callback for behavior decision trigger
@@ -844,15 +845,15 @@ export class SimulationEngine {
         ...(newMoney !== char.money ? { money: newMoney } : {}),
       })
 
-      // Check for status interrupts (when stat crosses below threshold)
+      // Check for status interrupts (when stat is below threshold)
       // Priority order: bladder > satiety > energy > hygiene (mood doesn't trigger interrupt)
-      if (char.bladder >= threshold && newBladder < threshold) {
+      if (newBladder < threshold) {
         this.triggerStatusInterrupt(char.id, 'bladder')
-      } else if (char.satiety >= threshold && newSatiety < threshold) {
+      } else if (newSatiety < threshold) {
         this.triggerStatusInterrupt(char.id, 'satiety')
-      } else if (char.energy >= threshold && newEnergy < threshold) {
+      } else if (newEnergy < threshold) {
         this.triggerStatusInterrupt(char.id, 'energy')
-      } else if (char.hygiene >= threshold && newHygiene < threshold) {
+      } else if (newHygiene < threshold) {
         this.triggerStatusInterrupt(char.id, 'hygiene')
       }
     }
@@ -898,6 +899,9 @@ export class SimulationEngine {
 
   // Callback when navigation completes (triggers next behavior decision)
   private onNavigationComplete(characterId: string): void {
+    // Clear interrupt movement flag (livelock prevention)
+    this.interruptMovingCharacters.delete(characterId)
+
     const character = this.worldState.getCharacter(characterId)
     if (!character) return
     if (this.pendingDecisions.has(characterId)) return
@@ -1013,25 +1017,83 @@ export class SimulationEngine {
     const character = this.worldState.getCharacter(characterId)
     if (!character) return
 
-    // Skip if decision is already pending
-    if (this.pendingDecisions.has(characterId)) return
-
-    // Skip if already executing action (don't interrupt current action)
-    if (character.currentAction) return
-
-    console.log(`[SimulationEngine] Status interrupt: ${character.name} ${statusType} < ${SimulationEngine.INTERRUPT_THRESHOLD}%`)
-
-    // Get forced action for this status type
     const forcedAction = SimulationEngine.STATUS_INTERRUPT_ACTIONS[statusType]
     if (!forcedAction) {
-      // Fallback to normal behavior decision if no mapping
+      if (this.pendingDecisions.has(characterId)) return
       const currentTime = this.worldState.getTime()
       this.makeBehaviorDecision(character, currentTime)
       return
     }
 
+    // Guard 1: Skip if decision is already pending
+    if (this.pendingDecisions.has(characterId)) return
+
+    // Guard 2: Don't interrupt an action that was itself triggered by a status interrupt - prevents loops
+    if (character.currentAction?.triggeredByInterrupt) return
+
+    // Guard 3: Don't interrupt if already moving to an interrupt-triggered action
+    if (character.pendingAction?.triggeredByInterrupt) return
+
+    // Guard 4: Don't interrupt if in interrupt fallback movement (livelock prevention)
+    if (this.interruptMovingCharacters.has(characterId)) return
+
+    console.log(`[SimulationEngine] Status interrupt: ${character.name} ${statusType} < ${SimulationEngine.INTERRUPT_THRESHOLD}%`)
+
+    // Abort current activity before starting interrupt
+    this.abortCurrentActivity(characterId)
+
+    // Re-fetch character after abort (state may have been mutated)
+    const currentChar = this.worldState.getCharacter(characterId)
+    if (!currentChar) return
+
     // Trigger interrupt behavior decision with forced action
-    this.makeInterruptBehaviorDecision(character, forcedAction)
+    this.makeInterruptBehaviorDecision(currentChar, forcedAction)
+  }
+
+  /**
+   * Abort all current activity for a character (for status interrupts).
+   * Cleans up: conversation → action → navigation → cross-map transition → pendingAction
+   */
+  private abortCurrentActivity(characterId: string): void {
+    const character = this.worldState.getCharacter(characterId)
+    if (!character) return
+
+    // 1. End active conversation (clears NPC state via ConversationManager)
+    if (character.conversation?.status === 'active') {
+      this.conversationManager.endConversation(characterId, false)
+    }
+
+    // 2. Cancel current action + mark DB record as aborted
+    if (character.currentAction) {
+      const actionId = character.currentAction.actionId
+      console.log(`[SimulationEngine] Aborting action for status interrupt: ${character.name} ${actionId}`)
+      this.actionExecutor.cancelAction(characterId)
+
+      const rowId = this.activeActionRowIds.get(characterId)
+      if (rowId && this.stateStore) {
+        const timeStr = this.formatTimeString(this.worldState.getTime())
+        this.stateStore.abortActionHistory(rowId, timeStr).catch(error => {
+          console.error(`[SimulationEngine] Error aborting action history:`, error)
+        })
+        this.activeActionRowIds.delete(characterId)
+      }
+    }
+
+    // 3. Stop navigation
+    if (character.navigation.isMoving) {
+      this.worldState.completeNavigation(characterId)
+    }
+
+    // 4. Clear cross-map navigation
+    if (character.crossMapNavigation) {
+      this.worldState.completeCrossMapNavigation(characterId)
+    }
+    this.characterSimulator.cancelTransition(characterId)
+
+    // 5. Clear pending action
+    if (character.pendingAction) {
+      this.worldState.updateCharacter(characterId, { pendingAction: null })
+    }
   }
 
   /**
@@ -1121,10 +1183,12 @@ export class SimulationEngine {
     decision: BehaviorDecision,
     logContext: string
   ): Promise<void> {
+    const triggeredByInterrupt = logContext === 'interrupt'
+
     switch (decision.type) {
       case 'action':
         if (decision.actionId) {
-          this.handleActionDecision(character, decision)
+          this.handleActionDecision(character, decision, triggeredByInterrupt)
         }
         break
 
@@ -1215,6 +1279,11 @@ export class SimulationEngine {
       console.log(`[SimulationEngine] Interrupt decision for ${character.name}: ${decision.type} (${decision.reason})`)
       await this.applyBehaviorDecision(currentChar, decision, 'interrupt')
 
+      // Track move-fallback to prevent livelock (re-interrupt during navigation)
+      if (decision.type === 'move') {
+        this.interruptMovingCharacters.add(character.id)
+      }
+
       // Reset afterSystemAutoAction flag after decision is applied
       if (currentChar.afterSystemAutoAction) {
         this.worldState.updateCharacter(character.id, { afterSystemAutoAction: false })
@@ -1279,13 +1348,13 @@ export class SimulationEngine {
       if (character.currentAction) continue
 
       // Character has arrived - execute pending action
-      const { actionId, facilityId, targetNpcId, reason, durationMinutes, conversationGoal } = character.pendingAction
+      const { actionId, facilityId, targetNpcId, reason, durationMinutes, conversationGoal, triggeredByInterrupt } = character.pendingAction
 
       // Clear pending action first
       this.worldState.updateCharacter(character.id, { pendingAction: null })
 
       // Try to execute the action
-      const success = this.actionExecutor.startAction(character.id, actionId, facilityId, targetNpcId, durationMinutes, reason)
+      const success = this.actionExecutor.startAction(character.id, actionId, facilityId, targetNpcId, durationMinutes, reason, undefined, triggeredByInterrupt)
       if (success) {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         if (targetNpcId) {
@@ -1309,7 +1378,7 @@ export class SimulationEngine {
   }
 
   // Handle action decision: execute immediately or move to facility/NPC first
-  private handleActionDecision(character: SimCharacter, decision: BehaviorDecision): void {
+  private handleActionDecision(character: SimCharacter, decision: BehaviorDecision, triggeredByInterrupt?: boolean): void {
     const { actionId, targetFacilityId, targetNpcId, reason, durationMinutes } = decision
     if (!actionId) return
 
@@ -1326,12 +1395,12 @@ export class SimulationEngine {
 
     // Handle talk action with NPC target
     if (actionId === 'talk' && targetNpcId) {
-      this.handleTalkAction(character, targetNpcId, reason, decision.conversationGoal)
+      this.handleTalkAction(character, targetNpcId, reason, decision.conversationGoal, triggeredByInterrupt)
       return
     }
 
     // Handle facility-based actions
-    this.handleFacilityAction(character, actionId, targetFacilityId, reason, durationMinutes)
+    this.handleFacilityAction(character, actionId, targetFacilityId, reason, durationMinutes, triggeredByInterrupt)
   }
 
   // Handle chat actions: reply_chat, check_chat, send_chat
@@ -1461,7 +1530,10 @@ export class SimulationEngine {
 
   // Callback when chat action completes
   private onChatActionComplete(characterId: string, _success: boolean): void {
-    // Force complete the action and trigger next decision
+    const action = this.worldState.getCharacter(characterId)?.currentAction
+    // Only complete if still in a chat action (interrupt may have already aborted it)
+    if (!action || !['reply_chat', 'check_chat', 'send_chat'].includes(action.actionId)) return
+
     this.actionExecutor.forceCompleteAction(characterId)
     this.onActionComplete(characterId)
   }
@@ -1534,7 +1606,7 @@ export class SimulationEngine {
   }
 
   // Handle talk action: move to NPC if not adjacent, then start talk
-  private handleTalkAction(character: SimCharacter, targetNpcId: string, reason?: string, conversationGoal?: ConversationGoal): void {
+  private handleTalkAction(character: SimCharacter, targetNpcId: string, reason?: string, conversationGoal?: ConversationGoal, triggeredByInterrupt?: boolean): void {
     const npc = this.worldState.getNPC(targetNpcId)
     if (!npc) {
       console.log(`[SimulationEngine] ${character.name} target NPC ${targetNpcId} not found`)
@@ -1569,7 +1641,7 @@ export class SimulationEngine {
 
     if (isAdjacent) {
       // Already adjacent - execute talk immediately
-      const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId, undefined, reason)
+      const success = this.actionExecutor.startAction(character.id, 'talk', undefined, targetNpcId, undefined, reason, undefined, triggeredByInterrupt)
       if (success) {
         this.faceEachOtherForTalk(character.id, targetNpcId)
         const goal = conversationGoal ?? { goal: reason ?? '会話する', successCriteria: '' }
@@ -1602,6 +1674,7 @@ export class SimulationEngine {
       facilityMapId: character.currentMapId,
       reason,
       conversationGoal,
+      ...(triggeredByInterrupt && { triggeredByInterrupt }),
     }
 
     this.worldState.updateCharacter(character.id, { pendingAction })
@@ -1686,7 +1759,8 @@ export class SimulationEngine {
     actionId: ActionId,
     targetFacilityId?: string,
     reason?: string,
-    durationMinutes?: number
+    durationMinutes?: number,
+    triggeredByInterrupt?: boolean
   ): void {
     const currentMap = this.worldState.getMap(character.currentMapId)
 
@@ -1722,7 +1796,7 @@ export class SimulationEngine {
 
     // Execute immediately if: no specific facility OR already inside target facility
     if (!targetFacilityId || isInsideTargetFacility) {
-      const success = this.actionExecutor.startAction(character.id, actionId, targetFacilityId, undefined, durationMinutes, reason)
+      const success = this.actionExecutor.startAction(character.id, actionId, targetFacilityId, undefined, durationMinutes, reason, undefined, triggeredByInterrupt)
       if (success) {
         const durationStr = durationMinutes !== undefined ? ` (${durationMinutes}min)` : ''
         console.log(`[SimulationEngine] ${character.name} started action: ${actionId}${durationStr} (${reason})${targetFacilityId ? ` at facility: ${targetFacilityId}` : ''}`)
@@ -1763,6 +1837,7 @@ export class SimulationEngine {
       facilityMapId,
       reason,
       durationMinutes,
+      ...(triggeredByInterrupt && { triggeredByInterrupt }),
     }
 
     this.worldState.updateCharacter(character.id, { pendingAction })

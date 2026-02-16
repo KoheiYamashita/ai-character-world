@@ -338,29 +338,56 @@ describe('SimulationEngine (integration)', () => {
   })
 
   describe('triggerStatusInterrupt', () => {
-    it('should not trigger when character has currentAction', async () => {
+    it('should abort non-interrupt action and trigger interrupt when stat drops below threshold', async () => {
       const maps = { town: createTestMap('town') }
-      // bladder just above threshold (10)
-      const chars = [createTestCharacter('c1', { bladder: 11 })]
+      // bladder already below threshold (current-value based check)
+      const chars = [createTestCharacter('c1', { bladder: 9 })]
       await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
 
-      // Set currentAction with long duration to prevent completion during test
+      // Set currentAction as a non-interrupt action (will be aborted)
       const char = engine.getCharacter('c1')!
       const now = Date.now()
       char.currentAction = {
-        actionId: 'work',
+        actionId: 'read',
         startTime: now,
-        targetEndTime: now + 600000, // 10 minutes, well past test duration
+        targetEndTime: now + 600000,
       }
 
       engine.start()
       vi.advanceTimersByTime(testTimeConfig.statusDecayIntervalMs + 100)
       engine.stop()
 
-      // Re-read after engine run (updateCharacter creates new object)
+      // Re-read after engine run
       const updated = engine.getCharacter('c1')!
-      // The character's action should still be running (not interrupted)
-      expect(updated.currentAction).not.toBeNull()
+      // Bladder should still be below threshold
+      expect(updated.bladder).toBeLessThan(10)
+      // The non-interrupt action (read) should have been aborted
+    })
+
+    it('should NOT interrupt when interrupt-triggered sleep is running', async () => {
+      const maps = { town: createTestMap('town') }
+      const chars = [createTestCharacter('c1', { bladder: 9 })]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+
+      // Set currentAction as an interrupt-triggered sleep action
+      const char = engine.getCharacter('c1')!
+      const now = Date.now()
+      char.currentAction = {
+        actionId: 'sleep',
+        startTime: now,
+        targetEndTime: now + 600000,
+        triggeredByInterrupt: true,
+      }
+
+      engine.start()
+      vi.advanceTimersByTime(testTimeConfig.statusDecayIntervalMs + 100)
+      engine.stop()
+
+      // Re-read after engine run
+      const updated = engine.getCharacter('c1')!
+      // The interrupt-triggered sleep should still be running
+      expect(updated.currentAction?.actionId).toBe('sleep')
     })
 
     it('should trigger interrupt when idle and stat drops below threshold', async () => {
@@ -380,8 +407,6 @@ describe('SimulationEngine (integration)', () => {
       // Bladder should have dropped below threshold
       expect(char.bladder).toBeLessThan(10)
       // The thinking action should have been started (interrupt starts 'thinking' first)
-      // After the async LLM call resolves, it's force-completed
-      // We can verify by checking the character's state changed
     })
   })
 
@@ -2301,23 +2326,22 @@ describe('SimulationEngine (integration)', () => {
   })
 
   describe('triggerStatusInterrupt via status decay', () => {
-    it('should trigger satiety interrupt when threshold crossed', async () => {
+    it('should trigger satiety interrupt when below threshold', async () => {
       const maps = { town: createTestMap('town') }
       const chars = [createTestCharacter('c1', { satiety: 11, bladder: 80 })]
       await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
       engine.setActionConfigs(testActionConfigs as never)
 
-      // Decay enough to cross threshold
+      // Decay enough to drop below threshold
       ;(engine as any).applyStatusDecay(3) // 3 minutes * 0.5/min = -1.5, from 11 → 9.5
 
       const char = engine.getCharacter('c1')!
       expect(char.satiety).toBeLessThan(10)
       // Interrupt decision should have been triggered (thinking action started)
-      // pendingDecisions should be set
       expect((engine as any).pendingDecisions.has('c1')).toBe(true)
     })
 
-    it('should trigger energy interrupt when threshold crossed', async () => {
+    it('should trigger energy interrupt when below threshold', async () => {
       const maps = { town: createTestMap('town') }
       const chars = [createTestCharacter('c1', { energy: 11, bladder: 80, satiety: 80 })]
       await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
@@ -2330,7 +2354,7 @@ describe('SimulationEngine (integration)', () => {
       expect((engine as any).pendingDecisions.has('c1')).toBe(true)
     })
 
-    it('should trigger hygiene interrupt when threshold crossed', async () => {
+    it('should trigger hygiene interrupt when below threshold', async () => {
       const maps = { town: createTestMap('town') }
       const chars = [createTestCharacter('c1', { hygiene: 11, bladder: 80, satiety: 80, energy: 80 })]
       await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
@@ -2340,6 +2364,27 @@ describe('SimulationEngine (integration)', () => {
 
       const char = engine.getCharacter('c1')!
       expect(char.hygiene).toBeLessThan(10)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(true)
+    })
+
+    it('should fire interrupt every tick while stat remains below threshold', async () => {
+      const maps = { town: createTestMap('town') }
+      // Start already below threshold
+      const chars = [createTestCharacter('c1', { bladder: 5 })]
+      await engine.initialize(maps, chars, 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // First decay - should trigger interrupt
+      ;(engine as any).applyStatusDecay(1)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(true)
+
+      // Simulate decision completing
+      ;(engine as any).pendingDecisions.delete('c1')
+      // Force complete thinking so character is idle
+      ;(engine as any).actionExecutor.forceCompleteAction('c1')
+
+      // Second decay - should trigger again (current-value based, not crossing-based)
+      ;(engine as any).applyStatusDecay(1)
       expect((engine as any).pendingDecisions.has('c1')).toBe(true)
     })
   })
@@ -2533,14 +2578,121 @@ describe('SimulationEngine (integration)', () => {
       })
     })
 
-    it('should skip when character already has action', async () => {
+    it('should abort non-interrupt action and trigger interrupt', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Give character a non-interrupt action (eat is an interrupt action, use 'work'-like action via thinking)
+      ;(engine as any).worldState.updateCharacter('c1', {
+        currentAction: { actionId: 'read', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Should abort the action and trigger interrupt decision
+      expect((engine as any).pendingDecisions.has('c1')).toBe(true)
+    })
+
+    it('should NOT interrupt when interrupt-triggered action is already running', async () => {
       const maps = { town: createTestMap('town') }
       await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
 
-      // Give character a current action
+      // Give character an interrupt-triggered action (toilet forced by interrupt)
       ;(engine as any).worldState.updateCharacter('c1', {
-        currentAction: { actionId: 'eat', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+        currentAction: { actionId: 'toilet', startTime: Date.now(), targetEndTime: Date.now() + 60000, triggeredByInterrupt: true },
       })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Should NOT add to pendingDecisions (interrupt-triggered action should not be interrupted)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(false)
+    })
+
+    it('should NOT interrupt when moving to an interrupt-triggered action (pendingAction)', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Character is moving to toilet (triggered by interrupt)
+      ;(engine as any).worldState.updateCharacter('c1', {
+        pendingAction: { actionId: 'toilet', facilityId: 'toilet-1', facilityMapId: 'town', reason: 'need to go', triggeredByInterrupt: true },
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Should NOT add to pendingDecisions
+      expect((engine as any).pendingDecisions.has('c1')).toBe(false)
+    })
+
+    it('should ALLOW interrupt when voluntary bathe is running (not triggered by interrupt)', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Give character a voluntary bathe action (no triggeredByInterrupt flag)
+      ;(engine as any).worldState.updateCharacter('c1', {
+        currentAction: { actionId: 'bathe', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Should add to pendingDecisions (voluntary bathe CAN be interrupted)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(true)
+    })
+
+    it('should NOT interrupt when interrupt-triggered bathe is running', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Give character a hygiene-interrupt-triggered bathe action
+      ;(engine as any).worldState.updateCharacter('c1', {
+        currentAction: { actionId: 'bathe', startTime: Date.now(), targetEndTime: Date.now() + 60000, triggeredByInterrupt: true },
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Should NOT add to pendingDecisions (interrupt-triggered bathe should not be interrupted)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(false)
+    })
+
+    it('should NOT interrupt when moving to an interrupt-triggered pendingAction', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Character is moving to toilet (triggered by bladder interrupt)
+      ;(engine as any).worldState.updateCharacter('c1', {
+        pendingAction: { actionId: 'toilet', facilityId: 'toilet-1', facilityMapId: 'town', reason: 'bladder interrupt', triggeredByInterrupt: true },
+      })
+
+      // satiety also drops - should NOT interrupt
+      ;(engine as any).triggerStatusInterrupt('c1', 'satiety')
+
+      // Should NOT add to pendingDecisions
+      expect((engine as any).pendingDecisions.has('c1')).toBe(false)
+    })
+
+    it('should ALLOW interrupt when voluntary sleep is running (not triggered by interrupt)', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Give character a voluntary sleep action (no triggeredByInterrupt flag)
+      ;(engine as any).worldState.updateCharacter('c1', {
+        currentAction: { actionId: 'sleep', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'satiety')
+
+      // Should add to pendingDecisions (voluntary sleep CAN be interrupted by satiety)
+      expect((engine as any).pendingDecisions.has('c1')).toBe(true)
+    })
+
+    it('should NOT interrupt when in interrupt fallback movement (livelock prevention)', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Mark character as in interrupt movement
+      ;(engine as any).interruptMovingCharacters.add('c1')
 
       ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
 
@@ -2683,9 +2835,9 @@ describe('SimulationEngine (integration)', () => {
       engine.setActionConfigs(actionConfigsWithBathe as never)
       engine.start()
 
-      // Start toilet action (fixed: duration 5min, effects: { bladder: 100 })
+      // Start toilet action as interrupt-triggered (fixed: duration 5min, effects: { bladder: 100 })
       const executor = engine.getActionExecutor()
-      executor.startAction('c1', 'toilet', 'home-obstacle-5')
+      executor.startAction('c1', 'toilet', 'home-obstacle-5', undefined, undefined, undefined, undefined, true)
 
       // Advance time past the action duration (5 minutes = 300000ms)
       vi.advanceTimersByTime(300001)
@@ -3166,6 +3318,102 @@ describe('SimulationEngine (integration)', () => {
       engine.setMemoryConfig({ midTermLimit: 8, todayActionsLimit: 5 })
 
       expect((engine as any).todayActionsLimit).toBe(5)
+    })
+  })
+
+  // ===========================================================================
+  // abortCurrentActivity tests
+  // ===========================================================================
+  describe('abortCurrentActivity', () => {
+    it('should clear currentAction, navigation, pendingAction', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Set up various activity states
+      ;(engine as any).worldState.updateCharacter('c1', {
+        currentAction: { actionId: 'eat', startTime: Date.now(), targetEndTime: Date.now() + 60000 },
+        pendingAction: { actionId: 'sleep', facilityId: 'bed-1', facilityMapId: 'home', reason: 'tired' },
+        navigation: {
+          isMoving: true,
+          path: ['town-0-0', 'town-0-1'],
+          currentPathIndex: 0,
+          progress: 0.5,
+          startPosition: { x: 100, y: 100 },
+          targetPosition: { x: 200, y: 100 },
+        },
+      })
+
+      ;(engine as any).abortCurrentActivity('c1')
+
+      const char = engine.getCharacter('c1')!
+      expect(char.currentAction).toBeNull()
+      expect(char.pendingAction).toBeNull()
+      expect(char.navigation.isMoving).toBe(false)
+    })
+
+    it('should end active conversation when aborting', async () => {
+      const maps = { town: createTestMap('town') }
+      const npc = createTestNPC('npc1', {
+        name: 'Shopkeeper',
+        currentNodeId: 'town-0-1',
+        position: { x: 200, y: 100 },
+      })
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, [npc], testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      // Start a conversation
+      const convManager = (engine as any).conversationManager
+      convManager.startConversation('c1', 'npc1', { goal: 'test', successCriteria: '' })
+
+      const charBefore = engine.getCharacter('c1')!
+      expect(charBefore.conversation?.status).toBe('active')
+
+      ;(engine as any).abortCurrentActivity('c1')
+
+      const charAfter = engine.getCharacter('c1')!
+      expect(charAfter.conversation?.status).not.toBe('active')
+    })
+  })
+
+  // ===========================================================================
+  // interruptMovingCharacters livelock prevention
+  // ===========================================================================
+  describe('interrupt movement livelock prevention', () => {
+    it('should set interruptMovingCharacters flag on move fallback', async () => {
+      const maps = { town: createTestMap('town'), home: createTestMap('home') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+      engine.setActionConfigs(testActionConfigs as never)
+
+      const decider = (engine as any).behaviorDecider
+      // Mock interrupt to return move (no facility available)
+      decider.decideInterruptFacility.mockResolvedValue({
+        type: 'move',
+        targetMapId: 'home',
+        reason: 'no toilet nearby, go home',
+      })
+
+      ;(engine as any).triggerStatusInterrupt('c1', 'bladder')
+
+      // Wait for async decision
+      await vi.advanceTimersByTimeAsync(100)
+
+      // Flag should be set
+      expect((engine as any).interruptMovingCharacters.has('c1')).toBe(true)
+    })
+
+    it('should clear interruptMovingCharacters flag on navigation complete', async () => {
+      const maps = { town: createTestMap('town') }
+      await engine.initialize(maps, [createTestCharacter('c1')], 'town', undefined, undefined, testTimeConfig)
+
+      // Manually set flag
+      ;(engine as any).interruptMovingCharacters.add('c1')
+
+      // Call onNavigationComplete
+      ;(engine as any).onNavigationComplete('c1')
+
+      // Flag should be cleared
+      expect((engine as any).interruptMovingCharacters.has('c1')).toBe(false)
     })
   })
 })

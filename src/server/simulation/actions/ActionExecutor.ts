@@ -140,7 +140,8 @@ export class ActionExecutor {
     targetNpcId?: string,
     durationMinutes?: number,
     reason?: string,
-    skipCanExecuteCheck?: boolean
+    skipCanExecuteCheck?: boolean,
+    triggeredByInterrupt?: boolean
   ): boolean {
     // 前提条件チェック (6-2)
     // チャットアクション等はSimulationEngineが管理するためスキップ可能
@@ -178,6 +179,7 @@ export class ActionExecutor {
       targetNpcId,  // talk アクション用
       durationMinutes: actualDurationMinutes,  // 選択された時間を記録
       reason,  // 行動理由を記録
+      ...(triggeredByInterrupt && { triggeredByInterrupt }),
     }
 
     // キャラクター状態更新（displayEmoji設定含む）

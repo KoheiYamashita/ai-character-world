@@ -20,6 +20,7 @@ export interface PendingAction {
   reason?: string
   durationMinutes?: number  // 可変時間アクション用
   conversationGoal?: ConversationGoal  // talk アクション用会話目的
+  triggeredByInterrupt?: boolean // ステータス割り込みで強制発動されたか
 }
 
 // Server-side character state (extends client Character with navigation)
